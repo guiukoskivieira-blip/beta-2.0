@@ -22,6 +22,7 @@ import { TrimBleedFixPanel } from './components/TrimBleedFixPanel';
 import { STANDARD_PROFILES, COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
 import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
+import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
 import type { BetaUser, StoredProductionProfile } from './domain/beta';
 import type { PreflightAnalysis, PdfDocumentStructure } from './types';
@@ -123,7 +124,10 @@ export const App: React.FC = () => {
         },
       };
 
-      // 3. Save to lightweight local storage
+      // 3. Save to lightweight local storage with immutable snapshot & initial report
+      const initialSnapshot = createAnalysisSnapshot(analysis, selectedProfile);
+      const reportData = buildTechnicalReport(initialSnapshot, null, selectedProfile);
+
       await storage.saveAnalysis({
         id: analysis.id,
         createdAt: analysis.createdAt,
@@ -138,6 +142,8 @@ export const App: React.FC = () => {
         errorCount: ruleResults.errorCount,
         warningCount: ruleResults.warningCount,
         approvedCount: ruleResults.approvedCount,
+        initialSnapshot,
+        reportData,
       });
 
       setCurrentAnalysis(analysis);
@@ -250,7 +256,7 @@ export const App: React.FC = () => {
               />
             ) : currentAnalysis ? (
               <div>
-                <OperationalSummary analysis={currentAnalysis} />
+                <OperationalSummary analysis={currentAnalysis} profile={selectedProfile} />
                 <VisualPreview analysis={currentAnalysis} profile={selectedProfile} file={selectedFile} />
                 {jobCheckResult && (
                   <JobCheckResults

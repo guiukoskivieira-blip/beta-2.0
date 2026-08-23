@@ -28,6 +28,9 @@ export interface AnalysisRecordSummary {
   approvedCount: number;
   organizationId?: string;
   userId?: string;
+  initialSnapshot?: any;
+  postFixSnapshot?: any;
+  reportData?: any;
 }
 
 export interface StoredProductionProfile {
