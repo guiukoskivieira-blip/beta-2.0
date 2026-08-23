@@ -37,6 +37,10 @@ const BILLING_PLAN_LIMITS: Record<string, number> = {
   professional_launch: 200,
 };
 
+function isValidUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 function getBillingAdmin() {
   const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
   const rawKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
@@ -49,6 +53,34 @@ function isBillingEnforced() {
 }
 
 async function getSubscriptionUsage(userId: string) {
+  // Se userId for não-UUID (ambiente local/dev, teste, guest):
+  if (!isValidUuid(userId)) {
+    const cycleMs = 30 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const periodStart = new Date(now).toISOString();
+    const periodEnd = new Date(now + cycleMs).toISOString();
+    const limit = BILLING_PLAN_LIMITS.free || 15;
+    return {
+      subscription: {
+        id: `dev_${userId}`,
+        user_id: userId,
+        organization_id: null,
+        plan_code: 'free',
+        billing_period: 'monthly',
+        status: 'active',
+        current_period_start: periodStart,
+        current_period_end: periodEnd,
+        cancel_at_period_end: false,
+        promotion_cycles_used: 0,
+        is_virtual_free: true,
+      },
+      used: 0,
+      limit,
+      remaining: limit,
+      isFree: true,
+    };
+  }
+
   const admin = getBillingAdmin();
   if (!admin) return null;
 
@@ -91,7 +123,7 @@ async function getSubscriptionUsage(userId: string) {
     };
   }
 
-  // 3. Usuário autenticado sem subscription ativa -> Plano FREE virtual ativo com 15 análises
+  // 3. Usuário autenticado com UUID válido sem subscription ativa -> Plano FREE virtual ativo com 15 análises
   let userCreatedAt: Date = new Date();
   const { data: profile, error: profError } = await admin
     .from('profiles')
@@ -114,22 +146,22 @@ async function getSubscriptionUsage(userId: string) {
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const periodStart = new Date(userCreatedAt.getTime() + cycleIndex * cycleMs).toISOString();
   const periodEnd = new Date(userCreatedAt.getTime() + (cycleIndex + 1) * cycleMs).toISOString();
+  const periodKey = `free_${periodStart.slice(0, 10)}`;
 
   const limit = BILLING_PLAN_LIMITS.free || 15;
 
-  const { count, error: usageError } = await admin
-    .from('analysis_usage_events')
-    .select('id', { count: 'exact', head: true })
+  const { data: usageRec, error: usageError } = await admin
+    .from('usage_records')
+    .select('analyses')
     .eq('user_id', userId)
-    .eq('status', 'counted')
-    .gte('counted_at', periodStart)
-    .lt('counted_at', periodEnd);
+    .eq('period', periodKey)
+    .maybeSingle();
 
   if (usageError) {
     throw new Error(`Erro ao consultar uso do plano gratuito: ${usageError.message}`);
   }
 
-  const used = count || 0;
+  const used = usageRec?.analyses || 0;
   const virtualFreeSubscription = {
     id: `free_${userId}`,
     user_id: userId,
@@ -155,34 +187,61 @@ async function getSubscriptionUsage(userId: string) {
 
 async function recordSuccessfulAnalysis(userId: string, analysisId: string, uploadBytes: number) {
   if (!isBillingEnforced()) return;
+  if (!isValidUuid(userId)) return;
+
   const admin = getBillingAdmin();
   if (!admin) return;
 
   const state = await getSubscriptionUsage(userId);
   if (!state || state.remaining <= 0) return;
 
-  const eventPayload: Record<string, any> = {
-    user_id: userId,
-    organization_id: state.subscription.organization_id || null,
-    analysis_id: analysisId,
-    upload_bytes: Math.max(0, uploadBytes || 0),
-    billing_period_start: state.subscription.current_period_start,
-    billing_period_end: state.subscription.current_period_end,
-    status: 'counted',
-    counted_at: new Date().toISOString(),
-  };
+  if (state.isFree) {
+    // Para plano Free sem subscription física, registra uso em usage_records sem violar constraints
+    const periodKey = `free_${state.subscription.current_period_start.slice(0, 10)}`;
+    const { data: existing } = await admin
+      .from('usage_records')
+      .select('analyses, bytes_uploaded')
+      .eq('user_id', userId)
+      .eq('period', periodKey)
+      .maybeSingle();
 
-  if (!state.subscription.is_virtual_free && state.subscription.id) {
-    eventPayload.subscription_id = state.subscription.id;
-  }
+    const currentAnalyses = existing?.analyses || 0;
+    const currentBytes = Number(existing?.bytes_uploaded || 0);
 
-  const { error } = await admin.from('analysis_usage_events').upsert(eventPayload, {
-    onConflict: 'analysis_id',
-    ignoreDuplicates: true,
-  });
+    const { error } = await admin.from('usage_records').upsert({
+      user_id: userId,
+      organization_id: state.subscription.organization_id || null,
+      period: periodKey,
+      analyses: currentAnalyses + 1,
+      bytes_uploaded: currentBytes + Math.max(0, uploadBytes || 0),
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'user_id,period',
+    });
 
-  if (error) {
-    console.error(`[Billing] Falha ao registrar evento de uso para análise ${analysisId}:`, error.message);
+    if (error) {
+      console.error(`[Billing] Falha ao registrar evento de uso free para análise ${analysisId}:`, error.message);
+    }
+  } else {
+    // Plano pago: registra em analysis_usage_events com subscription_id física válida
+    const { error } = await admin.from('analysis_usage_events').upsert({
+      user_id: userId,
+      organization_id: state.subscription.organization_id || null,
+      subscription_id: state.subscription.id,
+      analysis_id: analysisId,
+      upload_bytes: Math.max(0, uploadBytes || 0),
+      billing_period_start: state.subscription.current_period_start,
+      billing_period_end: state.subscription.current_period_end,
+      status: 'counted',
+      counted_at: new Date().toISOString(),
+    }, {
+      onConflict: 'user_id,analysis_id',
+      ignoreDuplicates: true,
+    });
+
+    if (error) {
+      console.error(`[Billing] Falha ao registrar evento de uso pago para análise ${analysisId}:`, error.message);
+    }
   }
 }
 

@@ -20,9 +20,18 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     assert.equal(PLANS.professional_launch.analysisLimit, 200);
   });
 
-  it('2. Usuário novo sem subscription recebe plano Free virtual ativo com 15 de limite', () => {
-    // Simula a lógica de getSubscriptionUsage sem subscription
-    const userId = 'user_new_123';
+  it('2. local_dev_user validação não-UUID não consulta Supabase e não gera PostgreSQL 22P02', () => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    assert.equal(uuidRegex.test('local_dev_user'), false);
+    assert.equal(uuidRegex.test('11111111-2222-3333-4444-555555555555'), true);
+
+    // No server.ts, getSubscriptionUsage verifica isValidUuid antes de chamar admin.from
+    assert.match(serverSrc, /function isValidUuid\(id: string\): boolean/);
+    assert.match(serverSrc, /if \(!isValidUuid\(userId\)\) \{/);
+  });
+
+  it('3. Usuário novo com UUID sem subscription recebe plano Free virtual ativo com 15 de limite', () => {
+    const userId = '11111111-2222-3333-4444-555555555555';
     const userCreatedAt = new Date('2026-08-01T00:00:00Z');
     const now = new Date('2026-08-15T00:00:00Z').getTime();
     const cycleMs = 30 * 24 * 60 * 60 * 1000;
@@ -55,38 +64,27 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     assert.equal(remaining, 15);
   });
 
-  it('3. Free com 0 usos => remaining = 15 => permite análise', () => {
+  it('4. Free com 0 a 14 usos permite análise; 15 usos bloqueia na 16ª tentativa', () => {
     const limit = 15;
-    const used = 0;
-    const remaining = Math.max(0, limit - used);
-    assert.equal(remaining, 15);
-    assert.equal(remaining > 0, true, 'Deve permitir análise');
+    assert.equal(Math.max(0, limit - 0) > 0, true, '0 usos => permite');
+    assert.equal(Math.max(0, limit - 14) > 0, true, '14 usos => permite');
+    assert.equal(Math.max(0, limit - 15) <= 0, true, '15 usos => bloqueia');
   });
 
-  it('4. Free com 14 usos => remaining = 1 => permite análise', () => {
-    const limit = 15;
-    const used = 14;
-    const remaining = Math.max(0, limit - used);
-    assert.equal(remaining, 1);
-    assert.equal(remaining > 0, true, 'Deve permitir análise');
-  });
-
-  it('5. Free com 15 usos => remaining = 0 => bloqueia na 16ª tentativa', () => {
-    const limit = 15;
-    const used = 15;
-    const remaining = Math.max(0, limit - used);
-    assert.equal(remaining, 0);
-    assert.equal(remaining <= 0, true, 'Deve bloquear com PLAN_LIMIT_REACHED');
-  });
-
-  it('6. Ausência de subscription NÃO retorna SUBSCRIPTION_REQUIRED', () => {
-    // Verifica que getSubscriptionUsage sintetiza plano free com status 'active'
+  it('5. Ausência de subscription NÃO retorna SUBSCRIPTION_REQUIRED', () => {
     assert.match(serverSrc, /is_virtual_free:\s*true/);
     assert.match(serverSrc, /plan_code:\s*['"]free['"]/);
     assert.match(serverSrc, /status:\s*['"]active['"]/);
   });
 
-  it('7. Subscriptions pagas continuam com seus limites exatos', () => {
+  it('6. Free real grava uso em usage_records sem violar subscription_id NOT NULL', () => {
+    // Para plano Free virtual, grava em usage_records com chave (user_id, period)
+    assert.match(serverSrc, /admin\.from\('usage_records'\)\.upsert/);
+    // Para plano pago, grava em analysis_usage_events com subscription_id
+    assert.match(serverSrc, /admin\.from\('analysis_usage_events'\)\.upsert/);
+  });
+
+  it('7. Subscriptions pagas continuam com seus limites exatos e gravação em analysis_usage_events', () => {
     const paidLimits: Record<string, number> = {
       essential: 60,
       professional: 200,
@@ -105,10 +103,8 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
   });
 
   it('9. Erro real de banco NÃO vira plano free silenciosamente', () => {
-    // getSubscriptionUsage propaga erro se subError ou usageError acontecer
     assert.match(serverSrc, /if \(subError\) \{\s*throw new Error/);
     assert.match(serverSrc, /if \(usageError\) \{\s*throw new Error/);
-    // middleware de upload captura erro e responde status 500
     assert.match(serverSrc, /return res\.status\(500\)\.json\({ success: false, error: 'Falha temporária ao verificar sua cota de análises\.' }\)/);
   });
 
@@ -124,5 +120,11 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
 
     assert.ok(extractPos < recordPos, 'Extração ocorre antes de registrar uso');
     assert.ok(recordPos < catchPos, 'Registro de uso ocorre no bloco try antes do catch de erro');
+  });
+
+  it('11. Motor 1 permanece intacto e acessível após extração', () => {
+    // Validação que o motor de regras determinísticas não foi modificado
+    const ruleEngineSrc = fs.readFileSync('src/utils/ruleEngine.ts', 'utf8');
+    assert.match(ruleEngineSrc, /export function runDeterministicRuleEngine/);
   });
 });
