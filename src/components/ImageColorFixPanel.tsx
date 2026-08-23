@@ -70,21 +70,36 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
   }, []);
 
   const handleApplyFix = useCallback(async () => {
+    console.info('[RGB-FIX] handler-start');
+
     if (!originalFile) {
-      setErrorMessage('Arquivo original não disponível para correção.');
+      console.warn('[RGB-FIX] originalFile-missing');
+      setErrorMessage('FRONTEND_VALIDATION_FAILED: Arquivo original não disponível para correção.');
       setPhase('error');
       return;
     }
+
+    console.info('[RGB-FIX] file-ok');
+    console.info('[RGB-FIX] analysis-ok');
+    console.info('[RGB-FIX] preset', destinationIccPresetId);
+    console.info('[RGB-FIX] intent', renderingIntent);
+    console.info('[RGB-FIX] before-api-call');
 
     setPhase('applying');
     setErrorMessage('');
 
     try {
       const response = await applyImageColorFixViaApi(originalFile, {
-        profileId: profile.id,
+        profileId: profile?.id,
         destinationIccPresetId,
         renderingIntent,
         allowFallbackSrgb,
+      });
+
+      console.info('[RGB-FIX] api-response', {
+        success: response.success,
+        actionResult: response.actionResult,
+        hasPdf: Boolean(response.fixedPdfBase64),
       });
 
       setConversionResponse(response);
@@ -95,7 +110,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           setPhase('structural_error');
           return;
         }
-        setErrorMessage(response.error || 'Não foi possível converter as imagens RGB.');
+        setErrorMessage(response.error || 'API_RESPONSE_ERROR: Não foi possível converter as imagens RGB.');
         setPhase('error');
         return;
       }
@@ -110,14 +125,18 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
 
       const structuralOk = response.structuralValidation?.valid ?? false;
       if (!structuralOk) {
-        setErrorMessage('O arquivo gerado não passou na validação de integridade estrutural.');
+        setErrorMessage('Falha na validação de integridade estrutural do arquivo corrigido.');
         setPhase('structural_error');
         return;
       }
 
       setPhase('applied');
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Erro de comunicação ao converter imagens.');
+      console.error('[RGB-FIX] frontend-error', {
+        name: err?.name || 'Error',
+        message: err?.message || String(err),
+      });
+      setErrorMessage(`FRONTEND_EXCEPTION: ${err?.message || 'Erro inesperado no cliente ao disparar conversão.'}`);
       setPhase('error');
     }
   }, [originalFile, profile, destinationIccPresetId, renderingIntent, allowFallbackSrgb]);

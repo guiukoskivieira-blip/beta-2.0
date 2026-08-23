@@ -265,26 +265,97 @@ export async function applyImageColorFixViaApi(
     sourceIccFile?: File | null;
   } = {}
 ): Promise<ImageColorFixApiResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-  if (options.profileId) formData.append('profileId', options.profileId);
-  if (options.destinationIccPresetId) formData.append('destinationIccPresetId', options.destinationIccPresetId);
-  if (options.renderingIntent) formData.append('renderingIntent', options.renderingIntent);
-  if (options.allowFallbackSrgb !== undefined) formData.append('allowFallbackSrgb', String(options.allowFallbackSrgb));
-  if (options.destIccFile) formData.append('destIccFile', options.destIccFile);
-  if (options.sourceIccFile) formData.append('sourceIccFile', options.sourceIccFile);
+  let targetUrl = '';
+  try {
+    targetUrl = apiUrl('/api/fix-image-color');
+  } catch (urlErr: any) {
+    return {
+      success: false,
+      error: `REQUEST_BUILD_FAILED: Falha ao resolver URL da API (${urlErr?.message || 'configuração inválida'}).`,
+    };
+  }
 
-  const authHeader = await getAuthHeader();
+  const requestId = `rgb-fix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  console.info(`[RGB-FIX-API:${requestId}] URL: ${targetUrl}`);
 
-  const res = await fetch(apiUrl('/api/fix-image-color'), {
-    method: 'POST',
-    body: formData,
-    headers: {
-      ...authHeader,
-    },
-  });
+  let formData: FormData;
+  try {
+    formData = new FormData();
+    formData.append('file', file);
+    if (options.profileId) formData.append('profileId', options.profileId);
+    if (options.destinationIccPresetId) formData.append('destinationIccPresetId', options.destinationIccPresetId);
+    if (options.renderingIntent) formData.append('renderingIntent', options.renderingIntent);
+    if (options.allowFallbackSrgb !== undefined) formData.append('allowFallbackSrgb', String(options.allowFallbackSrgb));
+    if (options.destIccFile) formData.append('destIccFile', options.destIccFile);
+    if (options.sourceIccFile) formData.append('sourceIccFile', options.sourceIccFile);
+  } catch (formErr: any) {
+    return {
+      success: false,
+      error: `REQUEST_BUILD_FAILED: Falha ao preparar os dados da requisição (${formErr?.message || 'erro de FormData'}).`,
+    };
+  }
 
-  const data = await res.json();
+  let authHeader = {};
+  try {
+    authHeader = await getAuthHeader();
+  } catch (authErr: any) {
+    console.warn(`[RGB-FIX-API:${requestId}] getAuthHeader aviso:`, authErr?.message);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(targetUrl, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'X-Request-ID': requestId,
+        ...authHeader,
+      },
+      cache: 'no-store',
+    });
+  } catch (err: any) {
+    console.error(`[RGB-FIX-API:${requestId}] fetch network error:`, err?.message || err);
+    return {
+      success: false,
+      error: `API_REQUEST_FAILED: Falha de conexão com o servidor ao converter imagens (${err?.message || 'servidor inacessível ou erro de rede'}).`,
+    };
+  }
+
+  let rawText = '';
+  try {
+    rawText = await res.text();
+  } catch (err: any) {
+    console.error(`[RGB-FIX-API:${requestId}] read response body error:`, err?.message || err);
+    return {
+      success: false,
+      error: `API_RESPONSE_ERROR: Falha ao ler a resposta do servidor (${err?.message || 'erro de I/O'}).`,
+    };
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    console.error(`[RGB-FIX-API:${requestId}] non-JSON response status ${res.status}:`, rawText.slice(0, 200));
+    return {
+      success: false,
+      error: `API_RESPONSE_ERROR: Erro HTTP ${res.status}: Resposta não interpretável do servidor.`,
+    };
+  }
+
+  if (!res.ok) {
+    console.error(`[RGB-FIX-API:${requestId}] HTTP ${res.status} response:`, data?.error);
+    return {
+      success: false,
+      error: data?.error || `API_RESPONSE_ERROR: Erro HTTP ${res.status} retornado pelo servidor.`,
+      actionResult: data?.actionResult,
+      objectsSummary: data?.objectsSummary,
+      audit: data?.audit,
+      structuralValidation: data?.structuralValidation,
+      revalidation: data?.revalidation,
+    };
+  }
+
   return data as ImageColorFixApiResponse;
 }
 
