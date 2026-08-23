@@ -89,17 +89,61 @@ async function getSubscriptionUsage(userId: string) {
   }
 
   const admin = getBillingAdmin();
+  const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  let parsedProtocol = 'none';
+  let parsedHostname = 'none';
+  try {
+    if (rawUrl) {
+      const u = new URL(rawUrl);
+      parsedProtocol = u.protocol;
+      parsedHostname = u.hostname;
+    }
+  } catch {
+    parsedProtocol = 'invalid';
+    parsedHostname = 'invalid';
+  }
+
+  console.log('[Billing/Diagnostic]', {
+    SUPABASE_URL_PRESENT: Boolean(rawUrl),
+    SUPABASE_URL_PROTOCOL: parsedProtocol,
+    SUPABASE_URL_HOSTNAME: parsedHostname,
+    BILLING_ADMIN_CREATED: Boolean(admin),
+  });
+
   if (!admin) return null;
 
   // 1. Consulta subscription ativa ou cancelada
-  const { data: subscription, error: subError } = await admin
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .in('status', ['active', 'canceled'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let subscription: any = null;
+  let subError: any = null;
+  try {
+    const res = await admin
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['active', 'canceled'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    subscription = res.data;
+    subError = res.error;
+  } catch (err: any) {
+    console.error('[Billing/Diagnostic] Subscription query exception:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      cause: err?.cause,
+      causeName: err?.cause?.name,
+      causeMessage: err?.cause?.message,
+      causeCode: err?.cause?.code,
+      causeErrno: err?.cause?.errno,
+      causeSyscall: err?.cause?.syscall,
+      causeHostname: err?.cause?.hostname,
+      causeAddress: err?.cause?.address,
+      causePort: err?.cause?.port,
+      stack: err?.stack,
+    });
+    throw new Error(`Erro ao consultar assinaturas: ${err?.message || err}`);
+  }
 
   if (subError) {
     throw new Error(`Erro ao consultar assinaturas: ${subError.message}`);
@@ -132,19 +176,29 @@ async function getSubscriptionUsage(userId: string) {
 
   // 3. Usuário autenticado com UUID válido sem subscription ativa -> Plano FREE virtual ativo com 15 análises
   let userCreatedAt: Date = new Date();
-  const { data: profile, error: profError } = await admin
-    .from('profiles')
-    .select('created_at')
-    .eq('id', userId)
-    .maybeSingle();
+  try {
+    const { data: profile, error: profError } = await admin
+      .from('profiles')
+      .select('created_at')
+      .eq('id', userId)
+      .maybeSingle();
 
-  if (profError) {
-    console.warn(`[Billing] Perfil não localizado para ${userId}:`, profError.message);
-  } else if (profile?.created_at) {
-    const parsedDate = new Date(profile.created_at);
-    if (!isNaN(parsedDate.getTime())) {
-      userCreatedAt = parsedDate;
+    if (profError) {
+      console.warn(`[Billing] Perfil não localizado para ${userId}:`, profError.message);
+    } else if (profile?.created_at) {
+      const parsedDate = new Date(profile.created_at);
+      if (!isNaN(parsedDate.getTime())) {
+        userCreatedAt = parsedDate;
+      }
     }
+  } catch (err: any) {
+    console.error('[Billing/Diagnostic] Profiles query exception:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      cause: err?.cause,
+      stack: err?.stack,
+    });
   }
 
   const now = Date.now();
@@ -157,12 +211,27 @@ async function getSubscriptionUsage(userId: string) {
 
   const limit = BILLING_PLAN_LIMITS.free || 15;
 
-  const { count, error: usageError } = await admin
-    .from('analyses')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .gte('created_at', periodStart)
-    .lt('created_at', periodEnd);
+  let count: number | null = null;
+  let usageError: any = null;
+  try {
+    const aRes = await admin
+      .from('analyses')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('created_at', periodStart)
+      .lt('created_at', periodEnd);
+    count = aRes.count;
+    usageError = aRes.error;
+  } catch (err: any) {
+    console.error('[Billing/Diagnostic] Analyses query exception:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      cause: err?.cause,
+      stack: err?.stack,
+    });
+    throw new Error(`Erro ao consultar uso do plano gratuito: ${err?.message || err}`);
+  }
 
   if (usageError) {
     throw new Error(`Erro ao consultar uso do plano gratuito: ${usageError.message}`);
