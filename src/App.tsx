@@ -59,6 +59,15 @@ export const App: React.FC = () => {
     auth.getCurrentUser().then((u) => {
       if (u) setCurrentUser(u);
     });
+
+    if (auth.onAuthStateChange) {
+      const unsubscribe = auth.onAuthStateChange((session) => {
+        setCurrentUser(session?.user || null);
+      });
+      return () => {
+        unsubscribe();
+      };
+    }
   }, []);
 
   useEffect(() => {

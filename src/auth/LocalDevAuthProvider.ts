@@ -1,6 +1,7 @@
 import type { BetaUser, UserSession } from '../domain/beta';
+import type { AuthProvider } from './AuthProvider';
 
-export class LocalDevAuthProvider {
+export class LocalDevAuthProvider implements AuthProvider {
   private currentUser: BetaUser = {
     id: 'local_dev_user',
     email: 'dev@artecheck.local',
