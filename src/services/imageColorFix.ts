@@ -15,6 +15,7 @@ import { runDeterministicRuleEngine } from '../utils/ruleEngine';
 import { extractPdfStructure } from '../../server/pdfExtractor';
 import { validateIccProfile, PRESET_ICC_PROFILES } from '../domain/colorManagement';
 import { transformRgbToCmyk, RenderingIntent } from './colorTransform';
+import { decodeJpegToRgb } from './jpegDecoder';
 import { evaluateFixContract, FixActionResult, FixContractResult } from './fixEngine';
 
 export interface ImageColorFixOptions {
@@ -52,6 +53,8 @@ export interface ImageColorFixAuditEntry {
 export interface ImageColorFixResult {
   success: boolean;
   actionResult: FixActionResult;
+  reasonCode?: string;
+  reason?: string;
   pdfBytes?: Uint8Array;
   contract: FixContractResult;
   objectsSummary: {
@@ -63,6 +66,7 @@ export interface ImageColorFixResult {
     notSupportedCount: number;
     objects: ImageConversionObjectResult[];
   };
+  imageResults?: ImageConversionObjectResult[];
   audit?: ImageColorFixAuditEntry;
   structuralValidation?: {
     valid: boolean;
@@ -221,23 +225,51 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
 
       // Safe Scope V1 Classification
       let classification: 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED' = 'NOT_SUPPORTED';
+      let reasonCode = 'CONVERTIBLE';
       let reason = '';
 
       if (!isRgb) {
         classification = 'NOT_SUPPORTED';
+        reasonCode = 'NON_RGB_COLORSPACE';
         reason = `Espaço de cores não é RGB (${colorSpaceStr}).`;
       } else if (bitsPerComponent !== 8) {
         classification = 'MANUAL_REQUIRED';
-        reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (exige 8 bits).`;
+        reasonCode = 'UNSUPPORTED_BITS_PER_COMPONENT';
+        reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (Safe Scope V1 exige 8 bits/canal).`;
       } else if (widthPx <= 0 || heightPx <= 0) {
         classification = 'NOT_SUPPORTED';
-        reason = 'Dimensões de imagem inválidas ou zero.';
+        reasonCode = 'INVALID_DIMENSIONS';
+        reason = `Dimensões de imagem inválidas ou zero (${widthPx}x${heightPx}).`;
       } else if (hasDecode) {
         classification = 'MANUAL_REQUIRED';
-        reason = 'Matriz de decodificação (/Decode) personalizada exige calibração manual.';
+        reasonCode = 'CUSTOM_DECODE_MATRIX';
+        reason = 'Matriz de decodificação (/Decode) personalizada exige calibração manual no software de origem.';
+      } else if (filterVal === 'DCTDecode') {
+        // Safe Scope V1.1: Support DCTDecode (JPEG) RGB images
+        try {
+          const decoded = decodeJpegToRgb(rawStreamBytes);
+          if (decoded.width !== widthPx || decoded.height !== heightPx) {
+            classification = 'MANUAL_REQUIRED';
+            reasonCode = 'DIMENSION_MISMATCH';
+            reason = `Dimensões no cabeçalho JPEG (${decoded.width}x${decoded.height}) divergem do dicionário PDF (${widthPx}x${heightPx}).`;
+          } else if (decoded.components !== 3) {
+            classification = 'MANUAL_REQUIRED';
+            reasonCode = 'NON_RGB_JPEG';
+            reason = `Imagem JPEG possui ${decoded.components} canal(is) (esperado 3 canais RGB).`;
+          } else {
+            classification = 'CONVERTIBLE';
+            reasonCode = 'CONVERTIBLE';
+            reason = 'Imagem raster RGB 8-bit comprimida em DCTDecode/JPEG compatível para conversão CMM segura (Safe Scope V1.1).';
+          }
+        } catch (jpegErr: any) {
+          classification = 'MANUAL_REQUIRED';
+          reasonCode = 'CORRUPTED_JPEG';
+          reason = `Falha na decodificação do stream JPEG: ${jpegErr?.message || String(jpegErr)}`;
+        }
       } else if (filterVal !== 'FlateDecode' && filterVal !== 'None' && filterVal !== '') {
         classification = 'MANUAL_REQUIRED';
-        reason = `Filtro de compressão /${filterVal} exige decodificação assistida.`;
+        reasonCode = 'UNSUPPORTED_FILTER';
+        reason = `Filtro de compressão /${filterVal} não suportado no Safe Scope V1.1 (suporta FlateDecode, DCTDecode/JPEG ou raster não comprimido).`;
       } else {
         // Test inflating pixel buffer
         try {
@@ -245,13 +277,16 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
           const expectedBytes = widthPx * heightPx * 3;
           if (inflated.length !== expectedBytes) {
             classification = 'MANUAL_REQUIRED';
-            reason = `Tamanho do stream decodificado (${inflated.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB).`;
+            reasonCode = 'STREAM_LENGTH_MISMATCH';
+            reason = `Tamanho do stream decodificado (${inflated.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB 8-bit).`;
           } else {
             classification = 'CONVERTIBLE';
-            reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura.';
+            reasonCode = 'CONVERTIBLE';
+            reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1).';
           }
         } catch (e: any) {
           classification = 'MANUAL_REQUIRED';
+          reasonCode = 'DECOMPRESS_FAILED';
           reason = `Falha ao descomprimir stream da imagem: ${e?.message || String(e)}`;
         }
       }
@@ -273,6 +308,7 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
         hasMask,
         hasEmbeddedIcc: Boolean(embeddedIcc && embeddedIcc.length > 0),
         classification,
+        reasonCode,
         reason,
       };
 
@@ -485,6 +521,7 @@ export async function applyImageColorFix(
         verified: false,
         widthPx: audit.widthPx,
         heightPx: audit.heightPx,
+        reasonCode: audit.reasonCode || 'MANUAL_REQUIRED',
         reason: audit.reason,
       });
       continue;
@@ -535,17 +572,25 @@ export async function applyImageColorFix(
           verified: false,
           widthPx: audit.widthPx,
           heightPx: audit.heightPx,
+          reasonCode: 'SOURCE_PROFILE_MISSING',
           reason: 'Perfil RGB de origem não incorporado. Conversão bloqueada para evitar suposições silenciosas sem autorização explícita.',
         });
         continue;
       }
     }
 
-    // Inflate RGB pixels
-    let inflatedRgb: Uint8Array;
+    // Decode RGB pixels according to filter (DCTDecode / FlateDecode / raw)
+    let rawRgbPixels: Uint8Array;
     try {
-      inflatedRgb = audit.filter === 'FlateDecode' ? pako.inflate(item.rawBytes) : item.rawBytes;
-    } catch (infErr: any) {
+      if (audit.filter === 'DCTDecode') {
+        const decoded = decodeJpegToRgb(item.rawBytes);
+        rawRgbPixels = decoded.data;
+      } else if (audit.filter === 'FlateDecode') {
+        rawRgbPixels = pako.inflate(item.rawBytes);
+      } else {
+        rawRgbPixels = item.rawBytes;
+      }
+    } catch (decodeErr: any) {
       manualRequiredCount++;
       objectResults.push({
         objectId: audit.name,
@@ -557,14 +602,15 @@ export async function applyImageColorFix(
         verified: false,
         widthPx: audit.widthPx,
         heightPx: audit.heightPx,
-        reason: `Falha ao descomprimir stream: ${infErr?.message || String(infErr)}`,
+        reasonCode: audit.filter === 'DCTDecode' ? 'CORRUPTED_JPEG' : 'DECOMPRESS_STREAM_FAILED',
+        reason: `Falha ao decodificar stream da imagem: ${decodeErr?.message || String(decodeErr)}`,
       });
       continue;
     }
 
     // Transform via LittleCMS WebAssembly CMM
     const transformResult = await transformRgbToCmyk({
-      rgbPixels: inflatedRgb,
+      rgbPixels: rawRgbPixels,
       sourceIcc: sourceIccInput,
       destinationIcc: destIccBytes,
       renderingIntent,
@@ -582,6 +628,7 @@ export async function applyImageColorFix(
         verified: false,
         widthPx: audit.widthPx,
         heightPx: audit.heightPx,
+        reasonCode: 'CMM_TRANSFORM_FAILED',
         reason: `Falha na transformação LittleCMS: ${transformResult.error || 'Erro desconhecido'}`,
       });
       continue;
@@ -601,6 +648,7 @@ export async function applyImageColorFix(
         verified: false,
         widthPx: audit.widthPx,
         heightPx: audit.heightPx,
+        reasonCode: 'PIXEL_LENGTH_MISMATCH',
         reason: `Contagem de bytes CMYK (${cmykPixels.length}) difere do esperado (${expectedCmykLen}).`,
       });
       continue;
@@ -651,35 +699,7 @@ export async function applyImageColorFix(
     });
   }
 
-  // 6. Ensure OutputIntent is present in the Catalog with the CMYK profile
-  try {
-    const catalog = pdfDoc.catalog;
-    const existingOutputIntents = catalog.get(PDFName.of('OutputIntents'));
-    if (!existingOutputIntents) {
-      const iccStreamDict = pdfDoc.context.obj({
-        N: 4,
-        Alternate: 'DeviceCMYK',
-        Filter: 'FlateDecode',
-      });
-      const deflatedIcc = pako.deflate(destIccBytes);
-      const iccStream = PDFRawStream.of(iccStreamDict as any, deflatedIcc);
-      const iccRef = pdfDoc.context.register(iccStream);
-
-      const intentDict = pdfDoc.context.obj({
-        Type: 'OutputIntent',
-        S: 'GTS_PDFX',
-        OutputConditionIdentifier: PDFString.of('CGATS TR 001'),
-        Info: PDFString.of('CGATS TR 001 (SWOP)'),
-        RegistryName: PDFString.of('http://www.color.org'),
-        DestOutputProfile: iccRef,
-      });
-      const intentRef = pdfDoc.context.register(intentDict);
-      const intentsArray = pdfDoc.context.obj([intentRef]);
-      catalog.set(PDFName.of('OutputIntents'), intentsArray);
-    }
-  } catch {
-    // Non-fatal if catalog update encounters unexpected dictionary type
-  }
+  // 6. Preserve existing OutputIntent if present (do not invent PDF/X compliance)
 
   // 7. Save generated PDF with traditional xref (useObjectStreams: false)
   let generatedPdfBytes: Uint8Array;
@@ -755,30 +775,35 @@ export async function applyImageColorFix(
 
   // 10. Determine overall FixActionResult
   let actionResult: FixActionResult = 'failed';
+  let reasonCode: string | undefined = undefined;
+  let reason: string | undefined = undefined;
+
   if (convertedCount === rgbImages && !hasRgbAfter && ruleStatusAfter === 'approved') {
     actionResult = 'corrected';
+    reasonCode = 'ALL_IMAGES_CONVERTED';
+    reason = `Todas as ${convertedCount} imagem(ns) RGB foram convertidas para CMYK com sucesso via LittleCMS. Documento validado pelo Motor 1.`;
   } else if (convertedCount > 0 && (hasRgbAfter || manualRequiredCount > 0)) {
     actionResult = 'partially_corrected';
+    const firstManual = objectResults.find((o) => o.status === 'manual_required' || o.status === 'failed');
+    reasonCode = firstManual?.reasonCode || 'PARTIAL_CONVERSION';
+    reason = `${convertedCount} imagem(ns) RGB convertida(s) com sucesso. ${manualRequiredCount} objeto(s) RGB restante(s) exigem intervenção manual (${firstManual?.reason || 'veja detalhes'}).`;
   } else if (manualRequiredCount > 0 && convertedCount === 0) {
     actionResult = 'manual_required';
+    const firstManual = objectResults.find((o) => o.status === 'manual_required' || o.status === 'failed');
+    reasonCode = firstManual?.reasonCode || 'MANUAL_REQUIRED';
+    reason = firstManual?.reason || `${manualRequiredCount} imagem(ns) RGB identificadas requerem conversão manual no software gráfico.`;
   } else if (convertedCount > 0) {
     actionResult = 'corrected';
+    reasonCode = 'ALL_IMAGES_CONVERTED';
+    reason = `Todas as ${convertedCount} imagem(ns) RGB convertidas com sucesso.`;
   } else {
     actionResult = 'failed';
+    reasonCode = 'CONVERSION_FAILED';
+    reason = 'Não foi possível converter as imagens RGB.';
   }
 
   const isVerified = actionResult === 'corrected' && ruleStatusAfter === 'approved' && structuralValid;
-
-  let message = '';
-  if (actionResult === 'corrected') {
-    message = `Todas as ${convertedCount} imagem(ns) RGB foram convertidas para CMYK com sucesso via LittleCMS. Documento validado pelo Motor 1.`;
-  } else if (actionResult === 'partially_corrected') {
-    message = `${convertedCount} imagem(ns) RGB convertida(s) com sucesso. ${manualRequiredCount} objeto(s) RGB restante(s) exigem intervenção manual no software de origem.`;
-  } else if (actionResult === 'manual_required') {
-    message = `${manualRequiredCount} imagem(ns) RGB identificadas requerem conversão manual no software gráfico.`;
-  } else {
-    message = 'Não foi possível converter as imagens RGB.';
-  }
+  const message = reason;
 
   const contract = evaluateFixContract(
     ruleId,
@@ -815,6 +840,8 @@ export async function applyImageColorFix(
   return {
     success: actionResult === 'corrected' || actionResult === 'partially_corrected',
     actionResult,
+    reasonCode,
+    reason,
     pdfBytes: generatedPdfBytes,
     contract,
     objectsSummary: {
@@ -826,6 +853,7 @@ export async function applyImageColorFix(
       notSupportedCount,
       objects: objectResults,
     },
+    imageResults: objectResults,
     audit: auditEntry,
     structuralValidation: {
       valid: structuralValid,
