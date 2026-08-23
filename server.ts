@@ -20,6 +20,8 @@ import {
   fetchMercadoPagoResource,
 } from "./server/mercadopago";
 
+import { parseCorsAllowedOrigins, isOriginAllowed } from "./server/cors";
+
 // Configure Multer for in-memory storage (no permanent disk writes)
 // Max file size: 50 MB
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -129,27 +131,16 @@ async function startServer() {
 
   // CORS — allowlist of known frontend origins (Bolt hosting, local dev, preview).
   // Additional origins can be added via CORS_ALLOWED_ORIGINS env var (comma-separated).
-  const corsAllowlist = (process.env.CORS_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
+  const corsAllowlist = parseCorsAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
   const defaultOrigins = [
     "https://guiukoskivieira-blip-e2zm.bolt.host",
   ];
   const allowedOrigins = [...defaultOrigins, ...corsAllowlist];
 
-  function isAllowedOrigin(origin: string): boolean {
-    if (allowedOrigins.includes(origin)) return true;
-    // Allow localhost and bolt.host preview origins for development
-    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return true;
-    if (/^https:\/\/.*\.bolt\.host$/.test(origin)) return true;
-    return false;
-  }
-
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.header("origin");
     // Access-Control-Allow-Origin is set to the requesting origin when allowed
-    if (origin && isAllowedOrigin(origin)) {
+    if (origin && isOriginAllowed(origin, allowedOrigins)) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Vary", "Origin");
     }
