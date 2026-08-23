@@ -147,22 +147,18 @@ async function getSubscriptionUsage(userId: string) {
   // 3. Usuário autenticado com UUID válido sem subscription ativa -> Plano FREE virtual ativo com 15 análises
   let userCreatedAt: Date = new Date();
   try {
-    const { data: profile, error: profError } = await admin
-      .from('profiles')
-      .select('created_at')
-      .eq('id', userId)
-      .maybeSingle();
+    const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
 
-    if (profError) {
-      console.warn(`[Billing] Perfil não localizado para ${userId}:`, profError.message);
-    } else if (profile?.created_at) {
-      const parsedDate = new Date(profile.created_at);
+    if (userError) {
+      console.warn(`[Billing] Usuário auth não localizado para ${userId}:`, userError.message);
+    } else if (userData?.user?.created_at) {
+      const parsedDate = new Date(userData.user.created_at);
       if (!isNaN(parsedDate.getTime())) {
         userCreatedAt = parsedDate;
       }
     }
   } catch (err: any) {
-    console.warn(`[Billing] Falha ao obter created_at do perfil para ${userId}:`, err?.message || err);
+    console.warn(`[Billing] Falha ao obter created_at do usuário para ${userId}:`, err?.message || err);
   }
 
   const now = Date.now();

@@ -209,3 +209,82 @@ export async function applyTrimBleedFixViaApi(
   const data = await res.json();
   return data as TrimBleedFixApiResponse;
 }
+
+export interface ImageColorFixApiResponse {
+  success: boolean;
+  actionResult?: 'corrected' | 'partially_corrected' | 'manual_required' | 'not_supported' | 'failed' | string;
+  fixedPdfBase64?: string;
+  fixedPdfSize?: number;
+  objectsSummary?: {
+    totalImages: number;
+    rgbImages: number;
+    convertibleCount: number;
+    convertedCount: number;
+    manualRequiredCount: number;
+    notSupportedCount: number;
+    objects: Array<{
+      objectId: string;
+      page: number;
+      status: string;
+      sourceColorSpace?: string;
+      destinationColorSpace?: string;
+      renderingIntent?: string;
+      verified?: boolean;
+      widthPx?: number;
+      heightPx?: number;
+      reason?: string;
+    }>;
+  };
+  audit?: any;
+  structuralValidation?: {
+    valid: boolean;
+    checks: { header: boolean; eof: boolean; xrefOrTrailer: boolean; reparseable: boolean };
+    message: string;
+  };
+  revalidation?: {
+    hasRgbBefore: boolean;
+    hasRgbAfter: boolean;
+    ruleStatusBefore: string;
+    ruleStatusAfter: string;
+    validated: boolean;
+    message: string;
+  };
+  backendVersion?: string;
+  serializationMode?: string;
+  error?: string;
+}
+
+export async function applyImageColorFixViaApi(
+  file: File,
+  options: {
+    profileId?: string;
+    destinationIccPresetId?: string;
+    renderingIntent?: string;
+    allowFallbackSrgb?: boolean;
+    destIccFile?: File | null;
+    sourceIccFile?: File | null;
+  } = {}
+): Promise<ImageColorFixApiResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (options.profileId) formData.append('profileId', options.profileId);
+  if (options.destinationIccPresetId) formData.append('destinationIccPresetId', options.destinationIccPresetId);
+  if (options.renderingIntent) formData.append('renderingIntent', options.renderingIntent);
+  if (options.allowFallbackSrgb !== undefined) formData.append('allowFallbackSrgb', String(options.allowFallbackSrgb));
+  if (options.destIccFile) formData.append('destIccFile', options.destIccFile);
+  if (options.sourceIccFile) formData.append('sourceIccFile', options.sourceIccFile);
+
+  const authHeader = await getAuthHeader();
+
+  const res = await fetch(apiUrl('/api/fix-image-color'), {
+    method: 'POST',
+    body: formData,
+    headers: {
+      ...authHeader,
+    },
+  });
+
+  const data = await res.json();
+  return data as ImageColorFixApiResponse;
+}
+
