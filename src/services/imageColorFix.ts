@@ -16,6 +16,7 @@ import { extractPdfStructure } from '../../server/pdfExtractor';
 import { validateIccProfile, PRESET_ICC_PROFILES } from '../domain/colorManagement';
 import { transformRgbToCmyk, RenderingIntent } from './colorTransform';
 import { decodeJpegToRgb } from './jpegDecoder';
+import { decodeAscii85, Ascii85DecodeError } from './ascii85';
 import { evaluateFixContract, FixActionResult, FixContractResult } from './fixEngine';
 
 export interface ImageColorFixOptions {
@@ -155,7 +156,52 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
       const widthPx = (dict.get(PDFName.of('Width')) as any)?.asNumber?.() || 0;
       const heightPx = (dict.get(PDFName.of('Height')) as any)?.asNumber?.() || 0;
       const bitsPerComponent = (dict.get(PDFName.of('BitsPerComponent')) as any)?.asNumber?.() || 8;
-      const filterVal = dict.get(PDFName.of('Filter'))?.toString()?.replace(/^\//, '') || 'None';
+      // Filter & DecodeParms extraction
+      const filterObj = dict.get(PDFName.of('Filter'));
+      const filterList: string[] = [];
+      if (filterObj instanceof PDFName) {
+        const name = filterObj.toString().replace(/^\//, '');
+        if (name) filterList.push(name);
+      } else if (filterObj instanceof PDFArray) {
+        for (let i = 0; i < filterObj.size(); i++) {
+          const item = filterObj.get(i);
+          const name = item?.toString()?.replace(/^\//, '');
+          if (name) filterList.push(name);
+        }
+      } else if (filterObj) {
+        const str = filterObj.toString().replace(/^\[|\]$/g, '').trim();
+        if (str) {
+          str.split(/\s+/).forEach((s: string) => {
+            const name = s.replace(/^\//, '').replace(/,$/, '');
+            if (name) filterList.push(name);
+          });
+        }
+      }
+      const filterVal = filterList.length === 0 ? 'None' : filterList.join('+');
+
+      // DecodeParms extraction & validation
+      const decodeParmsObj = dict.get(PDFName.of('DecodeParms'));
+      let hasUnsupportedPredictor = false;
+      let predictorReason = '';
+      if (decodeParmsObj) {
+        const checkParmsDict = (pDict: any) => {
+          if (pDict instanceof PDFDict) {
+            const predictor = (pDict.get(PDFName.of('Predictor')) as any)?.asNumber?.();
+            if (predictor !== undefined && predictor > 1) {
+              hasUnsupportedPredictor = true;
+              predictorReason = `Parâmetro de predição /Predictor ${predictor} em DecodeParms exige decodificação diferencial no software de origem.`;
+            }
+          }
+        };
+        if (decodeParmsObj instanceof PDFDict) {
+          checkParmsDict(decodeParmsObj);
+        } else if (decodeParmsObj instanceof PDFArray) {
+          for (let i = 0; i < decodeParmsObj.size(); i++) {
+            checkParmsDict(decodeParmsObj.get(i));
+          }
+        }
+      }
+
       const hasDecode = Boolean(dict.get(PDFName.of('Decode')));
       const sMaskRef = dict.get(PDFName.of('SMask'));
       const maskRef = dict.get(PDFName.of('Mask'));
@@ -223,10 +269,15 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
       // Stream extraction & validation
       const rawStreamBytes = (xobj as any).contents || (xobj as any).getContents?.() || new Uint8Array(0);
 
-      // Safe Scope V1 Classification
+      // Safe Scope V1.2 Classification
       let classification: 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED' = 'NOT_SUPPORTED';
       let reasonCode = 'CONVERTIBLE';
       let reason = '';
+
+      const isAscii85Flate = filterList.length === 2 && filterList[0] === 'ASCII85Decode' && filterList[1] === 'FlateDecode';
+      const isDct = filterList.length === 1 && filterList[0] === 'DCTDecode';
+      const isFlate = filterList.length === 1 && filterList[0] === 'FlateDecode';
+      const isNone = filterList.length === 0 || (filterList.length === 1 && (filterList[0] === 'None' || filterList[0] === ''));
 
       if (!isRgb) {
         classification = 'NOT_SUPPORTED';
@@ -235,7 +286,7 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
       } else if (bitsPerComponent !== 8) {
         classification = 'MANUAL_REQUIRED';
         reasonCode = 'UNSUPPORTED_BITS_PER_COMPONENT';
-        reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (Safe Scope V1 exige 8 bits/canal).`;
+        reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (Safe Scope V1.2 exige 8 bits/canal).`;
       } else if (widthPx <= 0 || heightPx <= 0) {
         classification = 'NOT_SUPPORTED';
         reasonCode = 'INVALID_DIMENSIONS';
@@ -244,7 +295,11 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
         classification = 'MANUAL_REQUIRED';
         reasonCode = 'CUSTOM_DECODE_MATRIX';
         reason = 'Matriz de decodificação (/Decode) personalizada exige calibração manual no software de origem.';
-      } else if (filterVal === 'DCTDecode') {
+      } else if (hasUnsupportedPredictor) {
+        classification = 'MANUAL_REQUIRED';
+        reasonCode = 'UNSUPPORTED_DECODE_PARMS';
+        reason = predictorReason;
+      } else if (isDct) {
         // Safe Scope V1.1: Support DCTDecode (JPEG) RGB images
         try {
           const decoded = decodeJpegToRgb(rawStreamBytes);
@@ -259,21 +314,64 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
           } else {
             classification = 'CONVERTIBLE';
             reasonCode = 'CONVERTIBLE';
-            reason = 'Imagem raster RGB 8-bit comprimida em DCTDecode/JPEG compatível para conversão CMM segura (Safe Scope V1.1).';
+            reason = 'Imagem raster RGB 8-bit comprimida em DCTDecode/JPEG compatível para conversão CMM segura (Safe Scope V1.2).';
           }
         } catch (jpegErr: any) {
           classification = 'MANUAL_REQUIRED';
           reasonCode = 'CORRUPTED_JPEG';
           reason = `Falha na decodificação do stream JPEG: ${jpegErr?.message || String(jpegErr)}`;
         }
-      } else if (filterVal !== 'FlateDecode' && filterVal !== 'None' && filterVal !== '') {
+      } else if (isAscii85Flate) {
+        // Safe Scope V1.2: Support [/ASCII85Decode /FlateDecode] filter chain
+        try {
+          let asciiDecoded: Uint8Array;
+          try {
+            asciiDecoded = decodeAscii85(rawStreamBytes);
+          } catch (a85Err: any) {
+            classification = 'MANUAL_REQUIRED';
+            reasonCode = 'ASCII85_DECODE_FAILED';
+            reason = `Falha na decodificação ASCII85: ${a85Err?.message || String(a85Err)}`;
+          }
+
+          if (classification !== 'MANUAL_REQUIRED') {
+            let inflated: Uint8Array;
+            try {
+              inflated = pako.inflate(asciiDecoded!);
+            } catch (infErr: any) {
+              classification = 'MANUAL_REQUIRED';
+              reasonCode = 'DECOMPRESS_FAILED';
+              reason = `Falha na descompressão FlateDecode: ${infErr?.message || String(infErr)}`;
+            }
+
+            if (classification !== 'MANUAL_REQUIRED') {
+              const expectedBytes = widthPx * heightPx * 3;
+              if (inflated!.length !== expectedBytes) {
+                classification = 'MANUAL_REQUIRED';
+                reasonCode = 'STREAM_LENGTH_MISMATCH';
+                reason = `Tamanho do stream decodificado (${inflated!.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB 8-bit).`;
+              } else {
+                classification = 'CONVERTIBLE';
+                reasonCode = 'CONVERTIBLE';
+                reason = 'Imagem raster RGB 8-bit com cadeia de filtros [/ASCII85Decode /FlateDecode] compatível para conversão CMM segura (Safe Scope V1.2).';
+              }
+            }
+          }
+        } catch (err: any) {
+          classification = 'MANUAL_REQUIRED';
+          reasonCode = 'DECOMPRESS_FAILED';
+          reason = `Falha ao processar cadeia de filtros: ${err?.message || String(err)}`;
+        }
+      } else if (!isFlate && !isNone) {
         classification = 'MANUAL_REQUIRED';
         reasonCode = 'UNSUPPORTED_FILTER';
-        reason = `Filtro de compressão /${filterVal} não suportado no Safe Scope V1.1 (suporta FlateDecode, DCTDecode/JPEG ou raster não comprimido).`;
+        const formattedFilter = filterList.length > 1
+          ? `[${filterList.map((f) => '/' + f).join(' ')}]`
+          : `/${filterVal}`;
+        reason = `Filtro(s) de compressão ${formattedFilter} não suportado(s) no Safe Scope V1.2 (suporta FlateDecode, DCTDecode, [/ASCII85Decode /FlateDecode] ou raster não comprimido).`;
       } else {
-        // Test inflating pixel buffer
+        // FlateDecode or uncompressed raster
         try {
-          const inflated = filterVal === 'FlateDecode' ? pako.inflate(rawStreamBytes) : rawStreamBytes;
+          const inflated = isFlate ? pako.inflate(rawStreamBytes) : rawStreamBytes;
           const expectedBytes = widthPx * heightPx * 3;
           if (inflated.length !== expectedBytes) {
             classification = 'MANUAL_REQUIRED';
@@ -282,7 +380,7 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
           } else {
             classification = 'CONVERTIBLE';
             reasonCode = 'CONVERTIBLE';
-            reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1).';
+            reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1.2).';
           }
         } catch (e: any) {
           classification = 'MANUAL_REQUIRED';
@@ -579,16 +677,75 @@ export async function applyImageColorFix(
       }
     }
 
-    // Decode RGB pixels according to filter (DCTDecode / FlateDecode / raw)
+    // Decode RGB pixels according to filter (ASCII85+Flate / DCTDecode / FlateDecode / raw)
     let rawRgbPixels: Uint8Array;
     try {
-      if (audit.filter === 'DCTDecode') {
+      if (audit.filter === 'ASCII85Decode+FlateDecode') {
+        let asciiDecoded: Uint8Array;
+        try {
+          asciiDecoded = decodeAscii85(item.rawBytes);
+        } catch (a85Err: any) {
+          manualRequiredCount++;
+          objectResults.push({
+            objectId: audit.name,
+            page: audit.page,
+            status: 'manual_required',
+            sourceColorSpace: audit.colorSpace,
+            destinationColorSpace: 'DeviceCMYK',
+            renderingIntent,
+            verified: false,
+            widthPx: audit.widthPx,
+            heightPx: audit.heightPx,
+            reasonCode: 'ASCII85_DECODE_FAILED',
+            reason: `Falha na decodificação ASCII85: ${a85Err?.message || String(a85Err)}`,
+          });
+          continue;
+        }
+        try {
+          rawRgbPixels = pako.inflate(asciiDecoded);
+        } catch (infErr: any) {
+          manualRequiredCount++;
+          objectResults.push({
+            objectId: audit.name,
+            page: audit.page,
+            status: 'manual_required',
+            sourceColorSpace: audit.colorSpace,
+            destinationColorSpace: 'DeviceCMYK',
+            renderingIntent,
+            verified: false,
+            widthPx: audit.widthPx,
+            heightPx: audit.heightPx,
+            reasonCode: 'DECOMPRESS_FAILED',
+            reason: `Falha na descompressão FlateDecode: ${infErr?.message || String(infErr)}`,
+          });
+          continue;
+        }
+      } else if (audit.filter === 'DCTDecode') {
         const decoded = decodeJpegToRgb(item.rawBytes);
         rawRgbPixels = decoded.data;
       } else if (audit.filter === 'FlateDecode') {
         rawRgbPixels = pako.inflate(item.rawBytes);
       } else {
         rawRgbPixels = item.rawBytes;
+      }
+
+      const expectedBytes = audit.widthPx * audit.heightPx * 3;
+      if (rawRgbPixels.length !== expectedBytes) {
+        manualRequiredCount++;
+        objectResults.push({
+          objectId: audit.name,
+          page: audit.page,
+          status: 'manual_required',
+          sourceColorSpace: audit.colorSpace,
+          destinationColorSpace: 'DeviceCMYK',
+          renderingIntent,
+          verified: false,
+          widthPx: audit.widthPx,
+          heightPx: audit.heightPx,
+          reasonCode: 'PIXEL_LENGTH_MISMATCH',
+          reason: `Contagem de bytes RGB (${rawRgbPixels.length}) difere do esperado (${expectedBytes}).`,
+        });
+        continue;
       }
     } catch (decodeErr: any) {
       manualRequiredCount++;

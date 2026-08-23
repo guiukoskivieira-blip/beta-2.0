@@ -248,3 +248,17 @@ test('7. Resposta manual_required com reasonCode SOURCE_PROFILE_MISSING preserva
   assert.equal(mockResponse.reasonCode, 'SOURCE_PROFILE_MISSING');
   assert.ok(mockResponse.reason.includes('Perfil RGB de origem não incorporado'));
 });
+
+// 8. Resposta manual_required com reasonCode ASCII85_DECODE_FAILED
+test('8. Resposta manual_required com reasonCode ASCII85_DECODE_FAILED preserva reason e código', () => {
+  const mockResponse = {
+    success: false,
+    actionResult: 'manual_required',
+    reasonCode: 'ASCII85_DECODE_FAILED',
+    reason: 'Falha na decodificação ASCII85: Caractere ASCII inválido na posição 12.',
+  };
+
+  assert.equal(mockResponse.actionResult, 'manual_required');
+  assert.equal(mockResponse.reasonCode, 'ASCII85_DECODE_FAILED');
+  assert.ok(mockResponse.reason.includes('ASCII85'));
+});

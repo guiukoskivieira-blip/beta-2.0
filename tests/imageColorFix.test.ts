@@ -6,6 +6,7 @@ import { auditImageXObjects, applyImageColorFix, resolveIccBytes } from '../src/
 import { COMMERCIAL_PRINT_300DPI_PROFILE } from '../src/utils/productionProfiles';
 import { extractPdfStructure } from '../server/pdfExtractor';
 import { runDeterministicRuleEngine } from '../src/utils/ruleEngine';
+import { encodeAscii85, decodeAscii85 } from '../src/services/ascii85';
 
 let passed = 0;
 let total = 0;
@@ -516,6 +517,205 @@ export async function runImageColorFixTests() {
   });
   assert(dctNoFallbackResult.actionResult === 'manual_required', 'DCTDecode sem fallback sRGB: manual_required');
   assert(dctNoFallbackResult.reasonCode === 'SOURCE_PROFILE_MISSING', 'DCTDecode sem fallback sRGB: reasonCode SOURCE_PROFILE_MISSING');
+
+  // Test 13: Safe Scope V1.2 — [/ASCII85Decode /FlateDecode] RGB 1800x1000 px, 508 DPI, 90x50 mm
+  const rawRgb1800 = new Uint8Array(1800 * 1000 * 3);
+  for (let i = 0; i < rawRgb1800.length; i += 3) {
+    rawRgb1800[i] = 255;     // R
+    rawRgb1800[i + 1] = 128; // G
+    rawRgb1800[i + 2] = 64;  // B
+  }
+  const flateCompressed1800 = pako.deflate(rawRgb1800);
+  const ascii85Encoded1800 = encodeAscii85(flateCompressed1800);
+  const ascii85Bytes1800 = Buffer.from(ascii85Encoded1800, 'binary');
+
+  const a85Doc = await PDFDocument.create();
+  const a85Page = a85Doc.addPage([pageW, pageH]);
+  const a85ImgDict = a85Doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 1800,
+    Height: 1000,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: a85Doc.context.obj([PDFName.of('ASCII85Decode'), PDFName.of('FlateDecode')]),
+  });
+  const a85ImgStream = PDFRawStream.of(a85ImgDict as any, ascii85Bytes1800);
+  const a85ImgRef = a85Doc.context.register(a85ImgStream);
+  a85Page.node.set(
+    PDFName.of('Resources'),
+    a85Doc.context.obj({ XObject: { Im1: a85ImgRef } })
+  );
+  const a85PdfBytes = await a85Doc.save({ useObjectStreams: false });
+  const a85PdfCopy = new Uint8Array(a85PdfBytes);
+
+  // Initial audit and analysis
+  const a85LoadedDoc = await PDFDocument.load(a85PdfBytes);
+  const a85Audit = auditImageXObjects(a85LoadedDoc);
+  assert(a85Audit.audits.length === 1, 'ASCII85+Flate: Auditoria detectou 1 Image XObject');
+  assert(a85Audit.audits[0].filter === 'ASCII85Decode+FlateDecode', 'ASCII85+Flate: Filtro identificado como ASCII85Decode+FlateDecode');
+  assert(a85Audit.audits[0].classification === 'CONVERTIBLE', 'ASCII85+Flate: Imagem classificada como CONVERTIBLE no Safe Scope V1.2');
+
+  const initialA85Structure = await extractPdfStructure(a85PdfBytes);
+  const initialA85Rules = runDeterministicRuleEngine(initialA85Structure, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const initialA85ColorRule = initialA85Rules.profileRules.find((r) => r.ruleId === 'RULE-PROF-CLR-001');
+  assert(initialA85ColorRule?.status === 'error', 'ASCII85+Flate: Motor 1 detecta RULE-PROF-CLR-001 em erro no PDF inicial');
+
+  // Apply LittleCMS Fix on ASCII85+Flate image
+  const a85FixResult = await applyImageColorFix(a85PdfBytes, {
+    allowFallbackSrgb: true,
+    destinationIccPresetId: 'cgats_tr_001_swop',
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert(a85FixResult.success === true, 'ASCII85+Flate: applyImageColorFix executou com sucesso');
+  assert(a85FixResult.actionResult === 'corrected', 'ASCII85+Flate: actionResult é "corrected"');
+  assert(a85FixResult.objectsSummary.convertedCount === 1, 'ASCII85+Flate: 1 imagem convertida');
+  assert(a85FixResult.structuralValidation?.valid === true, 'ASCII85+Flate: Validação estrutural do PDF gerado');
+  assert(Buffer.from(a85PdfBytes).equals(Buffer.from(a85PdfCopy)), 'ASCII85+Flate: Buffer original permanece 100% inalterado (imutabilidade)');
+
+  // Reanalysis via Motor 1
+  const fixedA85Structure = await extractPdfStructure(a85FixResult.pdfBytes!);
+  const fixedA85Rules = runDeterministicRuleEngine(fixedA85Structure, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const fixedA85ColorRule = fixedA85Rules.profileRules.find((r) => r.ruleId === 'RULE-PROF-CLR-001');
+
+  assert(fixedA85Structure.colorSummary.hasRgb === false, 'ASCII85+Flate Reanálise: RGB removido completamente');
+  assert(fixedA85Structure.colorSummary.hasCmyk === true, 'ASCII85+Flate Reanálise: CMYK detectado');
+  assert(fixedA85ColorRule?.status === 'approved', 'ASCII85+Flate Reanálise: RULE-PROF-CLR-001 aprovado');
+  assert(a85FixResult.revalidation?.validated === true, 'ASCII85+Flate Reanálise: revalidation.validated === true');
+
+  // Verify rebuilt XObject properties
+  const fixedA85Doc = await PDFDocument.load(a85FixResult.pdfBytes!);
+  const fixedA85XObject = (fixedA85Doc.getPage(0).node.Resources() as any).get(PDFName.of('XObject')).get(PDFName.of('Im1'));
+  const fixedA85Stream = fixedA85Doc.context.lookup(fixedA85XObject);
+  const fixedA85Dict = (fixedA85Stream as any).dict;
+
+  assert(fixedA85Dict.get(PDFName.of('Width')).asNumber() === 1800, 'ASCII85+Flate: Width 1800 px preservado');
+  assert(fixedA85Dict.get(PDFName.of('Height')).asNumber() === 1000, 'ASCII85+Flate: Height 1000 px preservado');
+  assert(fixedA85Dict.get(PDFName.of('ColorSpace')).toString() === '/DeviceCMYK', 'ASCII85+Flate: ColorSpace é /DeviceCMYK');
+  assert(fixedA85Dict.get(PDFName.of('Filter')).toString() === '/FlateDecode', 'ASCII85+Flate: Stream reconstruído em /FlateDecode puro');
+
+  // Test 14: Invalid ASCII85 -> MANUAL_REQUIRED com ASCII85_DECODE_FAILED
+  const invalidA85Doc = await PDFDocument.create();
+  const invalidA85Page = invalidA85Doc.addPage([300, 300]);
+  const invalidA85Dict = invalidA85Doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: invalidA85Doc.context.obj([PDFName.of('ASCII85Decode'), PDFName.of('FlateDecode')]),
+  });
+  const invalidA85Stream = PDFRawStream.of(invalidA85Dict as any, Buffer.from('invalid ASCII85 stream \x01\x02~>'));
+  const invalidA85Ref = invalidA85Doc.context.register(invalidA85Stream);
+  invalidA85Page.node.set(
+    PDFName.of('Resources'),
+    invalidA85Doc.context.obj({ XObject: { Im1: invalidA85Ref } })
+  );
+  const invalidA85PdfBytes = await invalidA85Doc.save({ useObjectStreams: false });
+  const invalidA85Audit = auditImageXObjects(await PDFDocument.load(invalidA85PdfBytes));
+  assert(invalidA85Audit.audits[0].classification === 'MANUAL_REQUIRED', 'ASCII85 inválido: classificado como MANUAL_REQUIRED');
+  assert(invalidA85Audit.audits[0].reasonCode === 'ASCII85_DECODE_FAILED', 'ASCII85 inválido: reasonCode ASCII85_DECODE_FAILED');
+
+  const invalidA85Fix = await applyImageColorFix(invalidA85PdfBytes, { allowFallbackSrgb: true });
+  assert(invalidA85Fix.actionResult === 'manual_required', 'ASCII85 inválido: fix retorna manual_required');
+  assert(invalidA85Fix.reasonCode === 'ASCII85_DECODE_FAILED', 'ASCII85 inválido: fix reasonCode é ASCII85_DECODE_FAILED');
+
+  // Test 15: Invalid Flate after ASCII85 -> MANUAL_REQUIRED com DECOMPRESS_FAILED
+  const badFlateInA85Doc = await PDFDocument.create();
+  const badFlateInA85Page = badFlateInA85Doc.addPage([300, 300]);
+  const badFlateInA85Dict = badFlateInA85Doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: badFlateInA85Doc.context.obj([PDFName.of('ASCII85Decode'), PDFName.of('FlateDecode')]),
+  });
+  const badFlateA85Encoded = encodeAscii85(new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02]));
+  const badFlateA85Stream = PDFRawStream.of(badFlateInA85Dict as any, Buffer.from(badFlateA85Encoded, 'binary'));
+  const badFlateA85Ref = badFlateInA85Doc.context.register(badFlateA85Stream);
+  badFlateInA85Page.node.set(
+    PDFName.of('Resources'),
+    badFlateInA85Doc.context.obj({ XObject: { Im1: badFlateA85Ref } })
+  );
+  const badFlatePdfBytes = await badFlateInA85Doc.save({ useObjectStreams: false });
+  const badFlateAudit = auditImageXObjects(await PDFDocument.load(badFlatePdfBytes));
+  assert(badFlateAudit.audits[0].classification === 'MANUAL_REQUIRED', 'Flate corrompido pós-ASCII85: classificado como MANUAL_REQUIRED');
+  assert(badFlateAudit.audits[0].reasonCode === 'DECOMPRESS_FAILED', 'Flate corrompido pós-ASCII85: reasonCode DECOMPRESS_FAILED');
+
+  // Test 16: Inverted filter order [/FlateDecode /ASCII85Decode] -> MANUAL_REQUIRED com UNSUPPORTED_FILTER
+  const invertedDoc = await PDFDocument.create();
+  const invertedPage = invertedDoc.addPage([300, 300]);
+  const invertedDict = invertedDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: invertedDoc.context.obj([PDFName.of('FlateDecode'), PDFName.of('ASCII85Decode')]),
+  });
+  const invertedStream = PDFRawStream.of(invertedDict as any, new Uint8Array(64));
+  const invertedRef = invertedDoc.context.register(invertedStream);
+  invertedPage.node.set(
+    PDFName.of('Resources'),
+    invertedDoc.context.obj({ XObject: { Im1: invertedRef } })
+  );
+  const invertedPdfBytes = await invertedDoc.save({ useObjectStreams: false });
+  const invertedAudit = auditImageXObjects(await PDFDocument.load(invertedPdfBytes));
+  assert(invertedAudit.audits[0].classification === 'MANUAL_REQUIRED', 'Ordem invertida: classificada como MANUAL_REQUIRED');
+  assert(invertedAudit.audits[0].reasonCode === 'UNSUPPORTED_FILTER', 'Ordem invertida: reasonCode UNSUPPORTED_FILTER');
+
+  // Test 17: Unknown filter in array [/ASCII85Decode /LZWDecode] -> MANUAL_REQUIRED com UNSUPPORTED_FILTER
+  const lzwDoc = await PDFDocument.create();
+  const lzwPage = lzwDoc.addPage([300, 300]);
+  const lzwDict = lzwDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: lzwDoc.context.obj([PDFName.of('ASCII85Decode'), PDFName.of('LZWDecode')]),
+  });
+  const lzwStream = PDFRawStream.of(lzwDict as any, new Uint8Array(64));
+  const lzwRef = lzwDoc.context.register(lzwStream);
+  lzwPage.node.set(
+    PDFName.of('Resources'),
+    lzwDoc.context.obj({ XObject: { Im1: lzwRef } })
+  );
+  const lzwPdfBytes = await lzwDoc.save({ useObjectStreams: false });
+  const lzwAudit = auditImageXObjects(await PDFDocument.load(lzwPdfBytes));
+  assert(lzwAudit.audits[0].classification === 'MANUAL_REQUIRED', 'Filtro LZW: classificado como MANUAL_REQUIRED');
+  assert(lzwAudit.audits[0].reasonCode === 'UNSUPPORTED_FILTER', 'Filtro LZW: reasonCode UNSUPPORTED_FILTER');
+
+  // Test 18: Pixel length mismatch in ASCII85+Flate -> MANUAL_REQUIRED com STREAM_LENGTH_MISMATCH
+  const mismatchDoc = await PDFDocument.create();
+  const mismatchPage = mismatchDoc.addPage([300, 300]);
+  const mismatchRgb = new Uint8Array(10 * 10 * 3 - 5); // 5 bytes less than expected 300 bytes
+  const mismatchEncoded = encodeAscii85(pako.deflate(mismatchRgb));
+  const mismatchDict = mismatchDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: mismatchDoc.context.obj([PDFName.of('ASCII85Decode'), PDFName.of('FlateDecode')]),
+  });
+  const mismatchStream = PDFRawStream.of(mismatchDict as any, Buffer.from(mismatchEncoded, 'binary'));
+  const mismatchRef = mismatchDoc.context.register(mismatchStream);
+  mismatchPage.node.set(
+    PDFName.of('Resources'),
+    mismatchDoc.context.obj({ XObject: { Im1: mismatchRef } })
+  );
+  const mismatchPdfBytes = await mismatchDoc.save({ useObjectStreams: false });
+  const mismatchAudit = auditImageXObjects(await PDFDocument.load(mismatchPdfBytes));
+  assert(mismatchAudit.audits[0].classification === 'MANUAL_REQUIRED', 'Tamanho divergente: classificado como MANUAL_REQUIRED');
+  assert(mismatchAudit.audits[0].reasonCode === 'STREAM_LENGTH_MISMATCH', 'Tamanho divergente: reasonCode STREAM_LENGTH_MISMATCH');
 
   console.log(`\n================================================================`);
   console.log(`ARTECHECK IMAGE COLOR FIX TESTS: ${passed}/${total} APROVADOS`);
