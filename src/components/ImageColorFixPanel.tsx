@@ -13,7 +13,7 @@ interface ImageColorFixPanelProps {
   originalFile: File | null;
 }
 
-type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error' | 'structural_error';
+type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error' | 'structural_error' | 'manual_required';
 
 export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis, profile, originalFile }) => {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -99,10 +99,18 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
       console.info('[RGB-FIX] api-response', {
         success: response.success,
         actionResult: response.actionResult,
+        reasonCode: response.reasonCode,
         hasPdf: Boolean(response.fixedPdfBase64),
       });
 
       setConversionResponse(response);
+
+      if (response.actionResult === 'manual_required') {
+        const reasonDetail = response.reason || response.error || 'Conversão manual necessária no software gráfico.';
+        setErrorMessage(reasonDetail);
+        setPhase('manual_required');
+        return;
+      }
 
       if (!response.success || !response.fixedPdfBase64) {
         if (response.structuralValidation && !response.structuralValidation.valid) {
@@ -110,7 +118,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           setPhase('structural_error');
           return;
         }
-        setErrorMessage(response.error || 'API_RESPONSE_ERROR: Não foi possível converter as imagens RGB.');
+        setErrorMessage(response.error || response.reason || 'API_RESPONSE_ERROR: Não foi possível converter as imagens RGB.');
         setPhase('error');
         return;
       }
@@ -464,6 +472,68 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
               Conversão cancelada. O PDF original permanece inalterado.
             </p>
           </div>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Voltar
+          </button>
+        </div>
+      )}
+
+      {/* Manual Required Phase */}
+      {phase === 'manual_required' && (
+        <div className="mt-5 space-y-4">
+          <div className="flex items-start space-x-3 p-4 rounded-xl bg-[#FFA500]/10 border border-[#FFA500]/30">
+            <AlertTriangle className="w-5 h-5 text-[#FFA500] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-[#FFA500]">
+                  Conversão não automática
+                </p>
+                {conversionResponse?.reasonCode && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-[#FFA500]/20 text-[#FFA500] border border-[#FFA500]/40">
+                    {conversionResponse.reasonCode}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#E6EDF8] mt-1.5 leading-relaxed font-medium">
+                {errorMessage}
+              </p>
+            </div>
+          </div>
+
+          {/* List of images with their reasons if available */}
+          {conversionResponse?.imageResults && conversionResponse.imageResults.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+                Detalhamento dos Objetos RGB
+              </p>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {conversionResponse.imageResults.map((img, idx) => (
+                  <div key={idx} className="p-3 rounded-lg bg-[#0B1018] border border-[#243244] text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-white font-medium">{img.objectId} (Pág. {img.page})</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-[#FFA500]/15 text-[#FFA500] border border-[#FFA500]/30 uppercase font-semibold">
+                        {img.status}
+                      </span>
+                    </div>
+                    {img.reasonCode && (
+                      <p className="text-[10px] font-mono text-[#007BFF] mt-1">
+                        Código: {img.reasonCode}
+                      </p>
+                    )}
+                    <p className="text-[#8E98A7] text-[11px] mt-0.5">
+                      {img.reason || 'Exige calibração ou decodificação manual no software de origem.'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleReset}

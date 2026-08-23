@@ -1340,6 +1340,9 @@ async function startServer() {
         return res.json({
           success: false,
           actionResult: result.actionResult,
+          reasonCode: result.reasonCode,
+          reason: result.reason || result.error || result.contract?.message,
+          imageResults: result.imageResults || result.objectsSummary?.objects || [],
           contract: result.contract,
           objectsSummary: result.objectsSummary,
           audit: result.audit,
@@ -1347,7 +1350,7 @@ async function startServer() {
           revalidation: result.revalidation,
           backendVersion: "image-color-cmm-v1",
           serializationMode: "traditional-xref",
-          error: result.error,
+          error: result.error || result.reason,
         });
       }
 
@@ -1357,6 +1360,9 @@ async function startServer() {
       return res.json({
         success: true,
         actionResult: result.actionResult,
+        reasonCode: result.reasonCode,
+        reason: result.reason || result.contract?.message,
+        imageResults: result.imageResults || result.objectsSummary?.objects || [],
         contract: result.contract,
         fixedPdfBase64: base64,
         fixedPdfSize: fixedBuffer.length,

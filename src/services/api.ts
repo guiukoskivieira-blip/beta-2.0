@@ -213,8 +213,26 @@ export async function applyTrimBleedFixViaApi(
 export interface ImageColorFixApiResponse {
   success: boolean;
   actionResult?: 'corrected' | 'partially_corrected' | 'manual_required' | 'not_supported' | 'failed' | string;
+  reasonCode?: string;
+  reason?: string;
   fixedPdfBase64?: string;
   fixedPdfSize?: number;
+  imageResults?: Array<{
+    objectId: string;
+    page: number;
+    status: string;
+    sourceColorSpace?: string;
+    destinationColorSpace?: string;
+    sourceProfile?: string;
+    destinationProfile?: string;
+    renderingIntent?: string;
+    verified?: boolean;
+    widthPx?: number;
+    heightPx?: number;
+    effectiveDpi?: number;
+    reasonCode?: string;
+    reason?: string;
+  }>;
   objectsSummary?: {
     totalImages: number;
     rgbImages: number;
@@ -228,10 +246,14 @@ export interface ImageColorFixApiResponse {
       status: string;
       sourceColorSpace?: string;
       destinationColorSpace?: string;
+      sourceProfile?: string;
+      destinationProfile?: string;
       renderingIntent?: string;
       verified?: boolean;
       widthPx?: number;
       heightPx?: number;
+      effectiveDpi?: number;
+      reasonCode?: string;
       reason?: string;
     }>;
   };

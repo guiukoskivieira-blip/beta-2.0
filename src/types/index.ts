@@ -324,6 +324,7 @@ export interface ImageXObjectAudit {
   hasMask: boolean;
   hasEmbeddedIcc: boolean;
   classification: ImageClassification;
+  reasonCode?: string;
   reason: string;
   effectiveDpiX?: number;
   effectiveDpiY?: number;
@@ -348,5 +349,6 @@ export interface ImageConversionObjectResult {
   widthPx: number;
   heightPx: number;
   effectiveDpi?: number;
+  reasonCode?: string;
   reason?: string;
 }

@@ -209,3 +209,42 @@ test('5. Documento estritamente CMYK -> Painel não é renderizado', () => {
 
   assert.equal(html, '', 'Painel deve retornar null para documentos sem RGB');
 });
+
+// 6. Resposta manual_required com reasonCode UNSUPPORTED_FILTER é tratada
+test('6. Resposta manual_required com reasonCode UNSUPPORTED_FILTER preserva reason e código', () => {
+  const mockResponse = {
+    success: false,
+    actionResult: 'manual_required',
+    reasonCode: 'UNSUPPORTED_FILTER',
+    reason: 'Filtro de compressão /DCTDecode exige decodificação assistida (Safe Scope V1 suporta FlateDecode / raster não comprimido).',
+    imageResults: [
+      {
+        objectId: '/Im1',
+        page: 1,
+        status: 'manual_required',
+        reasonCode: 'UNSUPPORTED_FILTER',
+        reason: 'Filtro de compressão /DCTDecode exige decodificação assistida.',
+      },
+    ],
+  };
+
+  assert.equal(mockResponse.actionResult, 'manual_required');
+  assert.equal(mockResponse.reasonCode, 'UNSUPPORTED_FILTER');
+  assert.ok(mockResponse.reason.includes('DCTDecode'), 'reason deve mencionar DCTDecode');
+  assert.equal(mockResponse.imageResults.length, 1);
+  assert.equal(mockResponse.imageResults[0].reasonCode, 'UNSUPPORTED_FILTER');
+});
+
+// 7. Resposta manual_required com reasonCode SOURCE_PROFILE_MISSING
+test('7. Resposta manual_required com reasonCode SOURCE_PROFILE_MISSING preserva reason e código', () => {
+  const mockResponse = {
+    success: false,
+    actionResult: 'manual_required',
+    reasonCode: 'SOURCE_PROFILE_MISSING',
+    reason: 'Perfil RGB de origem não incorporado. Conversão bloqueada para evitar suposições silenciosas sem autorização explícita.',
+  };
+
+  assert.equal(mockResponse.actionResult, 'manual_required');
+  assert.equal(mockResponse.reasonCode, 'SOURCE_PROFILE_MISSING');
+  assert.ok(mockResponse.reason.includes('Perfil RGB de origem não incorporado'));
+});
