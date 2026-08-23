@@ -334,11 +334,13 @@ export function pdfCoordsToPreview(
   if (marker.width <= 0 || marker.height <= 0) return null;
   if (page.widthPt <= 0 || page.heightPt <= 0) return null;
 
+  const pageXPt = page.mediaBox?.xPt ?? 0;
+  const pageYPt = page.mediaBox?.yPt ?? 0;
   const pageWidthPt = page.widthPt;
   const pageHeightPt = page.heightPt;
 
-  const leftPct = (marker.x / pageWidthPt) * 100;
-  const bottomPct = (marker.y / pageHeightPt) * 100;
+  const leftPct = ((marker.x - pageXPt) / pageWidthPt) * 100;
+  const bottomPct = ((marker.y - pageYPt) / pageHeightPt) * 100;
   const widthPct = (marker.width / pageWidthPt) * 100;
   const heightPct = (marker.height / pageHeightPt) * 100;
 

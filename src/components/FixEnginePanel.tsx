@@ -166,24 +166,22 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
                     </div>
                   )}
 
+                  {/* Required Action / Input Description */}
+                  {proposal.requiredInputDescription && (
+                    <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244]">
+                      <span className="text-[#8E98A7] font-medium block mb-1">
+                        {proposal.safetyLevel === 'assisted' ? 'Requisitos para fechamento assistido:' : 'Ação técnica no software de origem:'}
+                      </span>
+                      <p className="text-[#C3CBD6]">{proposal.requiredInputDescription}</p>
+                    </div>
+                  )}
+
                   {/* Affected pages */}
                   {proposal.affectedPages.length > 0 && (
                     <div>
                       <span className="text-[#8E98A7] font-medium block mb-0.5">Páginas afetadas:</span>
                       <span className="text-[#C3CBD6]">{proposal.affectedPages.join(', ')}</span>
                     </div>
-                  )}
-
-                  {/* Action button for assisted */}
-                  {proposal.safetyLevel === 'assisted' && (
-                    <button
-                      type="button"
-                      disabled
-                      className="inline-flex items-center px-4 py-2 rounded-xl bg-[#007BFF]/10 border border-[#007BFF]/30 text-[#007BFF] text-xs font-medium cursor-not-allowed opacity-60"
-                    >
-                      <UserCheck className="w-3.5 h-3.5 mr-1.5" />
-                      Preparar correção
-                    </button>
                   )}
                 </div>
               )}

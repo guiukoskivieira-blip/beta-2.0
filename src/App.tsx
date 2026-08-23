@@ -251,7 +251,7 @@ export const App: React.FC = () => {
             ) : currentAnalysis ? (
               <div>
                 <OperationalSummary analysis={currentAnalysis} />
-                <VisualPreview analysis={currentAnalysis} profile={selectedProfile} />
+                <VisualPreview analysis={currentAnalysis} profile={selectedProfile} file={selectedFile} />
                 {jobCheckResult && (
                   <JobCheckResults
                     result={jobCheckResult}

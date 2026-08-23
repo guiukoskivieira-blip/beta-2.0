@@ -4,7 +4,7 @@
  * e que Motor 1 permanece autoridade.
  */
 import assert from 'node:assert/strict';
-import { buildFixProposals, classifyRule, type FixProposal } from '../src/services/fixEngine';
+import { buildFixProposals, classifyRule, evaluateFixContract, type FixProposal } from '../src/services/fixEngine';
 import type { PreflightAnalysis, RuleEvaluationResult, RuleEngineSummary, ScoreSummary, PdfDocumentStructure } from '../src/types';
 
 let passed = 0;
@@ -336,6 +336,112 @@ test('Análise 100% aprovada não gera nenhuma proposta', () => {
   assert.equal(result.autoCount, 0);
   assert.equal(result.assistedCount, 0);
   assert.equal(result.manualCount, 0);
+});
+
+// ============================================================================
+// TESTES DO CONTRATO DE RESULTADO E SEGURANÇA (ETAPA 5 & 6)
+// ============================================================================
+
+test('Contrato de Resultado: verified=true APENAS se statusAfter for approved e actionResult for corrected', () => {
+  const resultApproved = evaluateFixContract(
+    'RULE-PROF-BLD-001',
+    'fix_trim_bleed',
+    'error',
+    'apply_trim_bleed_box',
+    'corrected',
+    'approved',
+    'Caixas técnicas ajustadas e validadas pelo Motor 1.'
+  );
+  assert.equal(resultApproved.verified, true);
+  assert.equal(resultApproved.actionResult, 'corrected');
+  assert.equal(resultApproved.statusAfter, 'approved');
+
+  const resultStillError = evaluateFixContract(
+    'RULE-PROF-BLD-001',
+    'fix_trim_bleed',
+    'error',
+    'apply_trim_bleed_box',
+    'failed',
+    'error',
+    'Falha na revalidação das caixas.'
+  );
+  assert.equal(resultStillError.verified, false);
+  assert.equal(resultStillError.actionResult, 'failed');
+
+  const resultManual = evaluateFixContract(
+    'RULE-PROF-DPI-001',
+    'fix_dpi',
+    'error',
+    'manual_inspection',
+    'manual_required',
+    'error',
+    'Resolução baixa exige troca da imagem original.'
+  );
+  assert.equal(resultManual.verified, false);
+  assert.equal(resultManual.actionResult, 'manual_required');
+});
+
+test('Segurança: DPI baixo não possui auto fix e não gera sucesso falso', () => {
+  const rule = makeRule({
+    ruleId: 'RULE-PROF-DPI-001',
+    status: 'error',
+    evidence: '72 DPI detectado',
+  });
+  const proposal = classifyRule(rule);
+  assert.ok(proposal);
+  assert.equal(proposal!.safetyLevel, 'manual');
+  assert.equal(proposal!.canApply, false);
+  const contract = evaluateFixContract(
+    proposal!.ruleId,
+    proposal!.id,
+    rule.status,
+    'dpi_enhancement_attempt',
+    'not_supported',
+    'error',
+    proposal!.reasonIfUnavailable
+  );
+  assert.equal(contract.verified, false);
+  assert.equal(contract.actionResult, 'not_supported');
+});
+
+test('Segurança: RGB não é convertido arbitrariamente sem perfil ICC e aprovação', () => {
+  const rule = makeRule({
+    ruleId: 'RULE-PROF-CLR-001',
+    status: 'error',
+    evidence: 'DeviceRGB em perfil CMYK',
+  });
+  const proposal = classifyRule(rule);
+  assert.ok(proposal);
+  assert.equal(proposal!.safetyLevel, 'assisted');
+  assert.equal(proposal!.canApply, false);
+  assert.equal(proposal!.requiresHumanApproval, true);
+  assert.ok(proposal!.requiredInputDescription?.includes('ICC'));
+});
+
+test('Segurança: Fontes ausentes não são substituídas silenciosamente', () => {
+  const rule = makeRule({
+    ruleId: 'RULE-FONT-001',
+    status: 'error',
+    evidence: 'Helvetica não incorporada',
+  });
+  const proposal = classifyRule(rule);
+  assert.ok(proposal);
+  assert.equal(proposal!.safetyLevel, 'manual');
+  assert.equal(proposal!.canApply, false);
+  assert.ok(proposal!.reasonIfUnavailable.toLowerCase().includes('licen'));
+});
+
+test('Segurança: PDF/X não recebe declaração falsa artificialmente', () => {
+  const rule = makeRule({
+    ruleId: 'RULE-PDFX-001',
+    status: 'warning',
+    evidence: 'Ausência de declaração PDF/X',
+  });
+  const proposal = classifyRule(rule);
+  assert.ok(proposal);
+  assert.equal(proposal!.safetyLevel, 'assisted');
+  assert.equal(proposal!.canApply, false);
+  assert.ok(proposal!.requiredInputDescription?.includes('OutputIntent'));
 });
 
 // ============================================================================

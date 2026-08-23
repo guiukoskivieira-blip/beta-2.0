@@ -779,6 +779,154 @@ test('RULE-PROF-CLR-001: RGB continua bloqueante em perfil CMYK', () => {
 });
 
 // ============================================================================
+// TESTES DE AUDITORIA DO MAPA VISUAL E RENDERIZAÇÃO
+// ============================================================================
+
+test('AUDIT 1: PDF de uma página gera dados visuais e preserva aspecto', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [makePage({ page: 1, widthMm: 210, heightMm: 297, widthPt: 595.28, heightPt: 841.89 })],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: true, recognizedStandard: 'PDF/X-1a:2001' },
+  };
+  const visualData = buildAllVisualData(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  assert.equal(visualData.pageData.size, 1);
+  const p1Data = visualData.pageData.get(1);
+  assert.ok(p1Data);
+  assert.equal(p1Data!.page, 1);
+  const aspect = doc.pages[0].widthMm / doc.pages[0].heightMm;
+  assert.ok(Math.abs(aspect - (210 / 297)) < 0.001);
+});
+
+test('AUDIT 2: PDF multipágina permite indexar e acessar páginas independentes', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 3,
+    pages: [
+      makePage({ page: 1, widthMm: 210, heightMm: 297 }),
+      makePage({ page: 2, widthMm: 210, heightMm: 297 }),
+      makePage({ page: 3, widthMm: 210, heightMm: 297 }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const visualData = buildAllVisualData(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  assert.equal(visualData.pageData.size, 3);
+  assert.ok(visualData.pageData.has(1));
+  assert.ok(visualData.pageData.has(2));
+  assert.ok(visualData.pageData.has(3));
+});
+
+test('AUDIT 3: Marcador com coordenadas válidas converte eixo Y do PDF para Browser', () => {
+  const page = makePage({ page: 1, widthPt: 600, heightPt: 800, widthMm: 210, heightMm: 280 });
+  const marker: VisualIssueMarker = {
+    page: 1,
+    category: 'dpi',
+    x: 60,
+    y: 80, // no PDF, 80pt acima da base
+    width: 300,
+    height: 400,
+    ruleId: 'RULE-PROF-DPI-001',
+    severity: 'error',
+    title: 'Imagem Baixo DPI',
+    measuredValue: '72 DPI',
+    expectedValue: '300 DPI',
+    imageId: 'img_test_y',
+  };
+  const coords = pdfCoordsToPreview(marker, page);
+  assert.ok(coords);
+  assert.equal(coords!.leftPct, 10); // 60 / 600 * 100
+  assert.equal(coords!.widthPct, 50); // 300 / 600 * 100
+  assert.equal(coords!.heightPct, 50); // 400 / 800 * 100
+  // topPct no browser = 100 - (y / pageHeight * 100) - heightPct = 100 - 10 - 50 = 40%
+  assert.equal(coords!.topPct, 40);
+});
+
+test('AUDIT 4: Problema sem coordenadas não recebe posição inventada', () => {
+  const page = makePage({
+    page: 1,
+    imageOccurrences: [
+      {
+        id: 'img_without_coords',
+        page: 1,
+        widthPx: 100,
+        heightPx: 100,
+        effectiveDpiX: 72,
+        effectiveDpiY: 72,
+        colorSpace: 'DeviceRGB',
+        displayWidthMm: 10,
+        displayHeightMm: 10,
+        // sem xPt, yPt, appliedWidthPt, appliedHeightPt
+      },
+    ],
+  });
+  const dpiResult = buildDpiMarkersForPage(page, COMMERCIAL_PRINT_300DPI_PROFILE);
+  assert.equal(dpiResult.markers.length, 0, 'Não deve criar marker com coordenadas inventadas');
+  assert.equal(dpiResult.unavailableImageIds.length, 1);
+  assert.equal(dpiResult.unavailableImageIds[0], 'img_without_coords');
+});
+
+test('AUDIT 5: Problemas globais do documento (RGB/PDFX) não geram markers espaciais falsos', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [makePage({ page: 1, imageOccurrences: [] })],
+    fonts: [],
+    colorSummary: { hasRgb: true, hasCmyk: false, hasSpotColors: false, familiesDetected: ['DeviceRGB'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const visualData = buildAllVisualData(doc, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const dpiMarkers = visualData.allMarkers.filter((m) => m.category === 'dpi');
+  assert.equal(dpiMarkers.length, 0, 'Nenhum marcador espacial falso para erro de RGB global');
+});
+
+test('AUDIT 6: Overlays de TrimBox e BleedBox utilizam geometria milimétrica real', () => {
+  const page = makePage({
+    page: 1,
+    widthMm: 216,
+    heightMm: 303,
+    trimBox: { status: 'explicit', xPt: 8.5, yPt: 8.5, widthPt: 595.28, heightPt: 841.89, xMm: 3, yMm: 3, widthMm: 210, heightMm: 297 },
+    bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+    mediaBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+  });
+  const bleedResult = buildBleedMarkersForPage(page, A4_COMMERCIAL_FLYER_PROFILE);
+  const trimOverlay = bleedResult.overlays.find((o) => o.type === 'trimBox');
+  const bleedOverlay = bleedResult.overlays.find((o) => o.type === 'bleedBox');
+  assert.ok(trimOverlay, 'TrimBox overlay deve existir');
+  assert.ok(bleedOverlay, 'BleedBox overlay deve existir');
+  assert.equal(trimOverlay!.widthMm, 210);
+  assert.equal(trimOverlay!.heightMm, 297);
+  assert.equal(bleedOverlay!.widthMm, 216);
+  assert.equal(bleedOverlay!.heightMm, 303);
+
+  const trimCoords = mmToPreviewPct(trimOverlay!, page);
+  assert.ok(trimCoords);
+  assert.ok(trimCoords!.leftPct > 0);
+  assert.ok(trimCoords!.topPct > 0);
+});
+
+test('AUDIT 7: PDF corrigido com novas caixas é re-analisável pelo pipeline visual', () => {
+  const correctedDoc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        widthMm: 216,
+        heightMm: 303,
+        trimBox: { status: 'explicit', xPt: 8.5, yPt: 8.5, widthPt: 595.28, heightPt: 841.89, xMm: 3, yMm: 3, widthMm: 210, heightMm: 297 },
+        bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const visualData = buildAllVisualData(correctedDoc, A4_COMMERCIAL_FLYER_PROFILE);
+  const bleedErrors = visualData.allMarkers.filter((m) => m.category === 'bleed');
+  assert.equal(bleedErrors.length, 0, 'PDF corrigido não gera markers de sangria com erro');
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
