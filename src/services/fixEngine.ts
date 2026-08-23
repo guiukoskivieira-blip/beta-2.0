@@ -141,15 +141,15 @@ export function classifyRule(rule: RuleEvaluationResult): FixProposal | null {
         ruleId: rule.ruleId,
         type: 'color_conversion',
         safetyLevel: 'assisted',
-        title: 'Converter RGB para CMYK',
-        description: 'Preparar proposta de conversão de espaço de cor RGB para CMYK. A conversão real não é aplicada nesta etapa.',
+        title: 'Converter imagens RGB para CMYK',
+        description: 'Conversão determinística de imagens raster RGB para CMYK via LittleCMS CMM WebAssembly com perfil ICC de destino calibrado e preservação dimensional.',
         affectedPages,
-        canApply: false,
+        canApply: true,
         requiresHumanApproval: true,
-        reasonIfUnavailable: 'A conversão de cores exige perfil ICC de saída e pode alterar aparência visual. Deve ser feita no software de origem com perfil de prova contratado.',
+        reasonIfUnavailable: 'A conversão de cores exige seleção de perfil ICC CMYK de destino e autorização de renderização (soft-proof). Elementos vetoriais ou sombreados complexos requerem ajuste na arte.',
         measuredValue: 'DeviceRGB detectado',
         expectedValue: 'DeviceCMYK',
-        requiredInputDescription: 'Seleção do Perfil ICC de destino (CMM) calibrado para o processo de impressão e verificação de prova de cor (soft-proof) antes de exportar.',
+        requiredInputDescription: 'Seleção de Perfil ICC CMYK de destino (ex: CGATS TR 001 SWOP, FOGRA39, ISO Coated v2) e autorização para calibração de cores.',
       };
 
     case 'dpi_enhancement':

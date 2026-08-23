@@ -302,3 +302,51 @@ export interface AiAssistantResponse {
   model?: string;
   error?: string;
 }
+
+export type ImageClassification = 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED';
+export type ImageObjectStatus = 'converted' | 'manual_required' | 'not_supported' | 'failed';
+export type SourceProfileOrigin = 'embedded' | 'selected' | 'configured_fallback';
+
+export interface ImageXObjectAudit {
+  id: string;
+  name: string;
+  page: number;
+  widthPx: number;
+  heightPx: number;
+  bitsPerComponent: number;
+  colorSpace: string;
+  isRgb: boolean;
+  isCmyk: boolean;
+  isGray: boolean;
+  filter: string;
+  hasDecode: boolean;
+  hasSMask: boolean;
+  hasMask: boolean;
+  hasEmbeddedIcc: boolean;
+  classification: ImageClassification;
+  reason: string;
+  effectiveDpiX?: number;
+  effectiveDpiY?: number;
+  ctm?: number[];
+  xPt?: number;
+  yPt?: number;
+  appliedWidthPt?: number;
+  appliedHeightPt?: number;
+}
+
+export interface ImageConversionObjectResult {
+  objectId: string;
+  page: number;
+  status: ImageObjectStatus;
+  sourceColorSpace: string;
+  destinationColorSpace: string;
+  sourceProfile?: string;
+  sourceProfileOrigin?: SourceProfileOrigin;
+  destinationProfile?: string;
+  renderingIntent?: string;
+  verified: boolean;
+  widthPx: number;
+  heightPx: number;
+  effectiveDpi?: number;
+  reason?: string;
+}

@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes } from "./server/pdfExtractor";
 import { checkTrimBleedEligibility, applyTrimBleedFix } from "./src/services/trimBleedFix";
 import { applyOutputIntentFix } from "./src/services/outputIntentFix";
+import { applyImageColorFix } from "./src/services/imageColorFix";
 import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE } from "./src/utils/productionProfiles";
 import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
@@ -1301,6 +1302,106 @@ async function startServer() {
       uptimeSeconds: Number(process.uptime().toFixed(1)),
     });
   });
+
+  // POST /api/fix-image-color & /api/fix/image-color - Real LittleCMS RGB->CMYK image fix on PDF clone
+  const handleImageColorFix = async (req: Request, res: Response) => {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const file = files?.file?.[0] || (req as any).file;
+    const destIccFile = files?.destIccFile?.[0] || files?.iccFile?.[0];
+    const sourceIccFile = files?.sourceIccFile?.[0];
+
+    if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
+
+    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "default_cmyk";
+    const renderingIntent = typeof req.body?.renderingIntent === "string" ? req.body.renderingIntent : "RelativeColorimetric";
+    const allowFallbackSrgb = req.body?.allowFallbackSrgb === "true" || req.body?.allowFallbackSrgb === true;
+
+    const profileMap: Record<string, ProductionProfile> = {
+      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
+      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
+      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
+    };
+    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+
+    try {
+      if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({ success: false, error: "Arquivo sem assinatura PDF válida." });
+      }
+
+      res.setHeader("X-ArteCheck-Backend-Version", "image-color-cmm-v1");
+
+      const result = await applyImageColorFix(file.buffer, {
+        destinationIccBytes: destIccFile?.buffer || null,
+        destinationIccPresetId,
+        sourceIccBytes: sourceIccFile?.buffer || null,
+        renderingIntent: renderingIntent as any,
+        allowFallbackSrgb,
+        profile,
+      });
+
+      if (!result.success || !result.pdfBytes) {
+        return res.json({
+          success: false,
+          actionResult: result.actionResult,
+          contract: result.contract,
+          objectsSummary: result.objectsSummary,
+          audit: result.audit,
+          structuralValidation: result.structuralValidation,
+          revalidation: result.revalidation,
+          backendVersion: "image-color-cmm-v1",
+          serializationMode: "traditional-xref",
+          error: result.error,
+        });
+      }
+
+      const fixedBuffer = Buffer.from(result.pdfBytes);
+      const base64 = fixedBuffer.toString("base64");
+
+      return res.json({
+        success: true,
+        actionResult: result.actionResult,
+        contract: result.contract,
+        fixedPdfBase64: base64,
+        fixedPdfSize: fixedBuffer.length,
+        objectsSummary: result.objectsSummary,
+        audit: result.audit,
+        structuralValidation: result.structuralValidation,
+        revalidation: result.revalidation,
+        backendVersion: "image-color-cmm-v1",
+        serializationMode: "traditional-xref",
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        backendVersion: "image-color-cmm-v1",
+        serializationMode: "traditional-xref",
+        error: error?.message || "Falha na conversão de cores de imagens.",
+      });
+    }
+  };
+
+  app.post(
+    "/api/fix-image-color",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+      { name: "sourceIccFile", maxCount: 1 },
+    ]),
+    handleImageColorFix
+  );
+
+  app.post(
+    "/api/fix/image-color",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+      { name: "sourceIccFile", maxCount: 1 },
+    ]),
+    handleImageColorFix
+  );
 
   // Future analysis routes structure placeholder
   app.get("/api/info", (_req: Request, res: Response) => {

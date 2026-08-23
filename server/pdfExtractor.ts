@@ -270,7 +270,7 @@ function parseBox(boxArray: any): PdfBoxInfo | undefined {
   };
 }
 
-export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumentStructure> {
+export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promise<PdfDocumentStructure> {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true, updateMetadata: false });
   const pageCount = pdfDoc.getPageCount();
   const pages: PdfPageStructure[] = [];
@@ -371,7 +371,28 @@ export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumen
             if (subtype?.toString() === '/Image') {
               const widthPx = dict.get(PDFName.of('Width'))?.asNumber?.() || 100;
               const heightPx = dict.get(PDFName.of('Height'))?.asNumber?.() || 100;
-              const colorSpace = dict.get(PDFName.of('ColorSpace'))?.toString() || 'DeviceRGB';
+              const bitsPerComponent = dict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+              const filterVal = dict.get(PDFName.of('Filter'))?.toString()?.replace(/^\//, '') || 'None';
+
+              let colorSpace = 'DeviceRGB';
+              const csObj = dict.get(PDFName.of('ColorSpace'));
+              if (csObj instanceof PDFName) {
+                colorSpace = csObj.toString().replace(/^\//, '');
+              } else if (csObj instanceof PDFArray) {
+                const first = csObj.get(0)?.toString();
+                if (first?.includes('ICCBased')) {
+                  const iccRef = csObj.get(1);
+                  const iccStream = iccRef ? pdfDoc.context.lookup(iccRef) : null;
+                  const streamDict: any = (iccStream as any)?.dict || iccStream;
+                  const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
+                  const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
+                  colorSpace = n === 4 ? 'ICCBased (CMYK)' : n === 3 ? 'ICCBased (RGB)' : n === 1 ? 'ICCBased (Gray)' : (alt || 'ICCBased');
+                } else {
+                  colorSpace = csObj.toString().replace(/^\//, '');
+                }
+              } else if (csObj) {
+                colorSpace = csObj.toString().replace(/^\//, '');
+              }
 
               if (colorSpace.includes('RGB')) {
                 hasGlobalRgb = true;
@@ -404,6 +425,8 @@ export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumen
                 name: imgName,
                 widthPx,
                 heightPx,
+                bitsPerComponent,
+                filter: filterVal,
                 displayWidthMm,
                 displayHeightMm,
                 effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
