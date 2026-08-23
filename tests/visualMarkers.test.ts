@@ -15,6 +15,7 @@ import {
   type VisualIssueMarker,
 } from '../src/services/visualMarkers';
 import { COMMERCIAL_PRINT_300DPI_PROFILE, LARGE_FORMAT_BANNER_PROFILE, A4_COMMERCIAL_FLYER_PROFILE } from '../src/utils/productionProfiles';
+import { runDeterministicRuleEngine } from '../src/utils/ruleEngine';
 import type { PdfPageStructure, PdfDocumentStructure, PreflightAnalysis, RuleEngineSummary, ScoreSummary } from '../src/types';
 
 let passed = 0;
@@ -633,6 +634,148 @@ test('mmToPreviewPct: retorna null para página com dimensão zero', () => {
   const page = makePage({ widthMm: 0, heightMm: 0 });
   const coords = mmToPreviewPct({ xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, page);
   assert.equal(coords, null);
+});
+
+// ============================================================================
+// TESTES RULE-PROF-DIM-001 & REGRAS DE PERFIL
+// ============================================================================
+
+test('RULE-PROF-DIM-001: TrimBox 210x297 + BleedBox 216x303 => aprovado', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        widthMm: 216,
+        heightMm: 303,
+        trimBox: { status: 'explicit', xPt: 8.5, yPt: 8.5, widthPt: 595.28, heightPt: 841.89, xMm: 3, yMm: 3, widthMm: 210, heightMm: 297 },
+        bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summary = runDeterministicRuleEngine(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  const dimRule = summary.results.find((r) => r.ruleId === 'RULE-PROF-DIM-001');
+  assert.ok(dimRule, 'RULE-PROF-DIM-001 deve ser avaliada');
+  assert.equal(dimRule!.status, 'approved', 'TrimBox 210x297 com BleedBox 216x303 deve ser aprovado');
+});
+
+test('RULE-PROF-DIM-001: TrimBox 216x303 => bloqueante', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        widthMm: 216,
+        heightMm: 303,
+        trimBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+        bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summary = runDeterministicRuleEngine(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  const dimRule = summary.results.find((r) => r.ruleId === 'RULE-PROF-DIM-001');
+  assert.ok(dimRule, 'RULE-PROF-DIM-001 deve ser avaliada');
+  assert.equal(dimRule!.status, 'error', 'TrimBox 216x303 deve ser bloqueante (error) no perfil A4');
+});
+
+test('RULE-PROF-DIM-001: sem TrimBox => fallback preservado', () => {
+  // Caso A: sem TrimBox, dimensões da página = 210x297 => aprovado
+  const docMatching: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        widthMm: 210,
+        heightMm: 297,
+        trimBox: undefined,
+        bleedBox: undefined,
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summaryA = runDeterministicRuleEngine(docMatching, A4_COMMERCIAL_FLYER_PROFILE);
+  const dimRuleA = summaryA.results.find((r) => r.ruleId === 'RULE-PROF-DIM-001');
+  assert.equal(dimRuleA?.status, 'approved', 'Sem TrimBox com widthMm=210 e heightMm=297 deve aprovar por fallback');
+
+  // Caso B: sem TrimBox, dimensões da página = 216x303 => erro
+  const docDiverging: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        widthMm: 216,
+        heightMm: 303,
+        trimBox: undefined,
+        bleedBox: undefined,
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summaryB = runDeterministicRuleEngine(docDiverging, A4_COMMERCIAL_FLYER_PROFILE);
+  const dimRuleB = summaryB.results.find((r) => r.ruleId === 'RULE-PROF-DIM-001');
+  assert.equal(dimRuleB?.status, 'error', 'Sem TrimBox com widthMm=216 e heightMm=303 deve reprovar por fallback');
+});
+
+test('RULE-PROF-DPI-001: DPI 150 continua bloqueante no perfil 300 DPI', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        imageOccurrences: [
+          {
+            id: 'img_150dpi',
+            page: 1,
+            widthPx: 591,
+            heightPx: 839,
+            displayWidthMm: 100,
+            displayHeightMm: 142,
+            effectiveDpiX: 150,
+            effectiveDpiY: 150,
+            colorSpace: 'DeviceCMYK',
+          },
+        ],
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: false, hasCmyk: true, hasSpotColors: false, familiesDetected: ['DeviceCMYK'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summary = runDeterministicRuleEngine(doc, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const dpiRule = summary.results.find((r) => r.ruleId === 'RULE-PROF-DPI-001');
+  assert.ok(dpiRule, 'RULE-PROF-DPI-001 deve ser avaliada');
+  assert.equal(dpiRule!.status, 'error', 'DPI 150 (< threshold de alerta 200) deve ser bloqueante (error)');
+});
+
+test('RULE-PROF-CLR-001: RGB continua bloqueante em perfil CMYK', () => {
+  const doc: PdfDocumentStructure = {
+    pageCount: 1,
+    pages: [
+      makePage({
+        page: 1,
+        colorOccurrences: [
+          { page: 1, family: 'DeviceRGB', count: 5 },
+        ],
+      }),
+    ],
+    fonts: [],
+    colorSummary: { hasRgb: true, hasCmyk: false, hasSpotColors: false, familiesDetected: ['DeviceRGB'] },
+    pdfxInfo: { isDeclaredPdfX: false },
+  };
+  const summary = runDeterministicRuleEngine(doc, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const clrRule = summary.results.find((r) => r.ruleId === 'RULE-PROF-CLR-001');
+  assert.ok(clrRule, 'RULE-PROF-CLR-001 deve ser avaliada');
+  assert.equal(clrRule!.status, 'error', 'Presença de RGB em perfil CMYK deve ser bloqueante (error)');
 });
 
 // ============================================================================

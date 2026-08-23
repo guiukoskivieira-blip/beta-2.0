@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
@@ -60,8 +61,10 @@ function isBillingEnforced() {
 }
 
 async function getSubscriptionUsage(userId: string) {
+  const isUuid = isValidUuid(userId);
+
   // Se userId for não-UUID (ambiente local/dev, teste, guest):
-  if (!isValidUuid(userId)) {
+  if (!isUuid) {
     const cycleMs = 30 * 24 * 60 * 60 * 1000;
     const now = Date.now();
     const periodStart = new Date(now).toISOString();
@@ -89,27 +92,6 @@ async function getSubscriptionUsage(userId: string) {
   }
 
   const admin = getBillingAdmin();
-  const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-  let parsedProtocol = 'none';
-  let parsedHostname = 'none';
-  try {
-    if (rawUrl) {
-      const u = new URL(rawUrl);
-      parsedProtocol = u.protocol;
-      parsedHostname = u.hostname;
-    }
-  } catch {
-    parsedProtocol = 'invalid';
-    parsedHostname = 'invalid';
-  }
-
-  console.log('[Billing/Diagnostic]', {
-    SUPABASE_URL_PRESENT: Boolean(rawUrl),
-    SUPABASE_URL_PROTOCOL: parsedProtocol,
-    SUPABASE_URL_HOSTNAME: parsedHostname,
-    BILLING_ADMIN_CREATED: Boolean(admin),
-  });
-
   if (!admin) return null;
 
   // 1. Consulta subscription ativa ou cancelada
@@ -127,21 +109,7 @@ async function getSubscriptionUsage(userId: string) {
     subscription = res.data;
     subError = res.error;
   } catch (err: any) {
-    console.error('[Billing/Diagnostic] Subscription query exception:', {
-      name: err?.name,
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause,
-      causeName: err?.cause?.name,
-      causeMessage: err?.cause?.message,
-      causeCode: err?.cause?.code,
-      causeErrno: err?.cause?.errno,
-      causeSyscall: err?.cause?.syscall,
-      causeHostname: err?.cause?.hostname,
-      causeAddress: err?.cause?.address,
-      causePort: err?.cause?.port,
-      stack: err?.stack,
-    });
+    console.error('Erro ao consultar assinaturas no Supabase:', err?.message || err);
     throw new Error(`Erro ao consultar assinaturas: ${err?.message || err}`);
   }
 
@@ -192,13 +160,7 @@ async function getSubscriptionUsage(userId: string) {
       }
     }
   } catch (err: any) {
-    console.error('[Billing/Diagnostic] Profiles query exception:', {
-      name: err?.name,
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause,
-      stack: err?.stack,
-    });
+    console.warn(`[Billing] Falha ao obter created_at do perfil para ${userId}:`, err?.message || err);
   }
 
   const now = Date.now();
@@ -207,7 +169,6 @@ async function getSubscriptionUsage(userId: string) {
   const cycleIndex = Math.floor(elapsed / cycleMs);
   const periodStart = new Date(userCreatedAt.getTime() + cycleIndex * cycleMs).toISOString();
   const periodEnd = new Date(userCreatedAt.getTime() + (cycleIndex + 1) * cycleMs).toISOString();
-  const periodKey = `free_${periodStart.slice(0, 10)}`;
 
   const limit = BILLING_PLAN_LIMITS.free || 15;
 
@@ -223,13 +184,7 @@ async function getSubscriptionUsage(userId: string) {
     count = aRes.count;
     usageError = aRes.error;
   } catch (err: any) {
-    console.error('[Billing/Diagnostic] Analyses query exception:', {
-      name: err?.name,
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause,
-      stack: err?.stack,
-    });
+    console.error('Erro ao consultar análises do plano gratuito:', err?.message || err);
     throw new Error(`Erro ao consultar uso do plano gratuito: ${err?.message || err}`);
   }
 
@@ -903,7 +858,6 @@ async function startServer() {
       res.setHeader("X-Request-ID", requestId);
       (req as any).artecheckRequestId = requestId;
       const requestStartedAt = performance.now();
-      console.log(`[SERVER:${requestId}] REQUEST RECEIVED (/api/upload reached)`);
       req.on("aborted", () => console.warn(`[SERVER:${requestId}] request aborted by client`));
       res.on("finish", () => console.log(`[SERVER:${requestId}] RESPONSE SENT status=${res.statusCode} elapsed=${Number((performance.now() - requestStartedAt).toFixed(2))}ms`));
       res.on("close", () => {
@@ -929,7 +883,6 @@ async function startServer() {
             error: err.message || "Erro durante o envio do arquivo.",
           });
         }
-        console.log(`[SERVER:${(req as any).artecheckRequestId}] multer completed`);
         next();
       });
     },
@@ -948,7 +901,6 @@ async function startServer() {
 
       const originalName = (file.originalname || "").replace(/[\r\n\0]/g, "").slice(0, 255);
       const requestId = (req as any).artecheckRequestId || "unknown";
-      console.log(`[SERVER:${requestId}] FILE RECEIVED: ${originalName} (buffer length: ${file.buffer?.length || 0} bytes)`);
 
       // 2. Validate file name extension and declared MIME (magic bytes remain authoritative below).
       if (!originalName.toLowerCase().endsWith(".pdf")) {
@@ -982,11 +934,9 @@ async function startServer() {
 
       // 4. Stage 3 Deterministic Structural Extraction (in-memory, zero permanent storage)
       try {
-        console.log(`[SERVER:${requestId}] PDF ENGINE START (extractPdfStructure executing)`);
         serverTracker.startStage('pdf_extractor_execution');
         const documentStructure = await extractPdfStructure(file.buffer);
         serverTracker.endStage('pdf_extractor_execution');
-        console.log(`[SERVER:${requestId}] PDF ENGINE END (extractPdfStructure succeeded)`);
 
         // 5. Payload Inspection & Diagnostic Audit
         serverTracker.startStage('payload_inspection_and_audit');

@@ -263,11 +263,23 @@ export function runDeterministicRuleEngine(
     const expH = profile.expectedHeightMm;
     const tol = 1.5; // tolerância em mm
 
+    const getNominalDimensions = (p: typeof doc.pages[0]) => {
+      // Prioritize valid/explicit TrimBox for nominal finished format. BleedBox is NEVER used as nominal format.
+      const hasValidTrimBox =
+        p.trimBox &&
+        p.trimBox.status !== 'fallback' &&
+        typeof p.trimBox.widthMm === 'number' &&
+        p.trimBox.widthMm > 0 &&
+        typeof p.trimBox.heightMm === 'number' &&
+        p.trimBox.heightMm > 0;
+
+      const w = hasValidTrimBox ? p.trimBox!.widthMm : p.widthMm;
+      const h = hasValidTrimBox ? p.trimBox!.heightMm : p.heightMm;
+      return { w, h, hasValidTrimBox };
+    };
+
     const invalidPages = (doc.pages || []).filter((p) => {
-      // Prioritize explicit TrimBox for finished format, fallback to page dimensions
-      const tb = p.trimBox && p.trimBox.status === 'explicit' ? p.trimBox : null;
-      const w = tb && typeof tb.widthMm === 'number' ? tb.widthMm : p.widthMm;
-      const h = tb && typeof tb.heightMm === 'number' ? tb.heightMm : p.heightMm;
+      const { w, h } = getNominalDimensions(p);
       const matchNormal = Math.abs(w - expW) <= tol && Math.abs(h - expH) <= tol;
       const matchRotated = Math.abs(w - expH) <= tol && Math.abs(h - expW) <= tol;
       return !matchNormal && !matchRotated;
@@ -279,14 +291,20 @@ export function runDeterministicRuleEngine(
         title: 'Dimensões Nominais do Perfil',
         category: 'profile_conditioned',
         status: 'error',
-        evidence: `Página(s) divergem das dimensões esperadas (${expW} × ${expH} mm). Encontrado: ${invalidPages.map((p) => `Pág ${p.page}: ${p.widthMm.toFixed(1)} × ${p.heightMm.toFixed(1)} mm`).join(', ')}.`,
+        evidence: `Página(s) divergem das dimensões esperadas (${expW} × ${expH} mm). Encontrado: ${invalidPages.map((p) => {
+          const { w, h } = getNominalDimensions(p);
+          return `Pág ${p.page}: ${w.toFixed(1)} × ${h.toFixed(1)} mm`;
+        }).join(', ')}.`,
         explanation: `O perfil "${profile.name}" exige o formato nominal de ${expW} × ${expH} mm.`,
         recommendation: `Ajuste o tamanho da prancheta para ${expW} × ${expH} mm antes de exportar.`,
-        references: invalidPages.map((p) => ({
-          page: p.page,
-          objectType: 'page',
-          details: `${p.widthMm.toFixed(1)} × ${p.heightMm.toFixed(1)} mm (Esperado: ${expW} × ${expH} mm)`,
-        })),
+        references: invalidPages.map((p) => {
+          const { w, h } = getNominalDimensions(p);
+          return {
+            page: p.page,
+            objectType: 'page',
+            details: `${w.toFixed(1)} × ${h.toFixed(1)} mm (Esperado: ${expW} × ${expH} mm)`,
+          };
+        }),
       });
     } else {
       profileRules.push({
