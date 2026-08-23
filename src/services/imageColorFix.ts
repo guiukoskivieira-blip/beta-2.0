@@ -91,12 +91,10 @@ export function resolveIccBytes(
     return iccBytes instanceof Uint8Array ? iccBytes : new Uint8Array(iccBytes);
   }
 
-  const targetPreset = presetId || 'default_cmyk';
+  const targetPreset = presetId || 'cgats_tr_001_swop';
   const preset = PRESET_ICC_PROFILES[targetPreset];
   const candidatePaths = [
     preset?.bundledPath ? path.resolve(process.cwd(), preset.bundledPath) : null,
-    path.resolve(process.cwd(), 'dist/iccs/default_cmyk.icc'),
-    path.resolve(process.cwd(), 'server/iccs/default_cmyk.icc'),
     path.resolve(process.cwd(), 'dist/iccs/cgats_tr001_swop.icc'),
     path.resolve(process.cwd(), 'server/iccs/cgats_tr001_swop.icc'),
   ].filter(Boolean) as string[];

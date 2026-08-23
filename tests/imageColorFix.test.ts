@@ -100,7 +100,7 @@ export async function runImageColorFixTests() {
   console.log('================================================================\n');
 
   // Test 1: Resolve ICC profile bytes
-  const cmykBytes = resolveIccBytes(null, 'default_cmyk');
+  const cmykBytes = resolveIccBytes(null, 'cgats_tr_001_swop');
   assert(Boolean(cmykBytes && cmykBytes.length > 1000), 'Resolve perfil ICC CMYK padrão embutido');
 
   // Test 2: Audit Image XObjects

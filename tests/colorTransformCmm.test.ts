@@ -22,7 +22,7 @@ export async function runColorTransformTests() {
   console.log('ARTECHECK — LITTLECMS / WASM CMM PROOF OF CONCEPT SUITE');
   console.log('================================================================\n');
 
-  const cmykProfilePath = path.resolve('server/iccs/default_cmyk.icc');
+  const cmykProfilePath = path.resolve('server/iccs/cgats_tr001_swop.icc');
   const rgbProfilePath = path.resolve('server/iccs/srgb.icc');
 
   const cmykBytes = fs.readFileSync(cmykProfilePath);
@@ -45,14 +45,14 @@ export async function runColorTransformTests() {
   assert(rgbHandle > 0, 'TEST 2.1: LittleCMS abre o perfil ICC RGB em memória nativa');
   lcms.cmsCloseProfile(rgbHandle);
 
-  // 3. ICC CMYK válido abre
+  // 3. ICC CGATS TR 001 SWOP CMYK válido abre
   const cmykValidation = validateIccProfile(cmykBytes);
   assert(
     cmykValidation.valid === true && cmykValidation.colorSpace === 'CMYK' && cmykValidation.components === 4,
-    'TEST 3: ICC CMYK válido abre, possui assinatura mágica acsp e 4 componentes'
+    'TEST 3: ICC CGATS TR 001 SWOP CMYK válido abre, possui assinatura mágica acsp e 4 componentes'
   );
   const cmykHandle = lcms.cmsOpenProfileFromMem(cmykBytes, cmykBytes.length);
-  assert(cmykHandle > 0, 'TEST 3.1: LittleCMS abre o perfil ICC CMYK em memória nativa');
+  assert(cmykHandle > 0, 'TEST 3.1: LittleCMS abre o perfil ICC CGATS TR 001 SWOP CMYK em memória nativa');
   lcms.cmsCloseProfile(cmykHandle);
 
   // 4. ICC inválido é rejeitado
@@ -234,6 +234,73 @@ export async function runColorTransformTests() {
     directWasmBinary.length > 100000 && directWasmBinary[0] === 0x00 && directWasmBinary[1] === 0x61 && directWasmBinary[2] === 0x73 && directWasmBinary[3] === 0x6d,
     'TEST 14: Binário WASM contém cabeçalho WebAssembly autêntico (\\0asm) e tamanho válido'
   );
+
+  // 15. Regressão estrita de todos os perfis ICC distribuídos no ArteCheck
+  const iccDir = path.resolve('server/iccs');
+  const distributedIccs = fs.readdirSync(iccDir).filter(f => f.endsWith('.icc') || f.endsWith('.icm'));
+  for (const iccFName of distributedIccs) {
+    const fullPath = path.join(iccDir, iccFName);
+    const bytes = fs.readFileSync(fullPath);
+    const validation = validateIccProfile(bytes);
+    assert(
+      validation.valid === true,
+      `TEST 15 [${iccFName}]: Header ICC e estrutura íntegros (${bytes.length} bytes)`
+    );
+    assert(
+      validation.header?.magicSignature === 'acsp',
+      `TEST 15 [${iccFName}]: Assinatura mágica "acsp" no offset 36`
+    );
+    assert(
+      validation.header?.profileSize === bytes.length,
+      `TEST 15 [${iccFName}]: Tamanho declarado no header (${validation.header?.profileSize}) é idêntico ao tamanho do arquivo (${bytes.length})`
+    );
+    const handle = lcms.cmsOpenProfileFromMem(bytes, bytes.length);
+    assert(
+      handle > 0,
+      `TEST 15 [${iccFName}]: LittleCMS cmsOpenProfileFromMem abre com sucesso`
+    );
+    lcms.cmsCloseProfile(handle);
+  }
+
+  // 16. Teste de Identidade Estrita dos Presets Oficiais (SWOP & sRGB)
+  const { computeSha256, PRESET_ICC_PROFILES } = await import('../src/domain/colorManagement');
+  const expectedPresetSpecs: Record<string, { expectedSha256: string; colorSpace: string; components: number; expectedFile: string }> = {
+    cgats_tr_001_swop: {
+      expectedSha256: '35f401731df11a4eba3502af632e51d68bc394bcb7d34632a331c1ba3f4a0bf6',
+      colorSpace: 'CMYK',
+      components: 4,
+      expectedFile: 'cgats_tr001_swop.icc',
+    },
+    srgb: {
+      expectedSha256: 'eddaf344b5edea13269e0d20055f335610e5e0b6e33e6e536f2701bc18c5f7d5',
+      colorSpace: 'RGB',
+      components: 3,
+      expectedFile: 'srgb.icc',
+    },
+  };
+
+  for (const [presetId, spec] of Object.entries(expectedPresetSpecs)) {
+    const preset = PRESET_ICC_PROFILES[presetId];
+    assert(Boolean(preset), `TEST 16 [${presetId}]: Preset existe em PRESET_ICC_PROFILES`);
+    assert(
+      preset.bundledPath?.includes(spec.expectedFile) === true,
+      `TEST 16 [${presetId}]: bundledPath aponta exclusivamente para ${spec.expectedFile} (não aponta para perfil divergente)`
+    );
+    const fileBytes = fs.readFileSync(path.resolve(process.cwd(), preset.bundledPath!));
+    const calculatedHash = computeSha256(fileBytes);
+    assert(
+      calculatedHash === spec.expectedSha256,
+      `TEST 16 [${presetId}]: SHA-256 verificado byte-a-byte (${calculatedHash.slice(0, 12)}...)`
+    );
+    const valid = validateIccProfile(fileBytes);
+    assert(
+      valid.valid === true && valid.colorSpace === spec.colorSpace && valid.components === spec.components,
+      `TEST 16 [${presetId}]: Validação semântica e estrutural (${valid.colorSpace} / ${valid.components} canais / magic acsp)`
+    );
+    const h = lcms.cmsOpenProfileFromMem(fileBytes, fileBytes.length);
+    assert(h > 0, `TEST 16 [${presetId}]: LittleCMS abre o perfil oficial do preset com sucesso`);
+    lcms.cmsCloseProfile(h);
+  }
 
   console.log(`\nCMM LittleCMS/WASM Suite: ${passed}/${total} testes aprovados.\n`);
 }

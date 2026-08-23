@@ -37,7 +37,7 @@ async function runOutputIntentTests() {
   console.log('================================================================\n');
 
   // Load real ICC profile from bundled path
-  const realIccPath = path.resolve(process.cwd(), 'node_modules/pdfjs-dist/iccs/CGATS001Compat-v2-micro.icc');
+  const realIccPath = path.resolve(process.cwd(), 'server/iccs/cgats_tr001_swop.icc');
   const realIccBytes = fs.readFileSync(realIccPath);
 
   // 1. ICC válido é aceito

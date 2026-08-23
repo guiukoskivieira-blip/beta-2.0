@@ -18,7 +18,7 @@ type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error'
 export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis, profile, originalFile }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [destinationIccPresetId, setDestinationIccPresetId] = useState<string>('default_cmyk');
+  const [destinationIccPresetId, setDestinationIccPresetId] = useState<string>('cgats_tr_001_swop');
   const [renderingIntent, setRenderingIntent] = useState<RenderingIntent>('RelativeColorimetric');
   const [allowFallbackSrgb, setAllowFallbackSrgb] = useState<boolean>(true);
   const [fixedPdfBlob, setFixedPdfBlob] = useState<Blob | null>(null);
@@ -276,8 +276,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
                 onChange={(e) => setDestinationIccPresetId(e.target.value)}
                 className="w-full bg-[#16202E] border border-[#243244] text-white text-xs rounded-lg p-2.5 focus:outline-none focus:border-[#007BFF]"
               >
-                <option value="default_cmyk">Padrão ArteCheck (CGATS TR 001 SWOP)</option>
-                <option value="cgats_tr_001_swop">CGATS TR 001 (SWOP CMYK Oficial)</option>
+                <option value="cgats_tr_001_swop">CGATS TR 001 / U.S. Web Coated (SWOP) [Padrão]</option>
                 <option value="fogra39">Coated FOGRA39 (ISO 12647-2)</option>
                 <option value="iso_coated_v2">ISO Coated v2 300% (ECI)</option>
               </select>

@@ -1309,7 +1309,7 @@ async function startServer() {
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
 
     const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
-    const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "default_cmyk";
+    const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
     const renderingIntent = typeof req.body?.renderingIntent === "string" ? req.body.renderingIntent : "RelativeColorimetric";
     const allowFallbackSrgb = req.body?.allowFallbackSrgb === "true" || req.body?.allowFallbackSrgb === true;
 

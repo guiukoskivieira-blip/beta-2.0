@@ -66,23 +66,21 @@ export function resolveIccBytes(
     return iccBytes instanceof Uint8Array ? iccBytes : new Uint8Array(iccBytes);
   }
 
-  if (presetId) {
-    const preset = PRESET_ICC_PROFILES[presetId];
-    if (preset?.bundledPath) {
-      const candidates = [
-        path.resolve(process.cwd(), preset.bundledPath),
-        path.resolve(process.cwd(), 'server/iccs/cgats_tr001_swop.icc'),
-        path.resolve(process.cwd(), 'node_modules/pdfjs-dist/iccs/CGATS001Compat-v2-micro.icc'),
-      ];
-      for (const p of candidates) {
-        if (fs.existsSync(p)) {
-          try {
-            const buf = fs.readFileSync(p);
-            return new Uint8Array(buf);
-          } catch {
-            // continue trying
-          }
-        }
+  const targetPreset = presetId || 'cgats_tr_001_swop';
+  const preset = PRESET_ICC_PROFILES[targetPreset];
+  const candidates = [
+    preset?.bundledPath ? path.resolve(process.cwd(), preset.bundledPath) : null,
+    path.resolve(process.cwd(), 'dist/iccs/cgats_tr001_swop.icc'),
+    path.resolve(process.cwd(), 'server/iccs/cgats_tr001_swop.icc'),
+  ].filter(Boolean) as string[];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      try {
+        const buf = fs.readFileSync(p);
+        return new Uint8Array(buf);
+      } catch {
+        // continue trying
       }
     }
   }
