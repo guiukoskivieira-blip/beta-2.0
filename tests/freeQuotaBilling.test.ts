@@ -77,9 +77,9 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     assert.match(serverSrc, /status:\s*['"]active['"]/);
   });
 
-  it('6. Free real grava uso em usage_records sem violar subscription_id NOT NULL', () => {
-    // Para plano Free virtual, grava em usage_records com chave (user_id, period)
-    assert.match(serverSrc, /admin\.from\('usage_records'\)\.upsert/);
+  it('6. Free real grava uso em analyses sem violar subscription_id NOT NULL', () => {
+    // Para plano Free virtual, grava em analyses
+    assert.match(serverSrc, /admin\.from\('analyses'\)\.insert/);
     // Para plano pago, grava em analysis_usage_events com subscription_id
     assert.match(serverSrc, /admin\.from\('analysis_usage_events'\)\.upsert/);
   });

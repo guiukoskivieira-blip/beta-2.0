@@ -150,18 +150,18 @@ async function getSubscriptionUsage(userId: string) {
 
   const limit = BILLING_PLAN_LIMITS.free || 15;
 
-  const { data: usageRec, error: usageError } = await admin
-    .from('usage_records')
-    .select('analyses')
+  const { count, error: usageError } = await admin
+    .from('analyses')
+    .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .eq('period', periodKey)
-    .maybeSingle();
+    .gte('created_at', periodStart)
+    .lt('created_at', periodEnd);
 
   if (usageError) {
     throw new Error(`Erro ao consultar uso do plano gratuito: ${usageError.message}`);
   }
 
-  const used = usageRec?.analyses || 0;
+  const used = count || 0;
   const virtualFreeSubscription = {
     id: `free_${userId}`,
     user_id: userId,
@@ -196,27 +196,17 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
   if (!state || state.remaining <= 0) return;
 
   if (state.isFree) {
-    // Para plano Free sem subscription física, registra uso em usage_records sem violar constraints
-    const periodKey = `free_${state.subscription.current_period_start.slice(0, 10)}`;
-    const { data: existing } = await admin
-      .from('usage_records')
-      .select('analyses, bytes_uploaded')
-      .eq('user_id', userId)
-      .eq('period', periodKey)
-      .maybeSingle();
-
-    const currentAnalyses = existing?.analyses || 0;
-    const currentBytes = Number(existing?.bytes_uploaded || 0);
-
-    const { error } = await admin.from('usage_records').upsert({
+    // Para plano Free sem subscription física, registra na tabela base analyses
+    const { error } = await admin.from('analyses').insert({
+      id: analysisId,
       user_id: userId,
       organization_id: state.subscription.organization_id || null,
-      period: periodKey,
-      analyses: currentAnalyses + 1,
-      bytes_uploaded: currentBytes + Math.max(0, uploadBytes || 0),
-      updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'user_id,period',
+      file_name: 'analysis.pdf',
+      score: 100,
+      error_count: 0,
+      warning_count: 0,
+      approved_count: 0,
+      created_at: new Date().toISOString(),
     });
 
     if (error) {
