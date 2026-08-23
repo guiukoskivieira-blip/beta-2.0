@@ -7,7 +7,10 @@ import type {
   PdfImageOccurrence,
   PdfColorOccurrence,
   PdfBoxInfo,
+  PdfOutputIntent,
+  PdfIccProfileInfo,
 } from '../src/types';
+import { validateIccProfile } from '../src/domain/colorManagement';
 
 export class DiagnosticTracker {
   private stages: Record<string, { start: number; end?: number; durationMs: number; metadata?: any }> = {};
@@ -521,11 +524,110 @@ export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumen
   const creationDate = pdfDoc.getCreationDate()?.toISOString();
   const modDate = pdfDoc.getModificationDate()?.toISOString();
 
+  // Parse OutputIntents from Catalog
+  const outputIntents: PdfOutputIntent[] = [];
+  const iccProfiles: PdfIccProfileInfo[] = [];
+
+  const catalog = pdfDoc.catalog;
+  const catalogOutputIntentsRef = catalog.get(PDFName.of('OutputIntents'));
+  const catalogOutputIntents = catalogOutputIntentsRef ? pdfDoc.context.lookup(catalogOutputIntentsRef) : undefined;
+
+  if (catalogOutputIntents instanceof PDFArray) {
+    for (let oIdx = 0; oIdx < catalogOutputIntents.size(); oIdx++) {
+      const intentItemRef = catalogOutputIntents.get(oIdx);
+      const intentDict = pdfDoc.context.lookup(intentItemRef);
+      if (intentDict instanceof PDFDict) {
+        const typeStr = intentDict.get(PDFName.of('Type'))?.toString()?.replace(/^\//, '') || 'OutputIntent';
+        const subtypeStr = intentDict.get(PDFName.of('S'))?.toString()?.replace(/^\//, '') || '';
+
+        const rawIdent = intentDict.get(PDFName.of('OutputConditionIdentifier'));
+        const outputConditionIdentifier = rawIdent
+          ? (typeof (rawIdent as any).value === 'string'
+              ? (rawIdent as any).value
+              : (rawIdent as any).asString?.() || rawIdent.toString().replace(/^[\/()]/, '').replace(/\)$/, ''))
+          : '';
+
+        const rawCond = intentDict.get(PDFName.of('OutputCondition'));
+        const outputCondition = rawCond
+          ? (typeof (rawCond as any).value === 'string'
+              ? (rawCond as any).value
+              : (rawCond as any).asString?.() || rawCond.toString().replace(/^[\/()]/, '').replace(/\)$/, ''))
+          : undefined;
+
+        const rawReg = intentDict.get(PDFName.of('RegistryName'));
+        const registryName = rawReg
+          ? (typeof (rawReg as any).value === 'string'
+              ? (rawReg as any).value
+              : (rawReg as any).asString?.() || rawReg.toString().replace(/^[\/()]/, '').replace(/\)$/, ''))
+          : undefined;
+
+        const rawInfo = intentDict.get(PDFName.of('Info'));
+        const info = rawInfo
+          ? (typeof (rawInfo as any).value === 'string'
+              ? (rawInfo as any).value
+              : (rawInfo as any).asString?.() || rawInfo.toString().replace(/^[\/()]/, '').replace(/\)$/, ''))
+          : undefined;
+
+        let destProfileInfo: PdfIccProfileInfo | undefined = undefined;
+        const destProfileRef = intentDict.get(PDFName.of('DestOutputProfile'));
+        if (destProfileRef) {
+          const profileStream = pdfDoc.context.lookup(destProfileRef);
+          if (profileStream) {
+            const streamDict = (profileStream as any).dict || profileStream;
+            const nVal = streamDict.get(PDFName.of('N'))?.asNumber?.() || 4;
+            const alternateVal = streamDict.get(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
+            const decodedBytes = decodeStream(profileStream);
+
+            if (decodedBytes && decodedBytes.length > 0) {
+              const validation = validateIccProfile(decodedBytes);
+              destProfileInfo = {
+                id: `icc_output_${oIdx + 1}`,
+                name: outputConditionIdentifier || validation.header?.colorSpace || 'ICC Profile',
+                components: validation.valid ? validation.components : nVal,
+                colorSpace: validation.valid ? validation.colorSpace : (alternateVal?.replace('Device', '') || 'CMYK'),
+                byteLength: decodedBytes.length,
+                sha256: validation.sha256,
+                shortSha256: validation.shortSha256,
+                isValidIcc: validation.valid,
+                version: validation.header?.version,
+                deviceClass: validation.header?.deviceClass,
+                magicSignature: validation.header?.magicSignature,
+                alternate: alternateVal,
+              };
+              iccProfiles.push(destProfileInfo);
+            } else {
+              destProfileInfo = {
+                id: `icc_output_${oIdx + 1}`,
+                name: outputConditionIdentifier || 'ICC Profile',
+                components: nVal,
+                colorSpace: alternateVal?.replace('Device', '') || 'CMYK',
+                byteLength: 0,
+                isValidIcc: false,
+                alternate: alternateVal,
+              };
+              iccProfiles.push(destProfileInfo);
+            }
+          }
+        }
+
+        outputIntents.push({
+          type: typeStr,
+          subtype: subtypeStr,
+          outputConditionIdentifier,
+          outputCondition,
+          registryName,
+          info,
+          destOutputProfile: destProfileInfo,
+          hasDestOutputProfile: Boolean(destProfileInfo && destProfileInfo.byteLength > 0 && destProfileInfo.isValidIcc),
+        });
+      }
+    }
+  }
+
   // Check PDF/X in root catalog / info dict
   let isDeclaredPdfX = false;
   let declaredVersion: string | undefined;
 
-  const catalog = pdfDoc.catalog;
   const infoDict = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Info);
   if (infoDict instanceof PDFDict) {
     const gtsVersion = infoDict.get(PDFName.of('GTS_PDFXVersion'))?.toString();
@@ -536,10 +638,14 @@ export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumen
     }
   }
 
+  const gtsIntent = outputIntents.find((oi) => oi.subtype === 'GTS_PDFX' || oi.type === 'OutputIntent');
+
   return {
     pageCount,
     pages,
     fonts: Array.from(fontsMap.values()),
+    outputIntents,
+    iccProfiles,
     colorSummary: {
       hasRgb: hasGlobalRgb,
       hasCmyk: hasGlobalCmyk || !hasGlobalRgb,
@@ -550,6 +656,9 @@ export async function extractPdfStructure(pdfBuffer: Buffer): Promise<PdfDocumen
       isDeclaredPdfX,
       declaredVersion,
       recognizedStandard: declaredVersion || (isDeclaredPdfX ? 'PDF/X' : undefined),
+      outputIntentSubtype: gtsIntent?.subtype,
+      outputConditionIdentifier: gtsIntent?.outputConditionIdentifier,
+      hasDestOutputProfile: gtsIntent?.hasDestOutputProfile,
     },
     metadata: {
       title,

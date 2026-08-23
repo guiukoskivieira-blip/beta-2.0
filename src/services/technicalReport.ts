@@ -28,6 +28,7 @@ export interface AnalysisSnapshot {
   warningCount: number;
   approvedCount: number;
   undeterminedCount: number;
+  reviewExplanation?: string;
   rules: SnapshotRuleItem[];
   documentSummary: {
     pageCount: number;
@@ -37,6 +38,8 @@ export interface AnalysisSnapshot {
     hasSpotColors: boolean;
     familiesDetected: string[];
     isDeclaredPdfX: boolean;
+    declaredPdfX: string | null;
+    verifiedPdfX: boolean;
     pdfxStandard?: string;
   };
 }
@@ -81,6 +84,8 @@ export interface TechnicalReportData {
   worsenedCount: number;
   newIssueCount: number;
   remainingIssuesCount: number;
+  undeterminedCount: number;
+  reviewExplanation?: string;
   manualInterventions: ManualInterventionItem[];
   initialScore: number;
   finalScore: number;
@@ -104,7 +109,7 @@ export function createAnalysisSnapshot(
     ? `${firstPage.widthMm.toFixed(1)} × ${firstPage.heightMm.toFixed(1)} mm (${pages.length} pág${pages.length > 1 ? 's' : ''})`
     : `${pages.length} páginas`;
 
-  const snapshotRules: SnapshotRuleItem[] = (analysis.ruleResults.results || []).map((r) => ({
+  const snapshotRules: SnapshotRuleItem[] = (analysis.ruleResults?.results || []).map((r) => ({
     ruleId: r.ruleId,
     title: r.title,
     category: r.category,
@@ -114,6 +119,34 @@ export function createAnalysisSnapshot(
     recommendation: r.recommendation,
   }));
 
+  const declaredVersion = analysis.document?.pdfxInfo?.declaredVersion || analysis.document?.pdfxInfo?.recognizedStandard;
+  const isDeclared = Boolean(analysis.document?.pdfxInfo?.isDeclaredPdfX);
+  const declaredPdfX = isDeclared ? (declaredVersion || 'PDF/X Declarado') : null;
+  // Distinção conceitual estrita: metadado declarado NÃO equivale a validação/certificação normativa
+  const verifiedPdfX = false;
+
+  const undeterminedCount = analysis.ruleResults?.undeterminedCount ?? 
+    snapshotRules.filter((r) => r.status === 'undetermined').length;
+  const warningCount = analysis.ruleResults?.warningCount ?? 
+    snapshotRules.filter((r) => r.status === 'warning').length;
+  const errorCount = analysis.ruleResults?.errorCount ?? 
+    snapshotRules.filter((r) => r.status === 'error').length;
+  const approvedCount = analysis.ruleResults?.approvedCount ?? 
+    snapshotRules.filter((r) => r.status === 'approved').length;
+
+  const classification = analysis.ruleResults?.scoreSummary?.classification || (errorCount > 0 ? 'blocked' : (warningCount > 0 || undeterminedCount > 0 ? 'review' : 'approved'));
+
+  let reviewExplanation: string | undefined;
+  if (classification === 'review') {
+    if (undeterminedCount > 0 && warningCount === 0 && errorCount === 0) {
+      reviewExplanation = 'Status REVIEW — existem verificações que não puderam ser determinadas de forma conclusiva.';
+    } else if (undeterminedCount > 0) {
+      reviewExplanation = `Status REVIEW — existem verificações indeterminadas (${undeterminedCount}) e alertas técnicos.`;
+    } else {
+      reviewExplanation = 'Status REVIEW — o arquivo contém alertas técnicos que requerem atenção antes da impressão.';
+    }
+  }
+
   const snapshot: AnalysisSnapshot = {
     id: analysis.id,
     createdAt: analysis.createdAt,
@@ -122,13 +155,14 @@ export function createAnalysisSnapshot(
     profileId: profile.id,
     profileName: profile.name,
     profileCategory: profile.category,
-    score: analysis.ruleResults.scoreSummary.score,
-    classification: analysis.ruleResults.scoreSummary.classification,
-    label: analysis.ruleResults.scoreSummary.label,
-    errorCount: analysis.ruleResults.errorCount,
-    warningCount: analysis.ruleResults.warningCount,
-    approvedCount: analysis.ruleResults.approvedCount,
-    undeterminedCount: analysis.ruleResults.undeterminedCount,
+    score: analysis.ruleResults?.scoreSummary?.score ?? 0,
+    classification,
+    label: analysis.ruleResults?.scoreSummary?.label || '',
+    errorCount,
+    warningCount,
+    approvedCount,
+    undeterminedCount,
+    reviewExplanation,
     rules: snapshotRules,
     documentSummary: {
       pageCount: analysis.document?.pageCount || pages.length,
@@ -137,8 +171,10 @@ export function createAnalysisSnapshot(
       hasCmyk: analysis.document?.colorSummary?.hasCmyk ?? false,
       hasSpotColors: analysis.document?.colorSummary?.hasSpotColors ?? false,
       familiesDetected: [...(analysis.document?.colorSummary?.familiesDetected || [])],
-      isDeclaredPdfX: analysis.document?.pdfxInfo?.isDeclaredPdfX ?? false,
-      pdfxStandard: analysis.document?.pdfxInfo?.recognizedStandard || analysis.document?.pdfxInfo?.declaredVersion,
+      isDeclaredPdfX: isDeclared,
+      declaredPdfX,
+      verifiedPdfX,
+      pdfxStandard: declaredVersion,
     },
   };
 
@@ -322,6 +358,8 @@ export function buildTechnicalReport(
     worsenedCount,
     newIssueCount,
     remainingIssuesCount,
+    undeterminedCount: activeSnapshot.undeterminedCount,
+    reviewExplanation: activeSnapshot.reviewExplanation,
     manualInterventions,
     initialScore: initialSnapshot.score,
     finalScore: activeSnapshot.score,

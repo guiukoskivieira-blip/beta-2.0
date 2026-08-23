@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes } from "./server/pdfExtractor";
 import { checkTrimBleedEligibility, applyTrimBleedFix } from "./src/services/trimBleedFix";
+import { applyOutputIntentFix } from "./src/services/outputIntentFix";
 import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE } from "./src/utils/productionProfiles";
 import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
@@ -1116,6 +1117,85 @@ async function startServer() {
         backendVersion: "trim-fix-xref-v2",
         serializationMode: "traditional-xref",
         error: error?.message || "Falha ao aplicar correção TrimBox/BleedBox.",
+      });
+    }
+  });
+
+  // POST /api/fix-output-intent - Configure OutputIntent and real ICC profile on a copy of the PDF
+  app.post("/api/fix-output-intent", upload.fields([{ name: 'file', maxCount: 1 }, { name: 'iccFile', maxCount: 1 }]), async (req: Request, res: Response) => {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const file = files?.file?.[0] || (req as any).file;
+    const iccFile = files?.iccFile?.[0];
+
+    if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
+
+    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const iccProfileId = typeof req.body?.iccProfileId === "string" ? req.body.iccProfileId : "cgats_tr_001_swop";
+    const outputConditionIdentifier = typeof req.body?.outputConditionIdentifier === "string" ? req.body.outputConditionIdentifier : "CGATS TR 001";
+    const targetColorSpace = (typeof req.body?.targetColorSpace === "string" ? req.body.targetColorSpace : "CMYK") as any;
+    const registryName = typeof req.body?.registryName === "string" ? req.body.registryName : undefined;
+    const info = typeof req.body?.info === "string" ? req.body.info : undefined;
+
+    const profileMap: Record<string, ProductionProfile> = {
+      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
+      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
+      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
+    };
+    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+
+    try {
+      if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({ success: false, error: "Arquivo sem assinatura PDF válida." });
+      }
+
+      res.setHeader("X-ArteCheck-Backend-Version", "output-intent-icc-v1");
+
+      const contract = {
+        iccProfileId,
+        outputConditionIdentifier,
+        targetColorSpace,
+        registryName,
+        info,
+      };
+
+      const iccBytes = iccFile?.buffer || null;
+      const result = await applyOutputIntentFix(file.buffer, contract, iccBytes, profile);
+
+      if (!result.success || !result.pdfBytes) {
+        return res.json({
+          success: false,
+          actionResult: result.actionResult,
+          contract: result.contract,
+          audit: result.audit,
+          structuralValidation: result.structuralValidation,
+          revalidation: result.revalidation,
+          backendVersion: "output-intent-icc-v1",
+          serializationMode: "traditional-xref",
+          error: result.error,
+        });
+      }
+
+      const fixedBuffer = Buffer.from(result.pdfBytes);
+      const base64 = fixedBuffer.toString("base64");
+
+      return res.json({
+        success: true,
+        actionResult: result.actionResult,
+        contract: result.contract,
+        fixedPdfBase64: base64,
+        fixedPdfSize: fixedBuffer.length,
+        audit: result.audit,
+        structuralValidation: result.structuralValidation,
+        revalidation: result.revalidation,
+        backendVersion: "output-intent-icc-v1",
+        serializationMode: "traditional-xref",
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        backendVersion: "output-intent-icc-v1",
+        serializationMode: "traditional-xref",
+        error: error?.message || "Falha ao configurar Output Intent.",
       });
     }
   });

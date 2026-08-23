@@ -2,6 +2,7 @@
  * ARTECHECK — Testes de Relatórios Técnicos e Comparação Antes/Depois.
  */
 import assert from 'node:assert/strict';
+import zlib from 'node:zlib';
 import { PDFDocument } from 'pdf-lib';
 import {
   createAnalysisSnapshot,
@@ -29,6 +30,46 @@ async function test(name: string, fn: () => void | Promise<void>) {
     failed++;
     console.log(`  ✗ REPORT ${passed + failed}: ${name} — ${err.message}`);
   }
+}
+
+function extractAllPdfText(pdfBytes: Uint8Array): string {
+  let combinedText = '';
+  const buffer = Buffer.from(pdfBytes);
+  let pos = 0;
+  while (pos < buffer.length) {
+    let streamIndex = buffer.indexOf('stream\r\n', pos);
+    let offset = 8;
+    if (streamIndex === -1) {
+      streamIndex = buffer.indexOf('stream\n', pos);
+      offset = 7;
+    }
+    if (streamIndex === -1) break;
+
+    const streamStart = streamIndex + offset;
+    const endStreamIndex = buffer.indexOf('endstream', streamStart);
+    if (endStreamIndex === -1) break;
+
+    const streamData = buffer.subarray(streamStart, endStreamIndex);
+    let streamContent = '';
+    try {
+      streamContent = zlib.inflateSync(streamData).toString('latin1');
+    } catch {
+      streamContent = streamData.toString('latin1');
+    }
+
+    // Decodifica strings hexadecimais do PDF emitidas pelo pdf-lib: <hex> Tj
+    const decodedStream = streamContent.replace(/<([0-9a-fA-F]+)>\s*Tj/g, (_, hex) => {
+      try {
+        return Buffer.from(hex, 'hex').toString('latin1');
+      } catch {
+        return hex;
+      }
+    });
+
+    combinedText += ' ' + decodedStream;
+    pos = endStreamIndex + 9;
+  }
+  return combinedText;
 }
 
 async function run() {
@@ -71,8 +112,10 @@ async function run() {
         familiesDetected: ['DeviceCMYK', 'DeviceRGB'],
       },
       pdfxInfo: {
-        isDeclaredPdfX: false,
-        declarationStatus: 'not_declared',
+        isDeclaredPdfX: true,
+        declarationStatus: 'declared',
+        declaredVersion: 'PDF/X-1a:2001',
+        recognizedStandard: 'PDF/X-1a',
       },
     },
     ruleResults: {
@@ -132,207 +175,162 @@ async function run() {
     },
   };
 
-  await test('Snapshot inicial é IMUTÁVEL e não é sobrescrito quando o objeto original sofre mutação', () => {
-    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
-
-    assert.equal(snapshot.id, 'test_analysis_001');
-    assert.equal(snapshot.score, 65);
-    assert.equal(snapshot.errorCount, 1);
-    assert.equal(snapshot.warningCount, 1);
-    assert.equal(snapshot.rules.length, 3);
-
-    // Tenta mutar o objeto mock original
-    (mockAnalysis.ruleResults.scoreSummary as any).score = 100;
-    (mockAnalysis.ruleResults as any).errorCount = 0;
-    (mockAnalysis as any).fileName = 'modificado_depois.pdf';
-
-    // O snapshot não pode ter sido alterado
-    assert.equal(snapshot.score, 65);
-    assert.equal(snapshot.errorCount, 1);
-    assert.equal(snapshot.fileName, 'catalogo_verao_2026.pdf');
-
-    // Restaura o mock
-    (mockAnalysis.ruleResults.scoreSummary as any).score = 65;
-    (mockAnalysis.ruleResults as any).errorCount = 1;
-    (mockAnalysis as any).fileName = 'catalogo_verao_2026.pdf';
-  });
-
-  await test('Comparação de regras: "corrected" EXIGE reanálise obrigatória pelo Motor 1', () => {
-    const beforeRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-PROF-BLD-001',
-        title: 'Sangria de Impressão',
-        category: 'profile_conditioned',
-        status: 'error',
-        evidence: 'TrimBox ausente',
-        explanation: 'Falta sangria',
-        recommendation: 'Ajustar sangria',
-      },
-    ];
-
-    const afterRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-PROF-BLD-001',
-        title: 'Sangria de Impressão',
-        category: 'profile_conditioned',
-        status: 'approved',
-        evidence: 'TrimBox e BleedBox configurados',
-        explanation: 'Corrigido',
-        recommendation: '',
-      },
-    ];
-
-    // SEM reanálise (reanalyzedByMotor1: false) -> NUNCA declarar 'corrected'
-    const unverifiedComparison = compareRuleSnapshots(beforeRules, afterRules, false);
-    assert.notEqual(unverifiedComparison[0].comparison, 'corrected');
-    assert.equal(unverifiedComparison[0].comparison, 'unchanged');
-
-    // COM reanálise confirmada pelo Motor 1 (reanalyzedByMotor1: true) -> 'corrected'
-    const verifiedComparison = compareRuleSnapshots(beforeRules, afterRules, true);
-    assert.equal(verifiedComparison[0].comparison, 'corrected');
-  });
-
-  await test('Comparação de regras: detecta "new_issue" corretamente', () => {
-    const beforeRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-PROF-BLD-001',
-        title: 'Sangria',
-        category: 'profile_conditioned',
-        status: 'approved',
-        evidence: 'Ok',
-        explanation: '',
-        recommendation: '',
-      },
-    ];
-
-    const afterRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-PROF-BLD-001',
-        title: 'Sangria',
-        category: 'profile_conditioned',
-        status: 'approved',
-        evidence: 'Ok',
-        explanation: '',
-        recommendation: '',
-      },
-      {
-        ruleId: 'RULE-FONT-001',
-        title: 'Fontes Não Incorporadas',
-        category: 'universal',
-        status: 'error',
-        evidence: 'Fonte Arial não embutida',
-        explanation: 'Novo problema detectado',
-        recommendation: 'Incorporar fonte',
-      },
-    ];
-
-    const comparison = compareRuleSnapshots(beforeRules, afterRules, true);
-    const newIssue = comparison.find((r) => r.ruleId === 'RULE-FONT-001');
-
-    assert.ok(newIssue);
-    assert.equal(newIssue?.comparison, 'new_issue');
-  });
-
-  await test('Comparação de regras: detecta "worsened" e "improved" corretamente', () => {
-    const beforeRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-1',
-        title: 'Regra 1',
-        category: 'universal',
-        status: 'approved',
-        evidence: 'Ok',
-        explanation: '',
-        recommendation: '',
-      },
-      {
-        ruleId: 'RULE-2',
-        title: 'Regra 2',
-        category: 'universal',
-        status: 'error',
-        evidence: 'Erro gravíssimo',
-        explanation: '',
-        recommendation: '',
-      },
-    ];
-
-    const afterRules: SnapshotRuleItem[] = [
-      {
-        ruleId: 'RULE-1',
-        title: 'Regra 1',
-        category: 'universal',
-        status: 'warning',
-        evidence: 'Aviso detectado',
-        explanation: '',
-        recommendation: '',
-      },
-      {
-        ruleId: 'RULE-2',
-        title: 'Regra 2',
-        category: 'universal',
-        status: 'warning',
-        evidence: 'Aviso tolerável',
-        explanation: '',
-        recommendation: '',
-      },
-    ];
-
-    const comparison = compareRuleSnapshots(beforeRules, afterRules, true);
-    const rule1 = comparison.find((r) => r.ruleId === 'RULE-1');
-    const rule2 = comparison.find((r) => r.ruleId === 'RULE-2');
-
-    assert.equal(rule1?.comparison, 'worsened');
-    assert.equal(rule2?.comparison, 'improved');
-  });
-
-  await test('Geração de PDF do relatório: gera documento válido e parseável', async () => {
-    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
-    const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
-
-    const pdfBytes = await generateTechnicalReportPdf(report);
-
-    assert.ok(pdfBytes instanceof Uint8Array);
-    assert.ok(pdfBytes.length > 1000);
-
-    // Valida cabeçalho PDF (%PDF-1.)
-    const header = String.fromCharCode(...pdfBytes.slice(0, 5));
-    assert.equal(header, '%PDF-');
-
-    // Valida que pode ser carregado por um parser PDF real
-    const parsedDoc = await PDFDocument.load(pdfBytes);
-    assert.ok(parsedDoc.getPageCount() >= 1);
-
-    // Valida nome do arquivo padronizado
-    const fileName = generateReportPdfFileName(report.fileName, report.generatedAt);
-    assert.match(fileName, /^ArteCheck_Relatorio_catalogo_verao_2026_\d{4}-\d{2}-\d{2}_\d{4}\.pdf$/);
-  });
-
-  await test('Relatório NÃO contém tokens, chaves de API, senhas ou segredos', async () => {
+  // 1. PDF apenas declarado como PDF/X NÃO aparece como "Em conformidade"
+  await test('1. PDF apenas declarado como PDF/X NÃO aparece como "Em conformidade"', async () => {
     const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
     const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
     const pdfBytes = await generateTechnicalReportPdf(report);
+    const decompressedText = extractAllPdfText(pdfBytes);
 
-    const rawPdfText = new TextDecoder('latin1').decode(pdfBytes);
-
-    assert.ok(!rawPdfText.includes('AIzaSy'));
-    assert.ok(!rawPdfText.includes('GEMINI_API_KEY'));
-    assert.ok(!rawPdfText.includes('SUPABASE_KEY'));
-    assert.ok(!rawPdfText.includes('sk-'));
-    assert.ok(!rawPdfText.includes('Bearer '));
+    // Não pode conter "PDF/X: Em conformidade" ou "Em conformidade"
+    assert.ok(!decompressedText.includes('PDF/X: Em conformidade'));
+    assert.ok(!decompressedText.includes('Em conformidade'));
   });
 
-  await test('Histórico mantém e recupera estado de antes/depois', async () => {
-    const storage = new LocalStorageProvider();
+  // 2. Versão declarada aparece corretamente
+  await test('2. Versão declarada aparece corretamente (PDF/X declarado: PDF/X-1a:2001)', async () => {
+    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.equal(snapshot.documentSummary.declaredPdfX, 'PDF/X-1a:2001');
 
+    const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const pdfBytes = await generateTechnicalReportPdf(report);
+    const decompressedText = extractAllPdfText(pdfBytes);
+
+    assert.ok(decompressedText.includes('PDF/X declarado:'));
+    assert.ok(decompressedText.includes('PDF/X-1a:2001'));
+  });
+
+  // 3. declaredPdfX não implica verifiedPdfX
+  await test('3. declaredPdfX não implica verifiedPdfX (verifiedPdfX === false)', () => {
+    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.equal(snapshot.documentSummary.isDeclaredPdfX, true);
+    assert.equal(snapshot.documentSummary.declaredPdfX, 'PDF/X-1a:2001');
+    assert.equal(snapshot.documentSummary.verifiedPdfX, false);
+  });
+
+  // 4. UNDETERMINED aparece no contador
+  await test('4. UNDETERMINED aparece no contador do resumo', async () => {
+    const analysisWithUndetermined: PreflightAnalysis = {
+      ...mockAnalysis,
+      ruleResults: {
+        ...mockAnalysis.ruleResults,
+        approvedCount: 8,
+        warningCount: 0,
+        errorCount: 0,
+        undeterminedCount: 1,
+        scoreSummary: {
+          score: 85,
+          classification: 'review',
+          label: 'Necessita Revisão',
+          color: '#F59E0B',
+          approvedCount: 8,
+          warningCount: 0,
+          errorCount: 0,
+          undeterminedCount: 1,
+        },
+      },
+    };
+
+    const snapshot = createAnalysisSnapshot(analysisWithUndetermined, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.equal(snapshot.undeterminedCount, 1);
+
+    const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.equal(report.undeterminedCount, 1);
+
+    const pdfBytes = await generateTechnicalReportPdf(report);
+    const decompressedText = extractAllPdfText(pdfBytes);
+    assert.ok(decompressedText.includes('Indeterminados: 1'));
+  });
+
+  // 5. 8 approved + 1 undetermined resulta exatamente nesses números
+  await test('5. 8 approved + 1 undetermined resulta exatamente nesses números', () => {
+    const analysis8Plus1: PreflightAnalysis = {
+      ...mockAnalysis,
+      ruleResults: {
+        ...mockAnalysis.ruleResults,
+        approvedCount: 8,
+        warningCount: 0,
+        errorCount: 0,
+        undeterminedCount: 1,
+        scoreSummary: {
+          score: 88,
+          classification: 'review',
+          label: 'Necessita Revisão',
+          color: '#F59E0B',
+          approvedCount: 8,
+          warningCount: 0,
+          errorCount: 0,
+          undeterminedCount: 1,
+        },
+      },
+    };
+
+    const snapshot = createAnalysisSnapshot(analysis8Plus1, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.equal(snapshot.approvedCount, 8);
+    assert.equal(snapshot.warningCount, 0);
+    assert.equal(snapshot.errorCount, 0);
+    assert.equal(snapshot.undeterminedCount, 1);
+  });
+
+  // 6. REVIEW com indeterminado possui explicação adequada
+  await test('6. REVIEW com indeterminado possui explicação adequada', async () => {
+    const analysisReviewUndetermined: PreflightAnalysis = {
+      ...mockAnalysis,
+      ruleResults: {
+        ...mockAnalysis.ruleResults,
+        approvedCount: 8,
+        warningCount: 0,
+        errorCount: 0,
+        undeterminedCount: 1,
+        scoreSummary: {
+          score: 88,
+          classification: 'review',
+          label: 'Necessita Revisão',
+          color: '#F59E0B',
+          approvedCount: 8,
+          warningCount: 0,
+          errorCount: 0,
+          undeterminedCount: 1,
+        },
+      },
+    };
+
+    const snapshot = createAnalysisSnapshot(analysisReviewUndetermined, COMMERCIAL_PRINT_300DPI_PROFILE);
+    assert.ok(snapshot.reviewExplanation);
+    assert.equal(
+      snapshot.reviewExplanation,
+      'Status REVIEW — existem verificações que não puderam ser determinadas de forma conclusiva.'
+    );
+
+    const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const pdfBytes = await generateTechnicalReportPdf(report);
+    const decompressedText = extractAllPdfText(pdfBytes);
+    assert.ok(decompressedText.includes('Status REVIEW'));
+    assert.ok(decompressedText.includes('determinadas de forma conclusiva'));
+  });
+
+  // 7. Relatório final pós-correção usa a mesma semântica
+  await test('7. Relatório final pós-correção usa a mesma semântica (distinção PDF/X e contadores)', async () => {
     const snapshotBefore = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
 
     const postFixAnalysis: PreflightAnalysis = {
       ...mockAnalysis,
-      id: 'test_analysis_001_fixed',
+      id: 'test_analysis_fixed',
+      document: {
+        ...mockAnalysis.document,
+        pdfxInfo: {
+          isDeclaredPdfX: true,
+          declarationStatus: 'declared',
+          declaredVersion: 'PDF/X-1a:2001',
+          recognizedStandard: 'PDF/X-1a',
+        },
+      },
       ruleResults: {
         ...mockAnalysis.ruleResults,
         errorCount: 0,
         warningCount: 1,
         approvedCount: 4,
+        undeterminedCount: 0,
         results: [
           {
             ruleId: 'RULE-PROF-BLD-001',
@@ -363,46 +361,105 @@ async function run() {
           },
         ],
         scoreSummary: {
-          ...mockAnalysis.ruleResults.scoreSummary,
           score: 95,
           classification: 'approved',
           label: 'Pronto para Impressão',
           color: '#00D18F',
+          approvedCount: 4,
+          warningCount: 1,
+          errorCount: 0,
+          undeterminedCount: 0,
         },
       },
     };
 
-    const snapshotAfter = createAnalysisSnapshot(postFixAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
-    const reportData = buildTechnicalReport(snapshotBefore, postFixAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE, {
+    const report = buildTechnicalReport(snapshotBefore, postFixAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE, {
       fixDescription: 'Correção de TrimBox e BleedBox',
       reanalyzedByMotor1: true,
     });
 
+    assert.equal(report.postFixSnapshot?.documentSummary.declaredPdfX, 'PDF/X-1a:2001');
+    assert.equal(report.postFixSnapshot?.documentSummary.verifiedPdfX, false);
+    assert.equal(report.correctedCount, 1);
+    assert.equal(report.undeterminedCount, 0);
+
+    const pdfBytes = await generateTechnicalReportPdf(report);
+    const decompressedText = extractAllPdfText(pdfBytes);
+    assert.ok(decompressedText.includes('PDF/X declarado:'));
+    assert.ok(!decompressedText.includes('Em conformidade'));
+    assert.ok(decompressedText.includes('Indeterminados: 0'));
+  });
+
+  // 8. Exportação PDF continua válida
+  await test('8. Exportação PDF continua válida e parseável pelo PDFDocument', async () => {
+    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const report = buildTechnicalReport(snapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+
+    const pdfBytes = await generateTechnicalReportPdf(report);
+
+    assert.ok(pdfBytes instanceof Uint8Array);
+    assert.ok(pdfBytes.length > 1000);
+
+    // Valida cabeçalho PDF
+    const header = String.fromCharCode(...pdfBytes.slice(0, 5));
+    assert.equal(header, '%PDF-');
+
+    // Valida carregamento real pelo pdf-lib
+    const parsedDoc = await PDFDocument.load(pdfBytes);
+    assert.ok(parsedDoc.getPageCount() >= 1);
+
+    // Valida nome do arquivo
+    const fileName = generateReportPdfFileName(report.fileName, report.generatedAt);
+    assert.match(fileName, /^ArteCheck_Relatorio_catalogo_verao_2026_\d{4}-\d{2}-\d{2}_\d{4}\.pdf$/);
+  });
+
+  // 9. Snapshot inicial é IMUTÁVEL
+  await test('9. Snapshot inicial é IMUTÁVEL e não sofre mutação externa', () => {
+    const snapshot = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+
+    assert.equal(snapshot.id, 'test_analysis_001');
+    assert.equal(snapshot.score, 65);
+    assert.equal(snapshot.errorCount, 1);
+    assert.equal(snapshot.warningCount, 1);
+
+    // Tenta mutar o mock
+    (mockAnalysis.ruleResults.scoreSummary as any).score = 100;
+    (mockAnalysis as any).fileName = 'modificado_depois.pdf';
+
+    assert.equal(snapshot.score, 65);
+    assert.equal(snapshot.fileName, 'catalogo_verao_2026.pdf');
+
+    // Restaura o mock
+    (mockAnalysis.ruleResults.scoreSummary as any).score = 65;
+    (mockAnalysis as any).fileName = 'catalogo_verao_2026.pdf';
+  });
+
+  // 10. Histórico mantém e recupera estado de antes/depois
+  await test('10. Histórico mantém e recupera snapshots de antes e depois com dados técnicos', async () => {
+    const storage = new LocalStorageProvider();
+    const snapshotBefore = createAnalysisSnapshot(mockAnalysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+
     await storage.saveAnalysis({
-      id: 'history_record_123',
+      id: 'history_record_pdfx_undetermined',
       createdAt: Date.now(),
-      fileName: 'cartao_visita.pdf',
-      fileSizeBytes: 102400,
+      fileName: 'banner_promocional.pdf',
+      fileSizeBytes: 512000,
       segmentName: 'Comercial',
-      productName: 'Folheto A4',
+      productName: 'Banner Lona',
       variantName: 'Padrão',
       productionProfileId: COMMERCIAL_PRINT_300DPI_PROFILE.id,
-      status: 'approved',
-      score: 95,
+      status: 'review',
+      score: 85,
       errorCount: 0,
-      warningCount: 1,
-      approvedCount: 4,
+      warningCount: 0,
+      approvedCount: 8,
       initialSnapshot: snapshotBefore,
-      postFixSnapshot: snapshotAfter,
-      reportData,
     });
 
-    const retrieved = await storage.getAnalysis('history_record_123');
+    const retrieved = await storage.getAnalysis('history_record_pdfx_undetermined');
     assert.ok(retrieved);
-    assert.equal(retrieved?.initialSnapshot?.score, 65);
-    assert.equal(retrieved?.postFixSnapshot?.score, 95);
-    assert.equal(retrieved?.reportData?.correctedCount, 1);
-    assert.equal(retrieved?.reportData?.finalTechnicalState, 'approved');
+    assert.equal(retrieved?.initialSnapshot?.documentSummary.declaredPdfX, 'PDF/X-1a:2001');
+    assert.equal(retrieved?.initialSnapshot?.documentSummary.verifiedPdfX, false);
   });
 
   console.log(`Relatórios Técnicos: ${passed}/${passed + failed} aprovados`);

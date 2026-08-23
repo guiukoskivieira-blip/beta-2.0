@@ -160,6 +160,34 @@ export interface PdfPageStructure {
   images?: any[];
 }
 
+export * from '../domain/colorManagement';
+
+export interface PdfIccProfileInfo {
+  id?: string;
+  name?: string;
+  components: number;
+  colorSpace: string;
+  byteLength: number;
+  sha256?: string;
+  shortSha256?: string;
+  isValidIcc: boolean;
+  version?: string;
+  deviceClass?: string;
+  magicSignature?: string;
+  alternate?: string;
+}
+
+export interface PdfOutputIntent {
+  type: string;
+  subtype: string;
+  outputConditionIdentifier: string;
+  outputCondition?: string;
+  registryName?: string;
+  info?: string;
+  destOutputProfile?: PdfIccProfileInfo;
+  hasDestOutputProfile: boolean;
+}
+
 export interface PdfDocumentStructure {
   pageCount: number;
   pages: PdfPageStructure[];
@@ -168,8 +196,8 @@ export interface PdfDocumentStructure {
   transparencySummary?: any;
   transparencies?: any[];
   colorManagementSummary?: any;
-  outputIntents?: any[];
-  iccProfiles?: any[];
+  outputIntents?: PdfOutputIntent[];
+  iccProfiles?: PdfIccProfileInfo[];
   colorSummary: {
     hasRgb: boolean;
     hasCmyk: boolean;

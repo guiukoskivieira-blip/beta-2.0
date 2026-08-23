@@ -7,7 +7,8 @@ export type FixType =
   | 'dpi_enhancement'
   | 'bleed_generation'
   | 'font_embedding'
-  | 'transparency_flattening';
+  | 'transparency_flattening'
+  | 'output_intent';
 
 export type FixActionResult =
   | 'corrected'
@@ -115,6 +116,23 @@ export function classifyRule(rule: RuleEvaluationResult): FixProposal | null {
         measuredValue: 'PDF padrão',
         expectedValue: 'PDF/X-1a:2001',
         requiredInputDescription: 'Configuração de OutputIntent (GTS_PDFX) e especificação de perfil ICC de destino (ex: ISO Coated v2 ou Fogra39) no software de exportação.',
+      };
+
+    case 'output_intent':
+      return {
+        id: `fix_output_intent`,
+        ruleId: rule.ruleId,
+        type: 'output_intent',
+        safetyLevel: 'assisted',
+        title: 'Configurar perfil de saída / Output Intent',
+        description: 'Configurar Output Intent padronizado com perfil ICC de destino (ex: Fogra39, ISO Coated v2, CGATS TR 001) para calibração de cor e conformidade de pré-impressão.',
+        affectedPages,
+        canApply: false,
+        requiresHumanApproval: true,
+        reasonIfUnavailable: 'A configuração de Output Intent é assistida e requer seleção ou fornecimento de perfil ICC real (.icc/.icm). Não pode ser executada sem perfil válido.',
+        measuredValue: 'Output Intent ausente',
+        expectedValue: 'Output Intent com perfil ICC incorporado',
+        requiredInputDescription: 'Seleção de perfil ICC padrão (FOGRA39, ISO Coated v2, SWOP) ou envio de arquivo .icc calibrado.',
       };
 
     case 'color_conversion':

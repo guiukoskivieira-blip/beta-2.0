@@ -195,13 +195,20 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
   currentPage.drawText('Cores:', { x: col1X, y: metaY, size: 8, font: helveticaBold, color: rgb(74 / 255, 85 / 255, 104 / 255) });
   currentPage.drawText(colorStr, { x: col1X + 45, y: metaY, size: 8, font: helvetica, color: rgb(16 / 255, 23 / 255, 34 / 255) });
 
-  currentPage.drawText('PDF/X:', { x: col2X, y: metaY, size: 8, font: helveticaBold, color: rgb(74 / 255, 85 / 255, 104 / 255) });
-  currentPage.drawText(report.initialSnapshot.documentSummary.isDeclaredPdfX ? 'Em conformidade' : 'Não declarado', { x: col2X + 48, y: metaY, size: 8, font: helvetica, color: rgb(16 / 255, 23 / 255, 34 / 255) });
+  const declaredPdfXText = report.initialSnapshot.documentSummary.declaredPdfX
+    ? report.initialSnapshot.documentSummary.declaredPdfX
+    : (report.initialSnapshot.documentSummary.isDeclaredPdfX
+      ? (report.initialSnapshot.documentSummary.pdfxStandard || 'Declarado')
+      : 'Não');
+
+  currentPage.drawText('PDF/X declarado:', { x: col2X, y: metaY, size: 8, font: helveticaBold, color: rgb(74 / 255, 85 / 255, 104 / 255) });
+  currentPage.drawText(sanitizeText(declaredPdfXText), { x: col2X + 80, y: metaY, size: 8, font: helvetica, color: rgb(16 / 255, 23 / 255, 34 / 255) });
 
   cursorY -= (metaBoxHeight + 15);
 
   // 2. Resumo de Score e Auditoria Antes/Depois
-  const scoreBoxHeight = report.hasFixApplied ? 80 : 60;
+  const activeSnapshot = report.postFixSnapshot || report.initialSnapshot;
+  const scoreBoxHeight = report.hasFixApplied ? 85 : (report.initialSnapshot.reviewExplanation ? 72 : 62);
   currentPage.drawRectangle({
     x: MARGIN,
     y: cursorY - scoreBoxHeight,
@@ -215,7 +222,7 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
   // Título da seção de pontuação
   currentPage.drawText('AVALIAÇÃO DE CONFORMIDADE TÉCNICA (MOTOR 1 DETERMINÍSTICO)', {
     x: MARGIN + 12,
-    y: cursorY - 16,
+    y: cursorY - 15,
     size: 9,
     font: helveticaBold,
     color: rgb(16 / 255, 23 / 255, 34 / 255),
@@ -225,8 +232,8 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
     // Compara Antes vs Depois
     currentPage.drawText(`Score Original: ${report.initialScore}/100 (${report.initialClassification.toUpperCase()})`, {
       x: MARGIN + 12,
-      y: cursorY - 34,
-      size: 9,
+      y: cursorY - 30,
+      size: 8.5,
       font: helvetica,
       color: rgb(107 / 255, 119 / 255, 140 / 255),
     });
@@ -240,18 +247,30 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
     const deltaSign = report.scoreDelta >= 0 ? `+${report.scoreDelta}` : `${report.scoreDelta}`;
     currentPage.drawText(`Score Pós-Correção: ${report.finalScore}/100 (${report.finalClassification.toUpperCase()}) [Delta: ${deltaSign}]`, {
       x: MARGIN + 12,
-      y: cursorY - 48,
-      size: 10,
+      y: cursorY - 43,
+      size: 9.5,
       font: helveticaBold,
       color: scoreColor,
     });
 
-    currentPage.drawText(`Reanálise obrigatória: Validado pelo Motor 1 (${report.fixDescription || 'Correção aplicada'})`, {
+    currentPage.drawText(`Bloqueantes: ${activeSnapshot.errorCount} | Alertas: ${activeSnapshot.warningCount} | Aprovados: ${activeSnapshot.approvedCount} | Indeterminados: ${activeSnapshot.undeterminedCount}`, {
       x: MARGIN + 12,
-      y: cursorY - 64,
-      size: 8,
+      y: cursorY - 56,
+      size: 7.5,
       font: helvetica,
-      color: rgb(0 / 255, 123 / 255, 255 / 255),
+      color: rgb(74 / 255, 85 / 255, 104 / 255),
+    });
+
+    const subText = activeSnapshot.reviewExplanation 
+      ? activeSnapshot.reviewExplanation 
+      : `Reanálise obrigatória: Validado pelo Motor 1 (${report.fixDescription || 'Correção aplicada'})`;
+
+    currentPage.drawText(sanitizeText(subText), {
+      x: MARGIN + 12,
+      y: cursorY - 70,
+      size: 7.5,
+      font: helvetica,
+      color: activeSnapshot.reviewExplanation ? rgb(217 / 255, 119 / 255, 6 / 255) : rgb(0 / 255, 123 / 255, 255 / 255),
     });
   } else {
     // Análise única
@@ -263,19 +282,29 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
 
     currentPage.drawText(`Pontuação de Qualidade: ${report.finalScore}/100 — Status: ${report.finalClassification.toUpperCase()}`, {
       x: MARGIN + 12,
-      y: cursorY - 36,
-      size: 11,
+      y: cursorY - 32,
+      size: 10.5,
       font: helveticaBold,
       color: scoreColor,
     });
 
-    currentPage.drawText(`Bloqueantes: ${report.initialSnapshot.errorCount} | Alertas: ${report.initialSnapshot.warningCount} | Aprovados: ${report.initialSnapshot.approvedCount}`, {
+    currentPage.drawText(`Bloqueantes: ${report.initialSnapshot.errorCount} | Alertas: ${report.initialSnapshot.warningCount} | Aprovados: ${report.initialSnapshot.approvedCount} | Indeterminados: ${report.initialSnapshot.undeterminedCount}`, {
       x: MARGIN + 12,
-      y: cursorY - 50,
+      y: cursorY - 46,
       size: 8,
       font: helvetica,
-      color: rgb(107 / 255, 119 / 255, 140 / 255),
+      color: rgb(74 / 255, 85 / 255, 104 / 255),
     });
+
+    if (report.initialSnapshot.reviewExplanation) {
+      currentPage.drawText(sanitizeText(report.initialSnapshot.reviewExplanation), {
+        x: MARGIN + 12,
+        y: cursorY - 58,
+        size: 7.5,
+        font: helvetica,
+        color: rgb(217 / 255, 119 / 255, 6 / 255),
+      });
+    }
   }
 
   cursorY -= (scoreBoxHeight + 18);
@@ -362,6 +391,8 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
         ? rgb(0 / 255, 150 / 255, 100 / 255)
         : item.statusBefore === 'warning'
         ? rgb(200 / 255, 110 / 255, 0 / 255)
+        : item.statusBefore === 'undetermined'
+        ? rgb(107 / 255, 119 / 255, 140 / 255)
         : rgb(200 / 255, 30 / 255, 30 / 255);
       currentPage.drawText(item.statusBefore.toUpperCase(), { x: MARGIN + 190, y: cursorY - 11, size: 7, font: helveticaBold, color: colorBefore });
 
@@ -370,6 +401,8 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
         ? rgb(0 / 255, 150 / 255, 100 / 255)
         : item.statusAfter === 'warning'
         ? rgb(200 / 255, 110 / 255, 0 / 255)
+        : item.statusAfter === 'undetermined'
+        ? rgb(107 / 255, 119 / 255, 140 / 255)
         : rgb(200 / 255, 30 / 255, 30 / 255);
       currentPage.drawText(item.statusAfter.toUpperCase(), { x: MARGIN + 250, y: cursorY - 11, size: 7, font: helveticaBold, color: colorAfter });
 
@@ -413,6 +446,8 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
         ? rgb(0 / 255, 150 / 255, 100 / 255)
         : item.statusBefore === 'warning'
         ? rgb(200 / 255, 110 / 255, 0 / 255)
+        : item.statusBefore === 'undetermined'
+        ? rgb(107 / 255, 119 / 255, 140 / 255)
         : rgb(200 / 255, 30 / 255, 30 / 255);
 
       currentPage.drawText(item.statusBefore.toUpperCase(), {
