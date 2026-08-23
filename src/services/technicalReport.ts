@@ -1,5 +1,6 @@
 import type { RuleStatus, RuleEvaluationResult, PreflightAnalysis, PdfDocumentStructure } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
+import { evaluatePdfx4Eligibility, type PdfxEligibilityResult } from './pdfxEligibility';
 
 export type RuleComparisonStatus = 'corrected' | 'improved' | 'unchanged' | 'worsened' | 'new_issue';
 
@@ -41,6 +42,7 @@ export interface AnalysisSnapshot {
     declaredPdfX: string | null;
     verifiedPdfX: boolean;
     pdfxStandard?: string;
+    pdfxEligibility?: PdfxEligibilityResult;
   };
 }
 
@@ -87,6 +89,7 @@ export interface TechnicalReportData {
   undeterminedCount: number;
   reviewExplanation?: string;
   manualInterventions: ManualInterventionItem[];
+  pdfxEligibility?: PdfxEligibilityResult;
   initialScore: number;
   finalScore: number;
   scoreDelta: number;
@@ -123,7 +126,7 @@ export function createAnalysisSnapshot(
   const isDeclared = Boolean(analysis.document?.pdfxInfo?.isDeclaredPdfX);
   const declaredPdfX = isDeclared ? (declaredVersion || 'PDF/X Declarado') : null;
   // Distinção conceitual estrita: metadado declarado NÃO equivale a validação/certificação normativa
-  const verifiedPdfX = false;
+  const verifiedPdfX = Boolean((analysis as any).verifiedPdfX);
 
   const undeterminedCount = analysis.ruleResults?.undeterminedCount ?? 
     snapshotRules.filter((r) => r.status === 'undetermined').length;
@@ -146,6 +149,13 @@ export function createAnalysisSnapshot(
       reviewExplanation = 'Status REVIEW — o arquivo contém alertas técnicos que requerem atenção antes da impressão.';
     }
   }
+
+  const pdfxEligibility = analysis.document
+    ? evaluatePdfx4Eligibility(analysis.document, {
+        profile,
+        ruleResults: analysis.ruleResults,
+      })
+    : undefined;
 
   const snapshot: AnalysisSnapshot = {
     id: analysis.id,
@@ -175,6 +185,7 @@ export function createAnalysisSnapshot(
       declaredPdfX,
       verifiedPdfX,
       pdfxStandard: declaredVersion,
+      pdfxEligibility,
     },
   };
 
@@ -361,6 +372,7 @@ export function buildTechnicalReport(
     undeterminedCount: activeSnapshot.undeterminedCount,
     reviewExplanation: activeSnapshot.reviewExplanation,
     manualInterventions,
+    pdfxEligibility: activeSnapshot.documentSummary.pdfxEligibility,
     initialScore: initialSnapshot.score,
     finalScore: activeSnapshot.score,
     scoreDelta: activeSnapshot.score - initialSnapshot.score,

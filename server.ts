@@ -7,9 +7,11 @@ import { createServer as createViteServer } from "vite";
 import { randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes } from "./server/pdfExtractor";
-import { checkTrimBleedEligibility, applyTrimBleedFix } from "./src/services/trimBleedFix";
+import { applyTrimBleedFix } from "./src/services/trimBleedFix";
 import { applyOutputIntentFix } from "./src/services/outputIntentFix";
 import { applyImageColorFix } from "./src/services/imageColorFix";
+import { preparePdfForPdfx4 } from "./src/services/pdfxPreparation";
+import { finalizePdfx4Document } from "./src/services/pdfxFinalize";
 import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE } from "./src/utils/productionProfiles";
 import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
@@ -1403,6 +1405,177 @@ async function startServer() {
       { name: "sourceIccFile", maxCount: 1 },
     ]),
     handleImageColorFix
+  );
+
+  // POST /api/prepare-pdfx4 & /api/prepare/pdfx4 - Deterministic PDF/X-4 Preparation Orchestrator
+  const handlePdfx4Preparation = async (req: Request, res: Response) => {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const file = files?.file?.[0] || (req as any).file;
+    const destIccFile = files?.destIccFile?.[0] || files?.iccFile?.[0];
+    const sourceIccFile = files?.sourceIccFile?.[0];
+
+    if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
+
+    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
+    const allowFallbackSrgb = req.body?.allowFallbackSrgb === "true" || req.body?.allowFallbackSrgb === true;
+
+    const profileMap: Record<string, ProductionProfile> = {
+      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
+      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
+      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
+    };
+    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+
+    try {
+      if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({ success: false, error: "Arquivo sem assinatura PDF válida." });
+      }
+
+      res.setHeader("X-ArteCheck-Backend-Version", "pdfx4-preparation-v1");
+
+      const result = await preparePdfForPdfx4(file.buffer, {
+        profile,
+        destinationIccPresetId,
+        destinationIccBytes: destIccFile?.buffer || null,
+        sourceIccPresetId: typeof req.body?.sourceIccPresetId === "string" ? req.body.sourceIccPresetId : undefined,
+        sourceIccBytes: sourceIccFile?.buffer || null,
+        allowFallbackSrgb,
+      });
+
+      const preparedBuffer = result.pdfBytes ? Buffer.from(result.pdfBytes) : null;
+      const base64 = preparedBuffer ? preparedBuffer.toString("base64") : undefined;
+
+      return res.json({
+        success: result.success,
+        status: result.status,
+        steps: result.steps,
+        eligibleAfterPreparation: result.eligibleAfterPreparation,
+        preparedPdfBase64: base64,
+        preparedPdfSize: preparedBuffer?.length,
+        originalSha256: result.originalSha256,
+        preparedSha256: result.preparedSha256,
+        verifiedPdfX: false, // STRICT: always false during Phase 2 preparation
+        summaryMessage: result.summaryMessage,
+        error: result.error,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        status: "blocked",
+        steps: [],
+        verifiedPdfX: false,
+        error: error?.message || "Falha na preparação para PDF/X-4.",
+      });
+    }
+  };
+
+  app.post(
+    "/api/prepare-pdfx4",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+      { name: "sourceIccFile", maxCount: 1 },
+    ]),
+    handlePdfx4Preparation
+  );
+
+  app.post(
+    "/api/prepare/pdfx4",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+      { name: "sourceIccFile", maxCount: 1 },
+    ]),
+    handlePdfx4Preparation
+  );
+
+  // POST /api/finalize-pdfx4 & /api/finalize/pdfx4 - Final PDF/X-4 Declaration & Normative Verification
+  const handlePdfx4Finalize = async (req: Request, res: Response) => {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const file = files?.file?.[0] || (req as any).file;
+    const destIccFile = files?.destIccFile?.[0] || files?.iccFile?.[0];
+
+    if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado para finalização." });
+
+    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
+    const title = typeof req.body?.title === "string" ? req.body.title : undefined;
+    const author = typeof req.body?.author === "string" ? req.body.author : undefined;
+    const creator = typeof req.body?.creator === "string" ? req.body.creator : undefined;
+
+    const profileMap: Record<string, ProductionProfile> = {
+      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
+      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
+      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
+    };
+    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+
+    try {
+      if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({ success: false, error: "Arquivo sem assinatura PDF válida." });
+      }
+
+      res.setHeader("X-ArteCheck-Backend-Version", "pdfx4-finalize-v1");
+
+      const result = await finalizePdfx4Document(file.buffer, {
+        profile,
+        destinationIccPresetId,
+        destinationIccBytes: destIccFile?.buffer || null,
+        title,
+        author,
+        creator,
+      });
+
+      const finalizedBuffer = result.finalizedPdfBytes ? Buffer.from(result.finalizedPdfBytes) : null;
+      const base64 = finalizedBuffer ? finalizedBuffer.toString("base64") : undefined;
+
+      return res.json({
+        success: result.success,
+        declaredPdfX: result.declaredPdfX,
+        verifiedPdfX: result.verifiedPdfX,
+        targetStandard: result.targetStandard,
+        checks: result.checks,
+        failures: result.failures,
+        warnings: result.warnings,
+        preparedSha256: result.preparedSha256,
+        finalizedSha256: result.finalizedSha256,
+        finalizedPdfBase64: base64,
+        finalizedPdfSize: finalizedBuffer?.length,
+        summaryMessage: result.summaryMessage,
+        error: result.error,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        declaredPdfX: null,
+        verifiedPdfX: false,
+        failures: [error?.message || "Falha na finalização PDF/X-4."],
+        error: error?.message || "Falha na finalização PDF/X-4.",
+      });
+    }
+  };
+
+  app.post(
+    "/api/finalize-pdfx4",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+    ]),
+    handlePdfx4Finalize
+  );
+
+  app.post(
+    "/api/finalize/pdfx4",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "destIccFile", maxCount: 1 },
+      { name: "iccFile", maxCount: 1 },
+    ]),
+    handlePdfx4Finalize
   );
 
   // Future analysis routes structure placeholder

@@ -647,9 +647,11 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
     }
   }
 
-  // Check PDF/X in root catalog / info dict
+  // Check PDF/X in root catalog / info dict and XMP Metadata
   let isDeclaredPdfX = false;
   let declaredVersion: string | undefined;
+  let hasXmpMetadata = false;
+  let xmpPdfxVersion: string | undefined;
 
   const infoDict = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Info);
   if (infoDict instanceof PDFDict) {
@@ -658,6 +660,26 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
     if (gtsVersion || gtsConformance) {
       isDeclaredPdfX = true;
       declaredVersion = (gtsVersion || gtsConformance || '').replace(/[\/()]/g, '');
+    }
+  }
+
+  const catalogMeta = pdfDoc.catalog.get(PDFName.of('Metadata'));
+  if (catalogMeta) {
+    const metaStream = pdfDoc.context.lookup(catalogMeta);
+    if (metaStream) {
+      const rawBytes = (metaStream as any).contents || (metaStream as any).getContents?.();
+      if (rawBytes && rawBytes.length > 0) {
+        hasXmpMetadata = true;
+        const xmpStr = Buffer.from(rawBytes).toString('utf-8');
+        const match = xmpStr.match(/GTS_PDFXVersion[>="]+([^<"&\s]+)/i);
+        if (match && match[1]) {
+          xmpPdfxVersion = match[1];
+          if (!declaredVersion) {
+            isDeclaredPdfX = true;
+            declaredVersion = xmpPdfxVersion;
+          }
+        }
+      }
     }
   }
 
@@ -682,6 +704,8 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
       outputIntentSubtype: gtsIntent?.subtype,
       outputConditionIdentifier: gtsIntent?.outputConditionIdentifier,
       hasDestOutputProfile: gtsIntent?.hasDestOutputProfile,
+      hasXmpMetadata,
+      xmpPdfxVersion,
     },
     metadata: {
       title,
