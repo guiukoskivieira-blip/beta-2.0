@@ -128,7 +128,6 @@ export function verifyPdfx4FinalizedDocument(
   warnings: string[];
 } {
   const checks: PdfxVerificationCheck[] = [];
-  const failures: string[];
   const warnings: string[] = [];
 
   // Check 1: Declared PDF/X in Info dictionary
@@ -301,7 +300,7 @@ export function verifyPdfx4FinalizedDocument(
   }
 
   const allPassed = checks.every((c) => c.status === 'passed');
-  failures = checks.filter((c) => c.status === 'failed').map((c) => `${c.code}: ${c.evidence}`);
+  const failures = checks.filter((c) => c.status === 'failed').map((c) => `${c.code}: ${c.evidence}`);
 
   return {
     verified: allPassed,
