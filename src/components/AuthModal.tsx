@@ -16,6 +16,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [displayName, setDisplayName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [successInfo, setSuccessInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
@@ -33,13 +34,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
     setLoading(true);
     setError(null);
+    setSuccessInfo(null);
 
     try {
       const session = isSignUp
         ? await auth.signUp(email, password, displayName || undefined, companyName || undefined)
         : await auth.signIn(email, password);
 
-      if (!session?.user) {
+      // Quando o cadastro é realizado mas requer confirmação de e-mail (session.accessToken ausente)
+      if (isSignUp && !session?.accessToken) {
+        setSuccessInfo('Cadastro realizado! Confirme seu e-mail e depois faça login para continuar.');
+        setIsSignUp(false);
+        setPassword('');
+        return;
+      }
+
+      if (!session?.user || !session?.accessToken) {
         throw new Error('Não foi possível autenticar. Tente novamente.');
       }
 
@@ -49,6 +59,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       const msg = err?.message || '';
       if (msg.includes('Invalid login') || msg.includes('credentials')) {
         setError('E-mail ou senha incorretos. Verifique e tente novamente.');
+      } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
+        setError('E-mail ainda não confirmado. Verifique sua caixa de entrada antes de fazer login.');
       } else if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
         setError('Este e-mail já está cadastrado. Faça login em vez de criar uma nova conta.');
       } else if (msg.includes('rate limit') || msg.includes('too many')) {
@@ -86,6 +98,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         {error && (
           <div className="mb-4 text-xs text-[#FF4D4D] bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 p-2.5 rounded-lg">
             {error}
+          </div>
+        )}
+
+        {successInfo && (
+          <div className="mb-4 text-xs text-[#00D18F] bg-[#00D18F]/10 border border-[#00D18F]/30 p-2.5 rounded-lg font-medium">
+            {successInfo}
           </div>
         )}
 

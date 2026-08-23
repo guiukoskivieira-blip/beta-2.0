@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Check, Crown, CreditCard, BarChart3, CalendarDays } from 'lucide-react';
 import { PLANS, type BillingPeriod, type BillingStatus, type PlanCode } from '../domain/billing';
 import { createCheckout, getBillingStatus } from '../services/billing';
+import { auth } from '../auth';
 
 export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
@@ -10,7 +11,16 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
 
   useEffect(() => {
     if (isOpen) {
-      getBillingStatus().then(setStatus).catch(e => setMessage(e.message));
+      setMessage('');
+      auth.getSession().then((session) => {
+        if (session?.accessToken) {
+          getBillingStatus()
+            .then(setStatus)
+            .catch((e) => setMessage(e.message));
+        } else {
+          setStatus(null);
+        }
+      });
     }
   }, [isOpen]);
 
@@ -23,6 +33,11 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   const checkout = async (code: PlanCode) => {
     try {
       setMessage('');
+      const session = await auth.getSession();
+      if (!session?.accessToken) {
+        setMessage('Faça login para escolher um plano.');
+        return;
+      }
       const r = await createCheckout(code, period);
       const targetUrl = r?.checkoutUrl || r?.url;
       if (targetUrl) location.href = targetUrl;

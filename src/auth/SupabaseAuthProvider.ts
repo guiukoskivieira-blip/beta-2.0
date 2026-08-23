@@ -87,10 +87,13 @@ export class SupabaseAuthProvider implements AuthProvider {
     }
 
     const supabase = this.getClient();
+    const emailRedirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo,
         data: {
           display_name: displayName || email.split('@')[0],
           company_name: companyName || '',

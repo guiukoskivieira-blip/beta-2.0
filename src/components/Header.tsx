@@ -45,9 +45,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center space-x-2.5">
-          {currentUser && onOpenPlans && (
-            <button type="button" onClick={onOpenPlans} className="inline-flex items-center px-3 py-1.5 border border-[#243244] text-xs font-semibold rounded-lg text-[#C3CBD6] bg-[#121820] hover:bg-[#101722] hover:text-white transition-colors" title="Planos e assinatura">
-              <CreditCard className="w-3.5 h-3.5 mr-1.5 text-[#00D18F]"/><span className="hidden lg:inline">Planos</span>
+          {onOpenPlans && (
+            <button type="button" onClick={onOpenPlans} className="inline-flex items-center px-3 py-1.5 border border-[#243244] text-xs font-semibold rounded-lg text-[#C3CBD6] bg-[#121820] hover:bg-[#101722] hover:text-white transition-colors cursor-pointer shadow-2xs" title="Planos e assinatura">
+              <CreditCard className="w-3.5 h-3.5 mr-1.5 text-[#00D18F]"/><span className="hidden sm:inline">Planos</span>
             </button>
           )}
           {onOpenProfiles && (

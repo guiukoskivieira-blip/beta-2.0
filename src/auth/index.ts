@@ -1,15 +1,21 @@
 import type { AuthProvider } from './AuthProvider';
 import { LocalDevAuthProvider } from './LocalDevAuthProvider';
 import { SupabaseAuthProvider } from './SupabaseAuthProvider';
-import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { IncompleteConfigAuthProvider } from './IncompleteConfigAuthProvider';
+import { resolveSupabaseEnv } from '../lib/supabaseClient';
 
 export * from './AuthProvider';
 export * from './LocalDevAuthProvider';
 export * from './SupabaseAuthProvider';
+export * from './IncompleteConfigAuthProvider';
 
-function createAuthProvider(): AuthProvider {
-  if (isSupabaseConfigured()) {
+export function createAuthProvider(resolver: typeof resolveSupabaseEnv = resolveSupabaseEnv): AuthProvider {
+  const envState = resolver();
+  if (envState.isConfigured) {
     return new SupabaseAuthProvider();
+  }
+  if (envState.hasPartialConfig) {
+    return new IncompleteConfigAuthProvider();
   }
   return new LocalDevAuthProvider();
 }
