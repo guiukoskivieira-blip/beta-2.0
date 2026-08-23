@@ -30,6 +30,7 @@ const MAX_ARRAY_ITEMS = 2_000;
 
 
 const BILLING_PLAN_LIMITS: Record<string, number> = {
+  free: 15,
   essential: 60,
   professional: 200,
   business: 500,
@@ -50,33 +51,139 @@ function isBillingEnforced() {
 async function getSubscriptionUsage(userId: string) {
   const admin = getBillingAdmin();
   if (!admin) return null;
-  const { data: subscription } = await admin.from('subscriptions').select('*')
-    .eq('user_id', userId).in('status', ['active','canceled']).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (!subscription || !subscription.current_period_start || !subscription.current_period_end) return null;
-  const limit = BILLING_PLAN_LIMITS[subscription.plan_code] || 0;
-  const { count } = await admin.from('analysis_usage_events').select('id', { count: 'exact', head: true })
-    .eq('subscription_id', subscription.id).eq('status', 'counted')
-    .gte('counted_at', subscription.current_period_start).lt('counted_at', subscription.current_period_end);
+
+  // 1. Consulta subscription ativa ou cancelada
+  const { data: subscription, error: subError } = await admin
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .in('status', ['active', 'canceled'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (subError) {
+    throw new Error(`Erro ao consultar assinaturas: ${subError.message}`);
+  }
+
+  // 2. Se houver subscription válida com períodos definidos
+  if (subscription && subscription.current_period_start && subscription.current_period_end) {
+    const limit = BILLING_PLAN_LIMITS[subscription.plan_code] || 0;
+    const { count, error: usageError } = await admin
+      .from('analysis_usage_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('subscription_id', subscription.id)
+      .eq('status', 'counted')
+      .gte('counted_at', subscription.current_period_start)
+      .lt('counted_at', subscription.current_period_end);
+
+    if (usageError) {
+      throw new Error(`Erro ao consultar uso da assinatura: ${usageError.message}`);
+    }
+
+    const used = count || 0;
+    return {
+      subscription,
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      isFree: false,
+    };
+  }
+
+  // 3. Usuário autenticado sem subscription ativa -> Plano FREE virtual ativo com 15 análises
+  let userCreatedAt: Date = new Date();
+  const { data: profile, error: profError } = await admin
+    .from('profiles')
+    .select('created_at')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profError) {
+    console.warn(`[Billing] Perfil não localizado para ${userId}:`, profError.message);
+  } else if (profile?.created_at) {
+    const parsedDate = new Date(profile.created_at);
+    if (!isNaN(parsedDate.getTime())) {
+      userCreatedAt = parsedDate;
+    }
+  }
+
+  const now = Date.now();
+  const cycleMs = 30 * 24 * 60 * 60 * 1000;
+  const elapsed = Math.max(0, now - userCreatedAt.getTime());
+  const cycleIndex = Math.floor(elapsed / cycleMs);
+  const periodStart = new Date(userCreatedAt.getTime() + cycleIndex * cycleMs).toISOString();
+  const periodEnd = new Date(userCreatedAt.getTime() + (cycleIndex + 1) * cycleMs).toISOString();
+
+  const limit = BILLING_PLAN_LIMITS.free || 15;
+
+  const { count, error: usageError } = await admin
+    .from('analysis_usage_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('status', 'counted')
+    .gte('counted_at', periodStart)
+    .lt('counted_at', periodEnd);
+
+  if (usageError) {
+    throw new Error(`Erro ao consultar uso do plano gratuito: ${usageError.message}`);
+  }
+
   const used = count || 0;
-  return { subscription, used, limit, remaining: Math.max(0, limit - used) };
+  const virtualFreeSubscription = {
+    id: `free_${userId}`,
+    user_id: userId,
+    organization_id: null,
+    plan_code: 'free',
+    billing_period: 'monthly',
+    status: 'active',
+    current_period_start: periodStart,
+    current_period_end: periodEnd,
+    cancel_at_period_end: false,
+    promotion_cycles_used: 0,
+    is_virtual_free: true,
+  };
+
+  return {
+    subscription: virtualFreeSubscription,
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    isFree: true,
+  };
 }
 
 async function recordSuccessfulAnalysis(userId: string, analysisId: string, uploadBytes: number) {
   if (!isBillingEnforced()) return;
   const admin = getBillingAdmin();
+  if (!admin) return;
+
   const state = await getSubscriptionUsage(userId);
-  if (!admin || !state || state.remaining <= 0) return;
-  await admin.from('analysis_usage_events').upsert({
+  if (!state || state.remaining <= 0) return;
+
+  const eventPayload: Record<string, any> = {
     user_id: userId,
     organization_id: state.subscription.organization_id || null,
-    subscription_id: state.subscription.id,
     analysis_id: analysisId,
     upload_bytes: Math.max(0, uploadBytes || 0),
     billing_period_start: state.subscription.current_period_start,
     billing_period_end: state.subscription.current_period_end,
     status: 'counted',
     counted_at: new Date().toISOString(),
-  }, { onConflict: 'analysis_id', ignoreDuplicates: true });
+  };
+
+  if (!state.subscription.is_virtual_free && state.subscription.id) {
+    eventPayload.subscription_id = state.subscription.id;
+  }
+
+  const { error } = await admin.from('analysis_usage_events').upsert(eventPayload, {
+    onConflict: 'analysis_id',
+    ignoreDuplicates: true,
+  });
+
+  if (error) {
+    console.error(`[Billing] Falha ao registrar evento de uso para análise ${analysisId}:`, error.message);
+  }
 }
 
 /** Creates a JSON-safe client payload without retaining binary PDF objects. */
@@ -268,14 +375,50 @@ async function startServer() {
   app.get('/api/billing/status', async (req: Request, res: Response) => {
     const userId = (req as any).authUser?.id;
     if (!userId) return res.status(401).json({ success: false, error: 'Autenticação necessária.' });
-    const state = await getSubscriptionUsage(userId);
-    if (!state) return res.json({ success: true, configured: isBillingEnforced(), subscription: null, usage: { used: 0, limit: 0, remaining: 0, percentage: 0 } });
-    const s = state.subscription;
-    return res.json({ success: true, configured: isBillingEnforced(), subscription: {
-      id: s.id, planCode: s.plan_code, billingPeriod: s.billing_period, status: s.status,
-      currentPeriodStart: s.current_period_start, currentPeriodEnd: s.current_period_end,
-      cancelAtPeriodEnd: s.cancel_at_period_end, promotionCyclesUsed: s.promotion_cycles_used || 0,
-    }, usage: { used: state.used, limit: state.limit, remaining: state.remaining, percentage: state.limit ? Math.min(100, Math.round(state.used / state.limit * 100)) : 0 } });
+    try {
+      const state = await getSubscriptionUsage(userId);
+      if (!state) {
+        return res.json({
+          success: true,
+          configured: isBillingEnforced(),
+          plan: 'free',
+          status: 'active',
+          subscription: null,
+          usedAnalyses: 0,
+          limitAnalyses: 15,
+          usage: { used: 0, limit: 15, remaining: 15, percentage: 0 },
+        });
+      }
+      const s = state.subscription;
+      const isVirtualFree = Boolean((s as any).is_virtual_free);
+      return res.json({
+        success: true,
+        configured: isBillingEnforced(),
+        plan: s.plan_code,
+        status: s.status,
+        usedAnalyses: state.used,
+        limitAnalyses: state.limit,
+        subscription: isVirtualFree ? null : {
+          id: s.id,
+          planCode: s.plan_code,
+          billingPeriod: s.billing_period,
+          status: s.status,
+          currentPeriodStart: s.current_period_start,
+          currentPeriodEnd: s.current_period_end,
+          cancelAtPeriodEnd: s.cancel_at_period_end,
+          promotionCyclesUsed: s.promotion_cycles_used || 0,
+        },
+        usage: {
+          used: state.used,
+          limit: state.limit,
+          remaining: state.remaining,
+          percentage: state.limit ? Math.min(100, Math.round((state.used / state.limit) * 100)) : 0,
+        },
+      });
+    } catch (err: any) {
+      console.error('Erro ao consultar status de assinatura:', err);
+      return res.status(500).json({ success: false, error: 'Erro ao consultar status de assinatura.' });
+    }
   });
 
   app.post('/api/billing/checkout', async (req: Request, res: Response) => {
@@ -609,8 +752,16 @@ async function startServer() {
       if (!isBillingEnforced()) return next();
       const userId = (req as any).authUser?.id;
       if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' });
-      const state = await getSubscriptionUsage(userId);
-      if (!state || !['active','canceled'].includes(state.subscription.status)) {
+
+      let state;
+      try {
+        state = await getSubscriptionUsage(userId);
+      } catch (err: any) {
+        console.error('Erro de infraestrutura ao validar quota:', err);
+        return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota de análises.' });
+      }
+
+      if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
         return res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para iniciar novas análises.' });
       }
       if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {

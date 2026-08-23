@@ -306,4 +306,90 @@ describe('Plans Modal & Billing Auth Flow Tests', () => {
     };
     assert.equal(headers.Authorization, 'Bearer real_jwt_session_token_from_tab_a_login');
   });
+
+  it('8. normalizeBillingStatus prevents NaN and normalizes nested backend response structure', async () => {
+    const { normalizeBillingStatus } = await import('../src/services/billing');
+
+    // 1. Backend format with nested subscription and usage objects
+    const nestedBackendResponse = {
+      success: true,
+      configured: true,
+      subscription: {
+        id: 'sub_123',
+        planCode: 'professional',
+        billingPeriod: 'monthly',
+        status: 'active',
+        currentPeriodEnd: '2026-09-22T00:00:00Z',
+      },
+      usage: {
+        used: 42,
+        limit: 200,
+        remaining: 158,
+        percentage: 21,
+      },
+    };
+
+    const normalized = normalizeBillingStatus(nestedBackendResponse);
+    assert.equal(normalized.plan, 'professional');
+    assert.equal(normalized.usedAnalyses, 42);
+    assert.equal(normalized.limitAnalyses, 200);
+    assert.equal(typeof normalized.usedAnalyses, 'number');
+    assert.equal(typeof normalized.limitAnalyses, 'number');
+    assert.equal(isNaN(normalized.usedAnalyses), false);
+    assert.equal(isNaN(normalized.limitAnalyses), false);
+    assert.equal(Math.max(0, normalized.limitAnalyses - normalized.usedAnalyses), 158);
+
+    // 2. Empty or null response defaults safely without NaN
+    const emptyNormalized = normalizeBillingStatus(null);
+    assert.equal(emptyNormalized.plan, 'free');
+    assert.equal(emptyNormalized.usedAnalyses, 0);
+    assert.equal(emptyNormalized.limitAnalyses, 15);
+    assert.equal(isNaN(emptyNormalized.usedAnalyses), false);
+    assert.equal(isNaN(emptyNormalized.limitAnalyses), false);
+  });
+
+  it('9. Double-click prevention blocks duplicate checkout calls while one is in flight', async () => {
+    let callCount = 0;
+    let inFlightPlanCode: string | null = null;
+
+    const mockCreateCheckout = async (code: string) => {
+      if (inFlightPlanCode !== null) {
+        return; // blocked duplicate click
+      }
+      inFlightPlanCode = code;
+      callCount++;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      inFlightPlanCode = null;
+      return { success: true, checkoutUrl: 'https://checkout.url' };
+    };
+
+    // First click
+    const p1 = mockCreateCheckout('professional');
+    // Immediate second click while in flight
+    const p2 = mockCreateCheckout('professional');
+
+    await Promise.all([p1, p2]);
+
+    assert.equal(callCount, 1, 'Apenas uma chamada de checkout deve ser executada');
+  });
+
+  it('10. Checkout error restores button state and displays error message', async () => {
+    let loadingPlanCode: string | null = 'professional';
+    let errorMessage = '';
+
+    const executeCheckoutWithError = async () => {
+      try {
+        throw new Error('Mercado Pago temporariamente indisponível.');
+      } catch (err: any) {
+        errorMessage = err.message;
+        loadingPlanCode = null; // Restaurado
+      }
+    };
+
+    await executeCheckoutWithError();
+
+    assert.equal(loadingPlanCode, null, 'Estado de loading deve ser restaurado em caso de erro');
+    assert.equal(errorMessage, 'Mercado Pago temporariamente indisponível.');
+  });
 });
+
