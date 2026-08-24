@@ -21,8 +21,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenProfiles,
 }) => {
   // Format clean profile display string
+  const isGeneric = Boolean(selectedProfile?.isGeneric || (!selectedProfile?.expectedWidthMm && !selectedProfile?.expectedHeightMm));
   const profileLabel = selectedProfile
-    ? selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm
+    ? isGeneric
+      ? `GENÉRICO (Formato não definido)`
+      : selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm
       ? `${selectedProfile.name.split('—')[0].trim()} (${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm)`
       : selectedProfile.name
     : 'Impressão Comercial';

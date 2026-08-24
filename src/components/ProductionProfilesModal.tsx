@@ -32,6 +32,7 @@ import {
 } from '../utils/customProfilesStorage';
 
 interface ProductionProfilesModalProps {
+  initialDimensions?: { widthMm: number; heightMm: number } | null;
   isOpen: boolean;
   onClose: () => void;
   selectedProfile: ProductionProfile;
@@ -45,6 +46,7 @@ export const ProductionProfilesModal: React.FC<ProductionProfilesModalProps> = (
   onClose,
   selectedProfile,
   onSelectProfile,
+  initialDimensions,
 }) => {
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('popular');
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,6 +56,15 @@ export const ProductionProfilesModal: React.FC<ProductionProfilesModalProps> = (
   const [customName, setCustomName] = useState('');
   const [customWidthMm, setCustomWidthMm] = useState<number>(100);
   const [customHeightMm, setCustomHeightMm] = useState<number>(100);
+
+  React.useEffect(() => {
+    if (isOpen && initialDimensions) {
+      setCustomWidthMm(initialDimensions.widthMm);
+      setCustomHeightMm(initialDimensions.heightMm);
+      setIsCreatingCustom(true);
+      setActiveCategory('custom');
+    }
+  }, [isOpen, initialDimensions]);
   const [customBleedMm, setCustomBleedMm] = useState<number>(3);
   const [customDpi, setCustomDpi] = useState<number>(300);
   const [customError, setCustomError] = useState<string | null>(null);

@@ -8,6 +8,7 @@ import { buildTechnicalReport, createAnalysisSnapshot } from '../services/techni
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from '../services/reportPdfGenerator';
 
 interface TrimBleedFixPanelProps {
+  onOpenProfiles?: () => void;
   onFixApplied?: (blob: Blob, fixId: string, fixLabel: string) => void;
   isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
@@ -17,7 +18,7 @@ interface TrimBleedFixPanelProps {
 
 type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error' | 'structural_error';
 
-export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, profile, originalFile, onFixApplied, isFixingInProgress }) => {
+export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, profile, originalFile, onFixApplied, isFixingInProgress, onOpenProfiles }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -222,12 +223,23 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
             <div className="flex items-start space-x-2.5 p-4 rounded-xl bg-[#FFB800]/5 border border-[#FFB800]/20">
               <Ban className="w-4 h-4 text-[#FFB800] shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-[#FFB800] font-medium">Correção automática indisponível</p>
-                <p className="text-xs text-[#A6B4C9] mt-1">
-                  O perfil selecionado ("{profile.name}") não define formato final (largura e altura) e sangria.
-                  Não é possível calcular TrimBox deterministicamente. Selecione um perfil com dimensões definidas
-                  (ex: "Folheto Comercial A4") ou configure um perfil personalizado.
-                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
+                  <div>
+                    <p className="text-sm text-amber-800 font-bold">Correção geométrica indisponível no perfil genérico</p>
+                    <p className="text-xs text-[#64748B] mt-1">
+                      Escolha um perfil com dimensões definidas para habilitar correções geométricas quando forem determinísticas.
+                    </p>
+                  </div>
+                  {onOpenProfiles && (
+                    <button
+                      type="button"
+                      onClick={onOpenProfiles}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shrink-0 shadow-2xs transition-all cursor-pointer"
+                    >
+                      Escolher perfil compatível
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

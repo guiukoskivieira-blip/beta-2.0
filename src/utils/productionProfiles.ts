@@ -200,3 +200,78 @@ export const STANDARD_PROFILES: ProductionProfile[] = [
   MENU_A3_PROFILE,
   LARGE_FORMAT_BANNER_PROFILE,
 ];
+
+/**
+ * Finds all standard and custom production profiles matching the given dimensions
+ * with a slight tolerance (default 0.5 mm) in either portrait or landscape orientation.
+ */
+export function findMatchingProfiles(
+  widthMm: number,
+  heightMm: number,
+  customProfiles: ProductionProfile[] = [],
+  toleranceMm: number = 0.5
+): ProductionProfile[] {
+  if (!widthMm || !heightMm || widthMm <= 0 || heightMm <= 0) return [];
+
+  const allProfiles = [...STANDARD_PROFILES, ...customProfiles].filter(
+    (p) => !p.isGeneric && Boolean(p.expectedWidthMm) && Boolean(p.expectedHeightMm)
+  );
+
+  return allProfiles.filter((p) => {
+    const expW = p.expectedWidthMm!;
+    const expH = p.expectedHeightMm!;
+
+    // Direct match (Width == expW && Height == expH)
+    const directMatch =
+      Math.abs(widthMm - expW) <= toleranceMm &&
+      Math.abs(heightMm - expH) <= toleranceMm;
+
+    // Rotated/Landscape match (Width == expH && Height == expW)
+    const rotatedMatch =
+      Math.abs(widthMm - expH) <= toleranceMm &&
+      Math.abs(heightMm - expW) <= toleranceMm;
+
+    return directMatch || rotatedMatch;
+  });
+}
+
+/**
+ * Detects matching profiles from a PDF page structure, testing both
+ * visual page dimensions, explicit TrimBox, and potential 3mm bleed deduction.
+ */
+export function detectMatchingProfilesFromPage(
+  page: { widthMm: number; heightMm: number; visualWidthMm?: number; visualHeightMm?: number; trimBox?: { widthMm: number; heightMm: number } | null },
+  customProfiles: ProductionProfile[] = [],
+  toleranceMm: number = 0.5
+): { detectedWidthMm: number; detectedHeightMm: number; matches: ProductionProfile[] } {
+  const pageW = page.visualWidthMm || page.widthMm;
+  const pageH = page.visualHeightMm || page.heightMm;
+
+  // 1. If explicit TrimBox exists, prioritize its dimensions
+  if (page.trimBox && page.trimBox.widthMm > 0 && page.trimBox.heightMm > 0) {
+    const trimW = page.trimBox.widthMm;
+    const trimH = page.trimBox.heightMm;
+    const matches = findMatchingProfiles(trimW, trimH, customProfiles, toleranceMm);
+    if (matches.length > 0) {
+      return { detectedWidthMm: trimW, detectedHeightMm: trimH, matches };
+    }
+  }
+
+  // 2. Direct visual page dimensions match
+  const directMatches = findMatchingProfiles(pageW, pageH, customProfiles, toleranceMm);
+  if (directMatches.length > 0) {
+    return { detectedWidthMm: pageW, detectedHeightMm: pageH, matches: directMatches };
+  }
+
+  // 3. Test if visual dimensions represent page with 3mm bleed (e.g. 96x56 -> 90x50, 216x303 -> 210x297)
+  const trimmedW = pageW - 6.0;
+  const trimmedH = pageH - 6.0;
+  if (trimmedW > 0 && trimmedH > 0) {
+    const bleedMatches = findMatchingProfiles(trimmedW, trimmedH, customProfiles, toleranceMm);
+    if (bleedMatches.length > 0) {
+      return { detectedWidthMm: trimmedW, detectedHeightMm: trimmedH, matches: bleedMatches };
+    }
+  }
+
+  return { detectedWidthMm: pageW, detectedHeightMm: pageH, matches: [] };
+}

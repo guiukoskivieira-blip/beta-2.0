@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { UploadZone } from './components/UploadZone';
@@ -7,6 +7,7 @@ import { ProcessingState } from './components/ProcessingState';
 import { OperationalVerdictBanner } from './components/OperationalVerdictBanner';
 import { MainInspectionCard } from './components/MainInspectionCard';
 import { AvailableFixesSection } from './components/AvailableFixesSection';
+import { RecommendedProfileBanner } from './components/RecommendedProfileBanner';
 import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordion';
 import { FilesManagementView } from './components/FilesManagementView';
 import { VerificationsView } from './components/VerificationsView';
@@ -20,7 +21,8 @@ import { PlansModal } from './components/PlansModal';
 import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { Footer } from './components/Footer';
 
-import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
+import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
+import { getLocalCustomProfiles } from './utils/customProfilesStorage';
 import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
 import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
@@ -32,7 +34,7 @@ import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
 import type { BillingStatus } from './domain/billing';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
-import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
@@ -52,6 +54,15 @@ export const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
 
+  // Profile recommendation state & feedback toast
+  const [dismissedRecommendation, setDismissedRecommendation] = useState(false);
+  const [profileChangeFeedback, setProfileChangeFeedback] = useState<{
+    profileName: string;
+    dimensionsText: string;
+    bleedText: string;
+    dpiText: string;
+  } | null>(null);
+
   // Active navigation tab ('dashboard' | 'files' | 'verifications' | 'reports' | 'history' | 'settings')
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
@@ -66,6 +77,7 @@ export const App: React.FC = () => {
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfilesOpen, setIsProfilesOpen] = useState(false);
+  const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isPlansOpen, setIsPlansOpen] = useState(false);
@@ -108,6 +120,25 @@ export const App: React.FC = () => {
     }
   }, [currentUser]);
 
+  // Compute matched profiles for active document
+  const matchingProfileData = useMemo(() => {
+    if (!currentAnalysis?.document.pages[0]) return null;
+    const customProfiles = getLocalCustomProfiles().map(p => ({
+      id: p.id,
+      name: p.name,
+      category: 'custom' as const,
+      description: 'Perfil personalizado',
+      expectedWidthMm: p.rules.dimensions?.targetWidthMm,
+      expectedHeightMm: p.rules.dimensions?.targetHeightMm,
+      expectedBleedMm: p.rules.bleed?.requiredBleedMm ?? 3,
+      minEffectiveDpi: p.rules.dpi?.recommendedDpi || 300,
+      warningDpiThreshold: p.rules.dpi?.criticalDpi || 200,
+      rgbPolicy: p.rules.colors?.rgbPolicy || 'error',
+      recommendsPdfX: true,
+    }));
+    return detectMatchingProfilesFromPage(currentAnalysis.document.pages[0], customProfiles);
+  }, [currentAnalysis, isProfilesOpen]);
+
   const handleFileSelected = (file: File) => {
     setOriginalFile(file);
     setWorkingFile(file);
@@ -119,6 +150,8 @@ export const App: React.FC = () => {
     setJobCheckResult(null);
     setProcessingStatus('idle');
     setErrorMessage(null);
+    setDismissedRecommendation(false);
+    setProfileChangeFeedback(null);
     setActiveTab('dashboard');
   };
 
@@ -128,6 +161,7 @@ export const App: React.FC = () => {
     setProcessingStatus('uploading');
     setErrorMessage(null);
     setLimitReached(false);
+    setDismissedRecommendation(false);
 
     try {
       // 1. Upload & Deterministic Structure Extraction
@@ -200,6 +234,63 @@ export const App: React.FC = () => {
       const msg = err?.message || 'Erro inesperado ao analisar o documento.';
       setErrorMessage(msg);
       setLimitReached(msg.includes('limite') || msg.includes('upgrade') || msg.includes('atingiu'));
+    }
+  };
+
+  // Instant Deterministic Profile Switch Handler (No reupload, working PDF preserved)
+  const handleSelectProfile = async (newProfile: ProductionProfile) => {
+    setSelectedProfile(newProfile);
+
+    if (currentAnalysis) {
+      // Re-run Motor 1 deterministically with the new production profile contract
+      const updatedRules = runDeterministicRuleEngine(currentAnalysis.document, newProfile);
+
+      const updatedAnalysis: PreflightAnalysis = {
+        ...currentAnalysis,
+        profileId: newProfile.id,
+        ruleResults: updatedRules,
+      };
+
+      setCurrentAnalysis(updatedAnalysis);
+
+      // Rebuild technical snapshots and update storage
+      const postFixSnapshot = createAnalysisSnapshot(updatedAnalysis, newProfile);
+      const updatedReport = buildTechnicalReport(
+        originalAnalysis ? createAnalysisSnapshot(originalAnalysis, newProfile) : postFixSnapshot,
+        { ruleResults: updatedRules } as any,
+        newProfile
+      );
+
+      await storage.saveAnalysis({
+        id: updatedAnalysis.id,
+        createdAt: updatedAnalysis.createdAt,
+        fileName: updatedAnalysis.fileName,
+        fileSizeBytes: updatedAnalysis.fileSizeBytes,
+        segmentName: newProfile.category,
+        productName: newProfile.name,
+        variantName: 'Perfil Atualizado',
+        productionProfileId: newProfile.id,
+        status: updatedRules.scoreSummary.classification,
+        score: updatedRules.scoreSummary.score,
+        errorCount: updatedRules.errorCount,
+        warningCount: updatedRules.warningCount,
+        approvedCount: updatedRules.approvedCount,
+        initialSnapshot: originalAnalysis ? createAnalysisSnapshot(originalAnalysis, newProfile) : postFixSnapshot,
+        postFixSnapshot,
+        reportData: updatedReport,
+      });
+
+      loadHistory();
+
+      // Show small informative feedback
+      setProfileChangeFeedback({
+        profileName: newProfile.name,
+        dimensionsText: newProfile.expectedWidthMm && newProfile.expectedHeightMm
+          ? `${newProfile.expectedWidthMm} × ${newProfile.expectedHeightMm} mm`
+          : 'Formato Livre',
+        bleedText: `${newProfile.expectedBleedMm ?? 0} mm`,
+        dpiText: `${newProfile.minEffectiveDpi} DPI`,
+      });
     }
   };
 
@@ -332,6 +423,8 @@ export const App: React.FC = () => {
     setProcessingStatus('idle');
     setErrorMessage(null);
     setLimitReached(false);
+    setDismissedRecommendation(false);
+    setProfileChangeFeedback(null);
     setActiveTab('dashboard');
   };
 
@@ -366,7 +459,10 @@ export const App: React.FC = () => {
         viewMode={viewMode}
         onToggleViewMode={(mode) => setViewMode(mode)}
         selectedProfile={selectedProfile}
-        onOpenProfiles={() => setIsProfilesOpen(true)}
+        onOpenProfiles={() => {
+          setCustomInitDimensions(null);
+          setIsProfilesOpen(true);
+        }}
       />
 
       {/* Main Layout Area */}
@@ -445,6 +541,52 @@ export const App: React.FC = () => {
             />
           ) : currentAnalysis ? (
             <div className="space-y-6">
+              {/* Profile Change Feedback Toast */}
+              {profileChangeFeedback && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 shadow-2xs flex items-center justify-between gap-3 animate-in fade-in duration-200 select-none">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xs shrink-0">
+                      ✓
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-bold block">
+                        Perfil alterado para {profileChangeFeedback.profileName}
+                      </span>
+                      <span className="text-emerald-700">
+                        As verificações foram recalculadas para: <strong>{profileChangeFeedback.dimensionsText}</strong> • Sangria: <strong>{profileChangeFeedback.bleedText}</strong> • <strong>{profileChangeFeedback.dpiText}</strong>.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProfileChangeFeedback(null)}
+                    className="p-1 rounded-lg text-emerald-600 hover:bg-emerald-100 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Recommended Profile Banner (if compatible presets found for generic active profile) */}
+              {matchingProfileData && !dismissedRecommendation && (
+                <RecommendedProfileBanner
+                  detectedWidthMm={matchingProfileData.detectedWidthMm}
+                  detectedHeightMm={matchingProfileData.detectedHeightMm}
+                  matchingProfiles={matchingProfileData.matches}
+                  currentProfile={selectedProfile}
+                  onSelectProfile={handleSelectProfile}
+                  onOpenProfilesModal={() => {
+                    setCustomInitDimensions(null);
+                    setIsProfilesOpen(true);
+                  }}
+                  onCreateCustomWithDimensions={(w, h) => {
+                    setCustomInitDimensions({ widthMm: w, heightMm: h });
+                    setIsProfilesOpen(true);
+                  }}
+                  onDismiss={() => setDismissedRecommendation(true)}
+                />
+              )}
+
               {/* Global Cumulative Session Download Bar (Top Highlight) */}
               {appliedCorrections.length > 0 && (
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#2563EB] text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 select-none">
@@ -501,7 +643,10 @@ export const App: React.FC = () => {
                 profile={selectedProfile}
                 file={workingFile || originalFile}
                 onOpenReportModal={() => setIsReportOpen(true)}
-                onOpenProfiles={() => setIsProfilesOpen(true)}
+                onOpenProfiles={() => {
+                  setCustomInitDimensions(null);
+                  setIsProfilesOpen(true);
+                }}
                 userName={currentUser?.name}
               />
 
@@ -573,9 +718,13 @@ export const App: React.FC = () => {
       />
       <ProductionProfilesModal
         isOpen={isProfilesOpen}
-        onClose={() => setIsProfilesOpen(false)}
+        onClose={() => {
+          setIsProfilesOpen(false);
+          setCustomInitDimensions(null);
+        }}
         selectedProfile={selectedProfile}
-        onSelectProfile={(p) => setSelectedProfile(p)}
+        onSelectProfile={handleSelectProfile}
+        initialDimensions={customInitDimensions}
       />
       <HistoryModal
         isOpen={isHistoryOpen}
