@@ -329,13 +329,13 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     const colorOccurrences: PdfColorOccurrence[] = [];
     const imageOccurrences: PdfImageOccurrence[] = [];
 
-    // Parse content streams for image coordinates (CTM tracking)
+    // Parse content streams for image coordinates (CTM tracking) and font usage
+    let contentBytes: Uint8Array | null = null;
     let imagePlacements = new Map<string, ImagePlacement>();
     try {
       const contents = page.node.Contents();
       if (contents) {
         const contentStreamRefs = contents instanceof PDFArray ? contents.asArray() : [contents];
-        let contentBytes: Uint8Array | null = null;
         if (contentStreamRefs.length > 1) {
           const parts: Uint8Array[] = [];
           for (const ref of contentStreamRefs) {
@@ -355,7 +355,7 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
           contentBytes = decodeStream(stream);
         }
         if (contentBytes) {
-        imagePlacements = parseImagePlacements(contentBytes);
+          imagePlacements = parseImagePlacements(contentBytes);
         }
       }
     } catch {}
