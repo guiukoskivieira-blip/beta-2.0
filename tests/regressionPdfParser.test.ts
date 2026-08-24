@@ -495,6 +495,138 @@ test('QA 06: Documento apenas com curvas/vetores (sem Tf nem Font) aprova RULE-F
 });
 
 // ============================================================================
+// QA 07: Distinção entre Fonte Selecionada (Tf) e Efetivamente Renderizada (Tj/TJ/'/")
+// ============================================================================
+
+test('QA 07 Caso A: BT /F1 12 Tf ET (sem texto) -> isUsedInContent=false e RULE-FONT-001 aprovado', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' });
+  const helvRef = pdfDoc.context.register(helvDict);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ Font: { F1: helvRef } }));
+
+  // Content stream with empty BT/ET block followed by Gray vector shapes
+  const content = Buffer.from('1 0 0 1 0 0 cm BT /F1 12 Tf 14.4 TL ET 0.5 g 10 10 100 100 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].baseFont, 'Helvetica');
+  assert.equal(structure.fonts[0].isUsedInContent, false, 'Tf isolado sem operador de texto NÃO deve marcar used=true');
+  assert.equal(structure.fonts[0].isEmbedded, 'no');
+
+  const rules = runDeterministicRuleEngine(structure, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const fontRule = rules.results.find((r) => r.ruleId === 'RULE-FONT-001');
+  assert.equal(fontRule?.status, 'approved', 'Sem texto renderizado, RULE-FONT-001 deve ser aprovado');
+  assert.ok(fontRule?.evidence.includes('Nenhum texto ativo utilizando fontes declaradas'));
+});
+
+test('QA 07 Caso B: BT /F1 12 Tf (ABC) Tj ET -> isUsedInContent=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' });
+  const helvRef = pdfDoc.context.register(helvDict);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ Font: { F1: helvRef } }));
+
+  const content = Buffer.from('BT /F1 12 Tf (ABC) Tj ET', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].isUsedInContent, true, 'Tj deve marcar used=true');
+});
+
+test('QA 07 Caso C: BT /F1 12 Tf [(A) 20 (B)] TJ ET -> isUsedInContent=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' });
+  const helvRef = pdfDoc.context.register(helvDict);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ Font: { F1: helvRef } }));
+
+  const content = Buffer.from('BT /F1 12 Tf [(A) 20 (B)] TJ ET', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].isUsedInContent, true, 'TJ deve marcar used=true');
+});
+
+test('QA 07 Caso D: Fonte apenas em Resources (sem Tf) -> isUsedInContent=false', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' });
+  const helvRef = pdfDoc.context.register(helvDict);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ Font: { F1: helvRef } }));
+
+  const content = Buffer.from('0 0 100 100 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].isUsedInContent, false);
+});
+
+test('QA 07 Caso E: Form XObject com Tf mas sem texto -> isUsedInContent=false', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' });
+  const helvRef = pdfDoc.context.register(helvDict);
+
+  const formDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 100, 100],
+    Resources: { Font: { F1: helvRef } },
+  });
+  const formContent = Buffer.from('BT /F1 12 Tf ET', 'utf-8');
+  const formStream = PDFRawStream.of(formDict as any, formContent);
+  const formRef = pdfDoc.context.register(formStream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Form1: formRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/Form1 Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].isUsedInContent, false);
+});
+
+test('QA 07 Caso F: Form XObject com Tf + Tj -> isUsedInContent=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const helvDict = pdfDoc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' });
+  const helvRef = pdfDoc.context.register(helvDict);
+
+  const formDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 100, 100],
+    Resources: { Font: { F1: helvRef } },
+  });
+  const formContent = Buffer.from('BT /F1 12 Tf (Hello Form) Tj ET', 'utf-8');
+  const formStream = PDFRawStream.of(formDict as any, formContent);
+  const formRef = pdfDoc.context.register(formStream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Form1: formRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/Form1 Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 1);
+  assert.equal(structure.fonts[0].isUsedInContent, true);
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
@@ -505,4 +637,5 @@ if (bugs.length > 0) {
 }
 
 export { bugs as pdfBugs, passed as pdfPassed, failed as pdfFailed };
+
 

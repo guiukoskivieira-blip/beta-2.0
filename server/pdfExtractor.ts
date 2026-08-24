@@ -243,6 +243,36 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
   return placements;
 }
 
+function parseActuallyUsedFontNames(contentBytes?: Uint8Array | null): Set<string> {
+  const usedFonts = new Set<string>();
+  if (!contentBytes || contentBytes.length === 0) return usedFonts;
+
+  const text = Buffer.from(contentBytes).toString('latin1');
+  const btEtRegex = /\bBT\b([\s\S]*?)\bET\b/g;
+  let blockMatch;
+
+  while ((blockMatch = btEtRegex.exec(text)) !== null) {
+    const blockContent = blockMatch[1];
+    let currentFont: string | null = null;
+
+    // Tokenize inside BT...ET to track active font at text drawing operations
+    const tokenRegex = /(\/([^\s\/\(\)\[\]<>{}%]+)\s+[\d\.\-+]+\s+Tf)|(\bTj\b|\bTJ\b|'|")/g;
+    let tokenMatch;
+
+    while ((tokenMatch = tokenRegex.exec(blockContent)) !== null) {
+      if (tokenMatch[2]) {
+        currentFont = tokenMatch[2];
+      } else if (tokenMatch[3]) {
+        if (currentFont) {
+          usedFonts.add(currentFont);
+        }
+      }
+    }
+  }
+
+  return usedFonts;
+}
+
 function parseBox(boxArray: any): PdfBoxInfo | undefined {
   if (!boxArray || !Array.isArray(boxArray) || boxArray.length < 4) return undefined;
   const toNum = (v: any): number => {
@@ -376,29 +406,13 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
 
     let hasTransparency = false;
 
-    // Track font resource names actually used by Tf operators on this page
-    const usedFontNamesOnPage = new Set<string>();
-    if (contentBytes && contentBytes.length > 0) {
-      const text = Buffer.from(contentBytes).toString('latin1');
-      const tfRegex = /\/([^\s\/\(\)\[\]<>{}%]+)\s+[\d\.\-+]+\s+Tf/g;
-      let match;
-      while ((match = tfRegex.exec(text)) !== null) {
-        usedFontNamesOnPage.add(match[1]);
-      }
-    }
+    // Track font resource names actually used by text rendering operators on this page
+    const usedFontNamesOnPage = parseActuallyUsedFontNames(contentBytes);
 
     const processFontsDict = (fontsDictRefOrObj: any, formContentBytes?: Uint8Array) => {
       const fontsDict = pdfDoc.context.lookup(fontsDictRefOrObj);
       if (fontsDict instanceof PDFDict) {
-        const formUsedFontNames = new Set<string>();
-        if (formContentBytes && formContentBytes.length > 0) {
-          const formText = Buffer.from(formContentBytes).toString('latin1');
-          const formTfRegex = /\/([^\s\/\(\)\[\]<>{}%]+)\s+[\d\.\-+]+\s+Tf/g;
-          let formMatch;
-          while ((formMatch = formTfRegex.exec(formText)) !== null) {
-            formUsedFontNames.add(formMatch[1]);
-          }
-        }
+        const formUsedFontNames = parseActuallyUsedFontNames(formContentBytes);
 
         const fEntries = fontsDict.entries();
         for (const [fName, fRef] of fEntries) {
@@ -443,9 +457,10 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
               isEmbedded = 'no';
             }
 
-            const isUsed = (usedFontNamesOnPage.size > 0 || formUsedFontNames.size > 0)
-              ? (usedFontNamesOnPage.has(rawFName) || usedFontNamesOnPage.has(baseFont) || formUsedFontNames.has(rawFName) || formUsedFontNames.has(baseFont))
-              : true;
+            const isUsed = usedFontNamesOnPage.has(rawFName) ||
+                           usedFontNamesOnPage.has(baseFont) ||
+                           formUsedFontNames.has(rawFName) ||
+                           formUsedFontNames.has(baseFont);
 
             if (!fontsMap.has(baseFont)) {
               fontsMap.set(baseFont, {
