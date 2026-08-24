@@ -242,9 +242,9 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
                   <div>
-                    <p className="text-sm text-amber-800 font-bold">Correção geométrica indisponível no perfil genérico</p>
+                    <p className="text-sm text-amber-800 font-bold">Correção automática indisponível</p>
                     <p className="text-xs text-[#64748B] mt-1">
-                      Escolha um perfil com dimensões definidas para habilitar correções geométricas quando forem determinísticas.
+                      O perfil selecionado não define formato final (expectedWidthMm/HeightMm). Escolha um perfil compatível para habilitar correções geométricas quando forem determinísticas.
                     </p>
                   </div>
                   {onOpenProfiles && (

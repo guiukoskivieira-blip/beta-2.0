@@ -6,6 +6,8 @@ import { ImageColorFixPanel } from './ImageColorFixPanel';
 import { TrimBleedFixPanel } from './TrimBleedFixPanel';
 import { PdfxPreparationPanel } from './PdfxPreparationPanel';
 import { FixEnginePanel } from './FixEnginePanel';
+import { AppliedFixStatusCard } from './AppliedFixStatusCard';
+import { checkTrimBleedEligibility } from '../services/trimBleedFix';
 
 interface AvailableFixesSectionProps {
   analysis: PreflightAnalysis;
@@ -14,6 +16,7 @@ interface AvailableFixesSectionProps {
   appliedCorrections?: Array<{ id: string; label: string; appliedAt: number; details?: { before?: string; after?: string; summary?: string } }>;
   onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   onOpenApplyAllModal?: () => void;
+  onOpenPdfxModal?: () => void;
   isFixingInProgress?: boolean;
   pdfxVerifiedState?: 'not_verified' | 'verified' | 'needs_revalidation';
   onAnalysisUpdated?: (updated: PreflightAnalysis) => void;
@@ -26,29 +29,41 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   appliedCorrections = [],
   onFixApplied,
   onOpenApplyAllModal,
+  onOpenPdfxModal,
   isFixingInProgress = false,
   pdfxVerifiedState = 'not_verified',
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'color' | 'boxes' | 'pdfx'>('all');
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Check what issues actually exist in the working file
-  const hasRgb = analysis.document.colorSummary.hasRgb;
+  // Check what issues actually exist in the working file using Motor 1 as the single source of truth
+  const colorRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-CLR-001' || r.category === 'color');
+  const bleedRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
+
+  const hasRgb = Boolean(analysis.document.colorSummary.hasRgb || (colorRule && colorRule.status !== 'approved'));
   const isDeclaredPdfX = Boolean(analysis.document.pdfxInfo?.isDeclaredPdfX);
-  const p1 = analysis.document.pages[0];
-  const needsTrimBleed = !p1?.bleedBox || (p1.bleedBox.widthMm <= p1.widthMm);
+  const hasOutputIntent = Boolean(analysis.document.pdfxInfo?.hasOutputIntent);
+
+  const profileHasDimensions = Boolean(
+    profile.expectedBleedMm && profile.expectedBleedMm > 0 &&
+    profile.expectedWidthMm && profile.expectedHeightMm
+  );
+
+  // Boxes need adjustment ONLY if Motor 1 rule is NOT approved AND profile expects bleed/dimensions AND is eligible
+  const isBleedEligible = profileHasDimensions && checkTrimBleedEligibility(analysis.document, profile).eligible;
+  const needsTrimBleed = Boolean(bleedRule && bleedRule.status !== 'approved' && isBleedEligible);
 
   const hasRgbApplied = appliedCorrections.some(c => c.id === 'rgb_cmyk');
   const hasBoxesApplied = appliedCorrections.some(c => c.id === 'trim_bleed');
   const hasPdfxApplied = appliedCorrections.some(c => c.id.startsWith('pdfx'));
 
   const canFixRgb = Boolean(hasRgb && !hasRgbApplied);
-  const profileHasDimensions = Boolean(profile.expectedBleedMm && profile.expectedBleedMm > 0 && profile.expectedWidthMm && profile.expectedHeightMm);
-  const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied && profileHasDimensions);
-  const canFixPdfx = Boolean(!isDeclaredPdfX || !analysis.document.pdfxInfo?.hasOutputIntent || pdfxVerifiedState === 'needs_revalidation');
+  const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied);
+  const canFixPdfx = Boolean((!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation') && pdfxVerifiedState !== 'verified');
 
   const autoFixesCount = (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
-  const hasAnyFixes = hasRgb || !isDeclaredPdfX || needsTrimBleed || appliedCorrections.length > 0;
+  const hasAnyFixes = hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || appliedCorrections.length > 0;
+  const hasPdfxPrereqs = Boolean(canFixRgb || canFixBoxes);
 
   // Detect manual issues that cannot be auto-fixed
   const dpiRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning'));
@@ -140,7 +155,7 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
       {/* Actionable Cards: What was found, Why it matters, What to do */}
       <div className="space-y-3">
         {/* Fix 1: RGB -> CMYK Color Conversion */}
-        {hasRgb ? (
+        {canFixRgb ? (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 to-white border border-blue-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-xl bg-[#EFF6FF] text-[#2563EB] shrink-0 mt-0.5">
@@ -170,18 +185,17 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </button>
             </div>
           </div>
-        ) : hasRgbApplied ? (
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span className="font-bold text-[#0F172A]">Imagens RGB convertidas com sucesso para CMYK (LittleCMS)</span>
-            </div>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">✓ Aplicada</span>
-          </div>
+        ) : (hasRgbApplied || (!analysis.document.colorSummary.hasRgb && (colorRule?.status === 'approved' || appliedCorrections.length > 0))) ? (
+          <AppliedFixStatusCard
+            title="Cores CMYK incorporadas ao arquivo de trabalho"
+            category="Cores"
+            details="Espaço de cor DeviceCMYK • Conversão LittleCMS CMM e perfil normativo"
+            validationText="Revalidado pelo Motor 1"
+          />
         ) : null}
 
-        {/* Fix 2: PDF/X-4 Preparation */}
-        {!isDeclaredPdfX ? (
+        {/* Fix 2: PDF/X-4 Preparation / Finalization */}
+        {canFixPdfx ? (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-50/70 to-white border border-purple-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-xl bg-[#FAF5FF] text-[#7C3AED] shrink-0 mt-0.5">
@@ -189,8 +203,17 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </div>
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#0F172A]">PDF/X NÃO DECLARADO</span>
+                  <span className="text-xs font-bold text-[#0F172A]">FINALIZAÇÃO NORMATIVA PDF/X-4</span>
                   <span className="px-2 py-0.5 rounded-md bg-[#EFF6FF] text-[#1D4ED8] text-[10px] font-bold">Normativo</span>
+                  {hasPdfxPrereqs ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Requisitos pendentes
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                      Pronto para finalizar
+                    </span>
+                  )}
                   {pdfxVerifiedState === 'needs_revalidation' && (
                     <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" /> Revalidação necessária
@@ -198,9 +221,13 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-[#475569] leading-relaxed">
-                  <strong>O que foi encontrado:</strong> O arquivo não possui Output Intent normativo (ISO 15930-7).<br />
-                  <strong>Por que importa:</strong> Sem o Output Intent, os sistemas de CtP/RIP não sabem qual o perfil ICC alvo pretendido pela criação.<br />
-                  <strong>Ação recomendada:</strong> Injetar metadados PDF/X-4 e OutputConditionIdentifier correspondente ao papel e perfil selecionados.
+                  <strong>O que foi encontrado:</strong> {hasPdfxPrereqs 
+                    ? `O arquivo requer adequação de ${[canFixRgb && 'Cores CMYK', canFixBoxes && 'Caixas Técnicas'].filter(Boolean).join(' e ')} antes de gravar a norma.`
+                    : 'O arquivo está pronto para gravação de metadados XMP e Output Intent normativo (ISO 15930-7).'}
+                  <br />
+                  <strong>Ação recomendada:</strong> {hasPdfxPrereqs 
+                    ? 'Ajustar os requisitos individualmente ou aplicar a correção conjunta.' 
+                    : 'Gravar metadados XMP PDF/X-4 e OutputConditionIdentifier GTS_PDFX.'}
                 </p>
               </div>
             </div>
@@ -209,25 +236,31 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               <button
                 type="button"
                 disabled={isFixingInProgress}
-                onClick={() => { setIsExpanded(true); setActiveTab('pdfx'); }}
+                onClick={() => {
+                  if (onOpenPdfxModal) {
+                    onOpenPdfxModal();
+                  } else {
+                    setIsExpanded(true);
+                    setActiveTab('pdfx');
+                  }
+                }}
                 className="px-4 py-2 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
               >
-                Preparar PDF/X-4
+                {hasPdfxPrereqs ? 'Ver Requisitos / Finalizar' : 'Finalizar PDF/X-4'}
               </button>
             </div>
           </div>
-        ) : hasPdfxApplied ? (
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span className="font-bold text-[#0F172A]">Estrutura PDF/X-4 e Output Intent normativo embutidos</span>
-            </div>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">✓ Aplicada</span>
-          </div>
+        ) : (hasPdfxApplied || pdfxVerifiedState === 'verified' || (isDeclaredPdfX && hasOutputIntent)) ? (
+          <AppliedFixStatusCard
+            title="PDF/X-4 incorporado ao arquivo de trabalho"
+            category="Normativo"
+            details="ISO 15930-7 (PDF/X-4) • Metadados XMP e Output Intent GTS_PDFX"
+            validationText="Revalidado pelo Motor 1"
+          />
         ) : null}
 
         {/* Fix 3: TrimBox & BleedBox Calibration */}
-        {needsTrimBleed ? (
+        {canFixBoxes ? (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50/70 to-white border border-emerald-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-xl bg-[#ECFDF5] text-[#059669] shrink-0 mt-0.5">
@@ -257,15 +290,29 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </button>
             </div>
           </div>
-        ) : hasBoxesApplied ? (
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span className="font-bold text-[#0F172A]">TrimBox e BleedBox calibrados geometricamente</span>
-            </div>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">✓ Aplicada</span>
-          </div>
+        ) : (hasBoxesApplied || (bleedRule?.status === 'approved' && (appliedCorrections.length > 0 || analysis.document.pages[0]?.trimBox?.status === 'explicit'))) ? (
+          <AppliedFixStatusCard
+            title="Caixas técnicas incorporadas ao arquivo de trabalho"
+            category="Geometria"
+            details={`TrimBox: ${analysis.document.pages[0]?.trimBox?.widthMm || profile.expectedWidthMm || 0} × ${analysis.document.pages[0]?.trimBox?.heightMm || profile.expectedHeightMm || 0} mm • Sangria: ${profile.expectedBleedMm || 3} mm`}
+            validationText="Revalidado pelo Motor 1"
+          />
         ) : null}
+
+        {/* All automatic fixes applied banner */}
+        {appliedCorrections.length > 0 && autoFixesCount === 0 && (
+          <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-start gap-3 text-xs">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold text-emerald-900">
+                Todas as correções automáticas disponíveis foram aplicadas com sucesso.
+              </span>
+              <p className="text-emerald-800 text-[11px] mt-0.5">
+                O arquivo de trabalho está em conformidade com as regras automáticas avaliadas pelo Motor 1.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Manual Items Alert (Non-blocking) */}
         {manualIssues.length > 0 && (
