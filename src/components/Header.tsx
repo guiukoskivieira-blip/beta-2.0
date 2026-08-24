@@ -20,6 +20,13 @@ export const Header: React.FC<HeaderProps> = ({
   selectedProfile,
   onOpenProfiles,
 }) => {
+  // Format clean profile display string
+  const profileLabel = selectedProfile
+    ? selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm
+      ? `${selectedProfile.name.split('—')[0].trim()} (${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm)`
+      : selectedProfile.name
+    : 'Impressão Comercial';
+
   return (
     <header className="sticky top-0 z-20 w-full bg-white/95 backdrop-blur-xs border-b border-slate-200/80 px-4 sm:px-8 py-3 flex items-center justify-between shadow-2xs select-none">
       {/* Left: Brand & Prominent Profile Selector */}
@@ -32,12 +39,12 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onOpenProfiles}
             className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-200 text-xs font-semibold text-[#0F172A] transition-all cursor-pointer shadow-2xs group"
-            title={`Perfil Ativo: ${selectedProfile.name}. Clique para alternar perfis.`}
+            title={`Perfil Ativo: ${selectedProfile.name}. Clique para abrir a biblioteca de produtos e perfis.`}
           >
             <Sliders className="w-3.5 h-3.5 text-[#4F46E5] group-hover:scale-110 transition-transform" />
             <span className="text-[#64748B] font-medium hidden sm:inline">Perfil:</span>
-            <span className="truncate max-w-[140px] sm:max-w-[200px] font-bold text-[#0F172A]">
-              {selectedProfile.name}
+            <span className="truncate max-w-[150px] sm:max-w-[240px] font-bold text-[#0F172A]">
+              {profileLabel}
             </span>
             <ChevronDown className="w-3 h-3 text-[#64748B] group-hover:text-[#4F46E5] transition-colors" />
           </button>

@@ -11,7 +11,7 @@ import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordio
 import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
 import { JobCheckResults } from './components/JobCheckResults';
 import { AuthModal } from './components/AuthModal';
-import { CustomProfilesModal } from './components/CustomProfilesModal';
+import { ProductionProfilesModal } from './components/ProductionProfilesModal';
 import { HistoryModal } from './components/HistoryModal';
 import { AboutBetaModal } from './components/AboutBetaModal';
 import { PlansModal } from './components/PlansModal';
@@ -383,24 +383,11 @@ export const App: React.FC = () => {
         onClose={() => setIsAuthOpen(false)}
         onSuccess={(user) => setCurrentUser(user)}
       />
-      <CustomProfilesModal
+      <ProductionProfilesModal
         isOpen={isProfilesOpen}
         onClose={() => setIsProfilesOpen(false)}
-        onSelectProfile={(p) => {
-          const converted: ProductionProfile = {
-            id: p.id,
-            name: p.name,
-            category: 'custom',
-            description: 'Perfil personalizado configurado pelo usuário.',
-            expectedWidthMm: p.rules.dimensions?.targetWidthMm,
-            expectedHeightMm: p.rules.dimensions?.targetHeightMm,
-            expectedBleedMm: p.rules.bleed?.requiredBleedMm,
-            minEffectiveDpi: p.rules.dpi?.recommendedDpi || 300,
-            warningDpiThreshold: p.rules.dpi?.criticalDpi || 200,
-            rgbPolicy: p.rules.colors?.rgbPolicy || 'error',
-          };
-          setSelectedProfile(converted);
-        }}
+        selectedProfile={selectedProfile}
+        onSelectProfile={(p) => setSelectedProfile(p)}
       />
       <HistoryModal
         isOpen={isHistoryOpen}
