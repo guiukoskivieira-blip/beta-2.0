@@ -27,6 +27,7 @@ import { buildTechnicalReport, createAnalysisSnapshot } from '../services/techni
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from '../services/reportPdfGenerator';
 
 interface TechnicalReportModalProps {
+  appliedCorrections?: Array<{ id: string; label: string; appliedAt: number }>;
   isOpen: boolean;
   onClose: () => void;
   analysis: PreflightAnalysis | null;
@@ -34,6 +35,7 @@ interface TechnicalReportModalProps {
 }
 
 export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
+  appliedCorrections = [],
   isOpen,
   onClose,
   analysis,

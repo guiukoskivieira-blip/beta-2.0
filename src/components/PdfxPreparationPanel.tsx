@@ -22,6 +22,8 @@ import type { PdfxPreparationResult } from '../services/pdfxPreparation';
 import type { PdfxFinalizeResult } from '../services/pdfxFinalize';
 
 export interface PdfxPreparationPanelProps {
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean) => void;
+  isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile?: ProductionProfile;
   originalFile?: File | null;
@@ -29,6 +31,8 @@ export interface PdfxPreparationPanelProps {
 }
 
 export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
+  onFixApplied,
+  isFixingInProgress,
   analysis,
   profile,
   originalFile,

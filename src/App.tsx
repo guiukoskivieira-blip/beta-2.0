@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { UploadZone } from './components/UploadZone';
@@ -8,6 +8,8 @@ import { OperationalVerdictBanner } from './components/OperationalVerdictBanner'
 import { MainInspectionCard } from './components/MainInspectionCard';
 import { AvailableFixesSection } from './components/AvailableFixesSection';
 import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordion';
+import { FilesManagementView } from './components/FilesManagementView';
+import { VerificationsView } from './components/VerificationsView';
 import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
 import { JobCheckResults } from './components/JobCheckResults';
 import { AuthModal } from './components/AuthModal';
@@ -23,26 +25,37 @@ import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
 import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
-import type { BetaUser } from './domain/beta';
+import type { BetaUser, AnalysisRecordSummary } from './domain/beta';
 import type { PreflightAnalysis } from './types';
 import { uploadPdfForExtraction } from './services/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
 import type { BillingStatus } from './domain/billing';
-import { FileText, FolderOpen, CheckSquare, Plus } from 'lucide-react';
+import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
+import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  
+  // File & Cumulative Session States
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [workingFile, setWorkingFile] = useState<File | null>(null);
+  const [workingPdfBlob, setWorkingPdfBlob] = useState<Blob | null>(null);
+  const [appliedCorrections, setAppliedCorrections] = useState<Array<{ id: string; label: string; appliedAt: number }>>([]);
+  const [isFixingInProgress, setIsFixingInProgress] = useState<boolean>(false);
+  const [pdfxVerifiedState, setPdfxVerifiedState] = useState<'not_verified' | 'verified' | 'needs_revalidation'>('not_verified');
+
+  // Analysis states
+  const [originalAnalysis, setOriginalAnalysis] = useState<PreflightAnalysis | null>(null);
+  const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
   const [processingStatus, setProcessingStatus] = useState<'idle' | 'uploading' | 'extracting' | 'analyzing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
-  const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
 
-  // Active navigation tab
+  // Active navigation tab ('dashboard' | 'files' | 'verifications' | 'reports' | 'history' | 'settings')
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
-  // View mode: 'operational' (concise, decision-first) vs 'technical' (expanded details)
+  // View mode: 'operational' vs 'technical'
   const [viewMode, setViewMode] = useState<'operational' | 'technical'>('operational');
 
   // Job Check state
@@ -58,12 +71,19 @@ export const App: React.FC = () => {
   const [isPlansOpen, setIsPlansOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
 
-  // User state
+  // User & Billing states
   const [currentUser, setCurrentUser] = useState<BetaUser | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
+  const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
 
-  // Sync auth state on mount and fetch billing status
+  const storage = new LocalStorageProvider();
+
+  const loadHistory = useCallback(() => {
+    storage.listAnalyses().then(setHistoryList).catch(() => {});
+  }, []);
+
   useEffect(() => {
+    loadHistory();
     auth.getCurrentUser().then((u) => {
       if (u) setCurrentUser(u);
     });
@@ -76,7 +96,7 @@ export const App: React.FC = () => {
         unsubscribe();
       };
     }
-  }, []);
+  }, [loadHistory]);
 
   useEffect(() => {
     if (currentUser) {
@@ -88,10 +108,13 @@ export const App: React.FC = () => {
     }
   }, [currentUser]);
 
-  const storage = new LocalStorageProvider();
-
   const handleFileSelected = (file: File) => {
-    setSelectedFile(file);
+    setOriginalFile(file);
+    setWorkingFile(file);
+    setWorkingPdfBlob(null);
+    setAppliedCorrections([]);
+    setPdfxVerifiedState('not_verified');
+    setOriginalAnalysis(null);
     setCurrentAnalysis(null);
     setJobCheckResult(null);
     setProcessingStatus('idle');
@@ -100,15 +123,15 @@ export const App: React.FC = () => {
   };
 
   const handleStartAnalysis = async () => {
-    if (!selectedFile) return;
+    if (!workingFile) return;
 
     setProcessingStatus('uploading');
     setErrorMessage(null);
     setLimitReached(false);
 
     try {
-      // 1. Upload & Deterministic Structure Extraction on backend
-      const result = await uploadPdfForExtraction(selectedFile);
+      // 1. Upload & Deterministic Structure Extraction
+      const result = await uploadPdfForExtraction(workingFile);
       if (!result.success || !result.document) {
         throw new Error(result.error || 'Falha na extração dos dados estruturais do PDF.');
       }
@@ -121,8 +144,8 @@ export const App: React.FC = () => {
       const analysis: PreflightAnalysis = {
         id: result.analysisId || `analysis_${Date.now()}`,
         createdAt: Date.now(),
-        fileName: selectedFile.name,
-        fileSizeBytes: selectedFile.size,
+        fileName: workingFile.name,
+        fileSizeBytes: workingFile.size,
         document: result.document,
         ruleResults,
         profileId: selectedProfile.id,
@@ -132,7 +155,7 @@ export const App: React.FC = () => {
         },
       };
 
-      // 3. Save to lightweight local storage with immutable snapshot & initial report
+      // 3. Save initial snapshot
       const initialSnapshot = createAnalysisSnapshot(analysis, selectedProfile);
       const reportData = buildTechnicalReport(initialSnapshot, null, selectedProfile);
 
@@ -154,14 +177,14 @@ export const App: React.FC = () => {
         reportData,
       });
 
+      setOriginalAnalysis(analysis);
       setCurrentAnalysis(analysis);
+      loadHistory();
 
-      // Refresh billing status after analysis to update usage counter
       if (currentUser) {
         getBillingStatus().then(setBillingStatus).catch(() => {});
       }
 
-      // Run Job Check if enabled with spec data
       if (jobCheckEnabled) {
         const jcResult = runJobCheck(jobCheckSpec, analysis);
         setJobCheckResult(jcResult);
@@ -180,8 +203,130 @@ export const App: React.FC = () => {
     }
   };
 
+  // Cumulative Fix Application Handler
+  const handleFixApplied = async (
+    newBlob: Blob,
+    fixId: string,
+    fixLabel: string,
+    isPdfxVerified?: boolean
+  ) => {
+    if (isFixingInProgress || !originalFile) return;
+
+    try {
+      setIsFixingInProgress(true);
+
+      const updatedFileName = originalFile.name;
+      const updatedWorkingFile = new File([newBlob], updatedFileName, { type: 'application/pdf' });
+
+      setWorkingPdfBlob(newBlob);
+      setWorkingFile(updatedWorkingFile);
+
+      const newCorrections = [
+        ...appliedCorrections,
+        { id: fixId, label: fixLabel, appliedAt: Date.now() },
+      ];
+      setAppliedCorrections(newCorrections);
+
+      // Re-extract and re-analyze deterministic rules over the updated working PDF
+      const result = await uploadPdfForExtraction(updatedWorkingFile);
+      if (result.success && result.document) {
+        const updatedRules = runDeterministicRuleEngine(result.document, selectedProfile);
+
+        const updatedAnalysis: PreflightAnalysis = {
+          id: currentAnalysis?.id || `analysis_${Date.now()}`,
+          createdAt: currentAnalysis?.createdAt || Date.now(),
+          fileName: updatedFileName,
+          fileSizeBytes: newBlob.size,
+          document: result.document,
+          ruleResults: updatedRules,
+          profileId: selectedProfile.id,
+          diagnosticInfo: {
+            extractionDurationMs: 35,
+            evaluationDurationMs: 12,
+          },
+        };
+
+        setCurrentAnalysis(updatedAnalysis);
+
+        // Update local storage record with post-fix snapshot
+        const postFixSnapshot = createAnalysisSnapshot(updatedAnalysis, selectedProfile);
+        const updatedReport = buildTechnicalReport(
+          originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+          { ruleResults: updatedRules } as any,
+          selectedProfile
+        );
+
+        await storage.saveAnalysis({
+          id: updatedAnalysis.id,
+          createdAt: updatedAnalysis.createdAt,
+          fileName: updatedAnalysis.fileName,
+          fileSizeBytes: updatedAnalysis.fileSizeBytes,
+          segmentName: selectedProfile.category,
+          productName: selectedProfile.name,
+          variantName: 'Corrigido',
+          productionProfileId: selectedProfile.id,
+          status: updatedRules.scoreSummary.classification,
+          score: updatedRules.scoreSummary.score,
+          errorCount: updatedRules.errorCount,
+          warningCount: updatedRules.warningCount,
+          approvedCount: updatedRules.approvedCount,
+          initialSnapshot: originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+          postFixSnapshot,
+          reportData: updatedReport,
+        });
+
+        loadHistory();
+      }
+
+      // Manage PDF/X verification status
+      if (isPdfxVerified) {
+        setPdfxVerifiedState('verified');
+      } else if (pdfxVerifiedState === 'verified') {
+        // If a non-PDF/X fix was applied after PDF/X was verified, require revalidation
+        setPdfxVerifiedState('needs_revalidation');
+      }
+    } catch (err) {
+      console.error('Erro ao reanalisar o PDF corrigido:', err);
+    } finally {
+      setIsFixingInProgress(false);
+    }
+  };
+
+  // Global Download Handler for the current working PDF
+  const handleDownloadWorkingPdf = () => {
+    if (!workingPdfBlob || !originalFile) return;
+
+    const baseName = originalFile.name.replace(/\.pdf$/i, '');
+    const downloadName = `${baseName}_artecheck_corrigido.pdf`;
+
+    const url = URL.createObjectURL(workingPdfBlob);
+    const a = window.document.createElement('a');
+    a.href = url;
+    a.download = downloadName;
+    window.document.body.appendChild(a);
+    a.click();
+    window.document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Restore session to original PDF
+  const handleRestoreOriginal = () => {
+    if (!originalFile || !originalAnalysis) return;
+
+    setWorkingFile(originalFile);
+    setWorkingPdfBlob(null);
+    setAppliedCorrections([]);
+    setCurrentAnalysis(originalAnalysis);
+    setPdfxVerifiedState('not_verified');
+  };
+
   const handleReset = () => {
-    setSelectedFile(null);
+    setOriginalFile(null);
+    setWorkingFile(null);
+    setWorkingPdfBlob(null);
+    setAppliedCorrections([]);
+    setPdfxVerifiedState('not_verified');
+    setOriginalAnalysis(null);
     setCurrentAnalysis(null);
     setJobCheckResult(null);
     setProcessingStatus('idle');
@@ -217,12 +362,11 @@ export const App: React.FC = () => {
       {/* Top Header */}
       <Header
         onReset={handleReset}
-        canReset={Boolean(selectedFile || currentAnalysis)}
+        canReset={Boolean(originalFile || currentAnalysis)}
         viewMode={viewMode}
         onToggleViewMode={(mode) => setViewMode(mode)}
         selectedProfile={selectedProfile}
         onOpenProfiles={() => setIsProfilesOpen(true)}
-        
       />
 
       {/* Main Layout Area */}
@@ -255,52 +399,92 @@ export const App: React.FC = () => {
               onRetry={handleStartAnalysis}
               onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
             />
-          ) : activeTab === 'verifications' && !currentAnalysis ? (
-            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-4 max-w-lg mx-auto my-12">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-[#4F46E5] flex items-center justify-center mx-auto border border-indigo-100">
-                <CheckSquare className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-black text-[#0F172A]">Nenhuma Verificação Ativa</h3>
-              <p className="text-xs text-[#64748B] font-medium leading-relaxed">
-                Envie um arquivo PDF ou selecione um item do histórico para inspecionar regras e métricas técnicas.
-              </p>
-              <button
-                type="button"
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 shadow-sm transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Analisar Novo Arquivo</span>
-              </button>
-            </div>
-          ) : activeTab === 'files' && !currentAnalysis ? (
-            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-4 max-w-lg mx-auto my-12">
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto border border-blue-100">
-                <FolderOpen className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-black text-[#0F172A]">Nenhum Arquivo Selecionado</h3>
-              <p className="text-xs text-[#64748B] font-medium leading-relaxed">
-                Envie um documento PDF para iniciar a validação automatizada ou consulte seus relatórios no Histórico.
-              </p>
-              <div className="flex items-center justify-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] shadow-2xs transition-all cursor-pointer"
-                >
-                  Enviar PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsHistoryOpen(true)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all cursor-pointer"
-                >
-                  Ver Histórico
-                </button>
-              </div>
-            </div>
+          ) : activeTab === 'files' ? (
+            <FilesManagementView
+              currentAnalysis={currentAnalysis}
+              workingFile={workingFile}
+              originalFile={originalFile}
+              profile={selectedProfile}
+              appliedCorrections={appliedCorrections}
+              onGoToDashboard={() => setActiveTab('dashboard')}
+              onDownloadWorkingPdf={handleDownloadWorkingPdf}
+              onRestoreOriginal={handleRestoreOriginal}
+              onOpenReportModal={() => setIsReportOpen(true)}
+              onReset={handleReset}
+              historyList={historyList}
+              onSelectHistoryItem={(id) => {
+                const item = historyList.find(h => h.id === id);
+                if (item) {
+                  setIsHistoryOpen(true);
+                }
+              }}
+              onDeleteHistoryItem={async (id) => {
+                await storage.deleteAnalysis(id);
+                loadHistory();
+              }}
+              onExportHistoryReport={async (item) => {
+                try {
+                  const snap = item.initialSnapshot;
+                  const reportData = item.reportData || buildTechnicalReport(snap);
+                  const pdfBytes = await generateTechnicalReportPdf(reportData);
+                  const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
+                  downloadTechnicalReportPdf(pdfBytes, fileName);
+                } catch (e) {
+                  console.error('Erro ao exportar relatório:', e);
+                }
+              }}
+            />
+          ) : activeTab === 'verifications' ? (
+            <VerificationsView
+              analysis={currentAnalysis}
+              profile={selectedProfile}
+              onGoToDashboard={() => setActiveTab('dashboard')}
+              onScrollToFixes={scrollToFixes}
+              onOpenReportModal={() => setIsReportOpen(true)}
+              onReset={handleReset}
+            />
           ) : currentAnalysis ? (
             <div className="space-y-6">
+              {/* Global Cumulative Session Download Bar (Top Highlight) */}
+              {appliedCorrections.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#2563EB] text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 select-none">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-white/20 text-white shrink-0">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black tracking-tight">
+                          Sessão de Trabalho: {appliedCorrections.length} correção(ões) acumulada(s)
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/90 font-medium">
+                        O PDF de trabalho está pronto com todas as alterações aplicadas e revalidadas.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRestoreOriginal}
+                      className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 inline mr-1" />
+                      Restaurar Original
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadWorkingPdf}
+                      className="px-4 py-2 rounded-xl bg-white text-emerald-800 hover:bg-emerald-50 text-xs font-black shadow-xs transition-all cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 inline mr-1.5" />
+                      Baixar Arquivo Corrigido
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Operational Decision Banner */}
               <OperationalVerdictBanner
                 ruleResults={currentAnalysis.ruleResults}
@@ -315,7 +499,7 @@ export const App: React.FC = () => {
               <MainInspectionCard
                 analysis={currentAnalysis}
                 profile={selectedProfile}
-                file={selectedFile}
+                file={workingFile || originalFile}
                 onOpenReportModal={() => setIsReportOpen(true)}
                 onOpenProfiles={() => setIsProfilesOpen(true)}
                 userName={currentUser?.name}
@@ -330,11 +514,15 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {/* Available Fixes Section */}
+              {/* Available Fixes Section (Cumulative) */}
               <AvailableFixesSection
                 analysis={currentAnalysis}
                 profile={selectedProfile}
-                originalFile={selectedFile}
+                originalFile={workingFile}
+                appliedCorrections={appliedCorrections}
+                onFixApplied={handleFixApplied}
+                isFixingInProgress={isFixingInProgress}
+                pdfxVerifiedState={pdfxVerifiedState}
               />
 
               {/* Technical Details Accordion */}
@@ -344,7 +532,7 @@ export const App: React.FC = () => {
                 isOpenDefault={viewMode === 'technical'}
               />
             </div>
-          ) : selectedFile ? (
+          ) : workingFile ? (
             <div className="space-y-6">
               <JobCheckForm
                 enabled={jobCheckEnabled}
@@ -353,7 +541,7 @@ export const App: React.FC = () => {
                 onSpecChange={setJobCheckSpec}
               />
               <FileSelected
-                file={selectedFile}
+                file={workingFile}
                 onClear={handleReset}
                 onAnalyze={handleStartAnalysis}
               />
@@ -406,6 +594,7 @@ export const App: React.FC = () => {
         onClose={() => setIsReportOpen(false)}
         analysis={currentAnalysis}
         profile={selectedProfile}
+        appliedCorrections={appliedCorrections}
       />
     </div>
   );

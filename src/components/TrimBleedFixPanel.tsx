@@ -8,6 +8,8 @@ import { buildTechnicalReport, createAnalysisSnapshot } from '../services/techni
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from '../services/reportPdfGenerator';
 
 interface TrimBleedFixPanelProps {
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string) => void;
+  isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
   originalFile: File | null;
@@ -15,7 +17,7 @@ interface TrimBleedFixPanelProps {
 
 type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error' | 'structural_error';
 
-export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, profile, originalFile }) => {
+export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, profile, originalFile, onFixApplied, isFixingInProgress }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -99,6 +101,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
       // Only mark as 'applied' if both structural and Motor 1 validation passed
       if (structureOk && response.revalidation?.validated) {
         setPhase('applied');
+        onFixApplied?.(blob, 'trim_bleed', 'Calibração de Caixas Técnicas (TrimBox/BleedBox)');
       } else if (!structureOk) {
         setErrorMessage('Falha na validação estrutural do PDF corrigido.');
         setPhase('structural_error');

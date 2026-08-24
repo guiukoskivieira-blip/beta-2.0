@@ -8,6 +8,8 @@ import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnica
 import { PRESET_ICC_PROFILES, type RenderingIntent } from '../domain/colorManagement';
 
 interface ImageColorFixPanelProps {
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string) => void;
+  isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
   originalFile: File | null;
@@ -15,7 +17,7 @@ interface ImageColorFixPanelProps {
 
 type Phase = 'idle' | 'preview' | 'applying' | 'applied' | 'cancelled' | 'error' | 'structural_error' | 'manual_required';
 
-export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis, profile, originalFile }) => {
+export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis, profile, originalFile, onFixApplied, isFixingInProgress }) => {
   const [phase, setPhase] = useState<Phase>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [destinationIccPresetId, setDestinationIccPresetId] = useState<string>('cgats_tr_001_swop');
