@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { PLANS } from '../src/domain/billing.ts';
+import { PLANS } from '../src/domain/billing';
 
 let passed = 0;
 let failed = 0;
@@ -34,7 +34,7 @@ const rlsSql = fs.readFileSync('supabase/migrations/002_rls_policies.sql', 'utf8
 // ============================================================================
 
 test('Quota idempotente: upsert com onConflict analysis_id e ignoreDuplicates', () => {
-  assert.match(serverSrc, /onConflict:\s*['"](?:user_id,)?analysis_id['"]/);
+  assert.match(serverSrc, /onConflict:\s*['"]analysis_id['"]/);
   assert.match(serverSrc, /ignoreDuplicates:\s*true/);
 });
 
