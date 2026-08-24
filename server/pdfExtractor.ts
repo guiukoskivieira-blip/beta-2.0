@@ -311,9 +311,38 @@ function formatPdfBox(box?: PdfBoxInfo): string {
   return `[${box.xPt.toFixed(3)}, ${box.yPt.toFixed(3)}, ${(box.xPt + box.widthPt).toFixed(3)}, ${(box.yPt + box.heightPt).toFixed(3)}] pt (${box.widthMm.toFixed(2)} x ${box.heightMm.toFixed(2)} mm)`;
 }
 
+export class PdfEncryptedError extends Error {
+  readonly code = 'PDF_ENCRYPTED';
+  readonly status = 'manual_required';
+  constructor(message = 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.') {
+    super(message);
+    this.name = 'PdfEncryptedError';
+  }
+}
+
 export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promise<PdfDocumentStructure> {
   const started = Date.now();
-  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+
+  let pdfDoc: PDFDocument;
+  try {
+    pdfDoc = await PDFDocument.load(pdfBuffer);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (
+      msg.includes('is encrypted') ||
+      msg.includes('EncryptedPDFError') ||
+      err?.name === 'EncryptedPDFError'
+    ) {
+      throw new PdfEncryptedError();
+    }
+    throw err;
+  }
+
+  // Also verify trailer encryption dictionary
+  if (pdfDoc.context.trailerInfo?.Encrypt || (pdfDoc as any).isEncrypted) {
+    throw new PdfEncryptedError();
+  }
+
   const rawPages = pdfDoc.getPages();
   const pageCount = rawPages.length;
 
@@ -772,13 +801,20 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     });
   }
 
-  // Parse Metadata & PDF/X
-  const title = pdfDoc.getTitle();
-  const author = pdfDoc.getAuthor();
-  const creator = pdfDoc.getCreator();
-  const producer = pdfDoc.getProducer();
-  const creationDate = pdfDoc.getCreationDate()?.toISOString();
-  const modDate = pdfDoc.getModificationDate()?.toISOString();
+  // Parse Metadata & PDF/X safely
+  let title = '';
+  let author = '';
+  let creator = '';
+  let producer = '';
+  let creationDate: string | undefined = undefined;
+  let modDate: string | undefined = undefined;
+
+  try { title = pdfDoc.getTitle() || ''; } catch {}
+  try { author = pdfDoc.getAuthor() || ''; } catch {}
+  try { creator = pdfDoc.getCreator() || ''; } catch {}
+  try { producer = pdfDoc.getProducer() || ''; } catch {}
+  try { creationDate = pdfDoc.getCreationDate()?.toISOString(); } catch {}
+  try { modDate = pdfDoc.getModificationDate()?.toISOString(); } catch {}
 
   // Parse OutputIntents from Catalog
   const outputIntents: PdfOutputIntent[] = [];

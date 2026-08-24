@@ -32,12 +32,20 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
   const currentIndex = getCurrentStepIndex();
 
   if (status === 'error') {
+    const isEncrypted =
+      errorMessage?.toLowerCase().includes('criptografia') ||
+      errorMessage?.toLowerCase().includes('protegido') ||
+      errorMessage?.toLowerCase().includes('senha') ||
+      errorMessage?.includes('PDF_ENCRYPTED');
+
     return (
       <div className="w-full max-w-2xl mx-auto my-12 p-8 bg-[#161B22] border border-[#FF4D4D]/30 rounded-2xl text-center shadow-2xl">
         <div className="w-14 h-14 mx-auto rounded-full bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 flex items-center justify-center text-[#FF4D4D] mb-4">
           <AlertCircle className="w-7 h-7" />
         </div>
-        <h3 className="text-xl font-bold text-white mb-2">Falha no Processamento</h3>
+        <h3 className="text-xl font-bold text-white mb-2">
+          {isEncrypted ? 'PDF Protegido por Senha' : 'Falha no Processamento'}
+        </h3>
         <p className="text-sm text-[#8E98A7] mb-6 max-w-md mx-auto">
           {errorMessage || 'Ocorreu um erro ao processar e avaliar o arquivo PDF.'}
         </p>

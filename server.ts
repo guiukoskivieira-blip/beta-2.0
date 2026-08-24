@@ -6,7 +6,7 @@ import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import { randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
-import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes } from "./server/pdfExtractor";
+import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes, PdfEncryptedError } from "./server/pdfExtractor";
 import { applyTrimBleedFix } from "./src/services/trimBleedFix";
 import { applyOutputIntentFix } from "./src/services/outputIntentFix";
 import { applyImageColorFix } from "./src/services/imageColorFix";
@@ -993,6 +993,21 @@ async function startServer() {
           },
         });
       } catch (extractError: any) {
+        if (
+          extractError instanceof PdfEncryptedError ||
+          extractError?.code === 'PDF_ENCRYPTED' ||
+          extractError?.message?.includes('is encrypted') ||
+          extractError?.name === 'EncryptedPDFError' ||
+          extractError?.name === 'PdfEncryptedError'
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: 'PDF_ENCRYPTED',
+            status: 'manual_required',
+            error: 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.',
+            message: 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.',
+          });
+        }
         console.error("PDF Structure Extraction Error:", extractError.message || extractError);
         return res.status(400).json({
           success: false,
@@ -1034,6 +1049,21 @@ async function startServer() {
         largeFields: audit.largeFields.slice(0, 10),
       });
     } catch (error: any) {
+      if (
+        error instanceof PdfEncryptedError ||
+        error?.code === 'PDF_ENCRYPTED' ||
+        error?.message?.includes('is encrypted') ||
+        error?.name === 'EncryptedPDFError' ||
+        error?.name === 'PdfEncryptedError'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'PDF_ENCRYPTED',
+          status: 'manual_required',
+          error: 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.',
+          message: 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.',
+        });
+      }
       return res.status(400).json({
         success: false,
         fileSize: file.size,

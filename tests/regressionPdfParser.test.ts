@@ -627,6 +627,58 @@ test('QA 07 Caso F: Form XObject com Tf + Tj -> isUsedInContent=true', async () 
 });
 
 // ============================================================================
+// QA 10: Detecção Precoce de PDF Criptografado e Erro Controlado
+// ============================================================================
+
+test('QA 10 Caso A: PDF com /Encrypt dispara PdfEncryptedError sem crash de data', async () => {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.addPage([595.28, 841.89]);
+
+  // Simulate an encryption dictionary in trailer
+  const encryptDict = pdfDoc.context.obj({
+    Filter: 'Standard',
+    V: 4,
+    R: 4,
+    P: -60,
+  });
+  const encryptRef = pdfDoc.context.register(encryptDict);
+  pdfDoc.context.trailerInfo.Encrypt = encryptRef;
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+
+  await assert.rejects(
+    async () => {
+      await extractPdfStructure(Buffer.from(pdfBytes));
+    },
+    (err: any) => {
+      assert.equal(err.code, 'PDF_ENCRYPTED');
+      assert.equal(err.status, 'manual_required');
+      assert.ok(err.message.includes('protegido por senha ou criptografia'));
+      return true;
+    }
+  );
+});
+
+test('QA 10 Caso B: PDF normal sem criptografia carrega com sucesso', async () => {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.addPage([595.28, 841.89]);
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pageCount, 1);
+});
+
+test('QA 10 Caso C: PDF contendo string literal "/Encrypt" em stream de texto NÃO dispara PdfEncryptedError', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const textContent = Buffer.from('BT /F1 12 Tf (Este texto contem a palavra /Encrypt) Tj ET', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, textContent)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pageCount, 1);
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
@@ -637,5 +689,6 @@ if (bugs.length > 0) {
 }
 
 export { bugs as pdfBugs, passed as pdfPassed, failed as pdfFailed };
+
 
 
