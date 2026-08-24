@@ -540,7 +540,7 @@ export async function finalizePdfx4Document(
   // 2. Load PDF into clean PDFDocument to write authentic PDF/X-4 metadata and XMP
   let loadedDoc: PDFDocument;
   try {
-    loadedDoc = await PDFDocument.load(preparedBytes, { ignoreEncryption: true });
+    loadedDoc = await PDFDocument.load(preparedBytes);
   } catch (loadErr: any) {
     return {
       success: false,

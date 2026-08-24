@@ -183,7 +183,6 @@ export async function applyOutputIntentFix(
   try {
     // 5. Load a clean copy of the original PDF in pdf-lib (original remains untouched)
     const pdfDoc = await PDFDocument.load(originalPdfBuffer, {
-      ignoreEncryption: true,
       updateMetadata: false,
     });
 

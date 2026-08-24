@@ -331,27 +331,34 @@ export async function transformRgbToCmyk(
       };
     }
 
-    // 8. Execute CMM Transformation
-    // Create a copy of the input bytes to guarantee immutability of the caller's buffer
-    const inputCopy = new Uint8Array(rgbPixels);
-    const outputPixels = lcms.cmsDoTransform(transformHandle, inputCopy, pixelCount);
+    // 8. Execute CMM Transformation in bounded chunks to prevent WASM heap exhaustion and memory spikes
+    const CHUNK_PIXELS = 250_000; // ~750 KB RGB -> ~1 MB CMYK per chunk (well within WASM memory limits)
+    const outputPixels = new Uint8Array(pixelCount * 4);
 
-    if (!outputPixels || outputPixels.length !== pixelCount * 4) {
-      return {
-        success: false,
-        inputComponents: 3,
-        outputComponents: 4,
-        pixelCount,
-        sourceProfile: sourceProfileSummary,
-        destinationProfile: destinationProfileSummary,
-        renderingIntent,
-        error: `Comprimento retornado pelo CMM (${outputPixels?.length || 0}) difere do esperado (${pixelCount * 4} bytes).`,
-      };
+    for (let offset = 0; offset < pixelCount; offset += CHUNK_PIXELS) {
+      const count = Math.min(CHUNK_PIXELS, pixelCount - offset);
+      const rgbChunk = rgbPixels.subarray(offset * 3, (offset + count) * 3);
+      const cmykChunk = lcms.cmsDoTransform(transformHandle, rgbChunk, count);
+
+      if (!cmykChunk || cmykChunk.length !== count * 4) {
+        return {
+          success: false,
+          inputComponents: 3,
+          outputComponents: 4,
+          pixelCount,
+          sourceProfile: sourceProfileSummary,
+          destinationProfile: destinationProfileSummary,
+          renderingIntent,
+          error: `Falha na transformação do bloco de pixels (${cmykChunk?.length || 0} bytes retornados para ${count * 4} esperados).`,
+        };
+      }
+
+      outputPixels.set(cmykChunk, offset * 4);
     }
 
     return {
       success: true,
-      outputPixels: new Uint8Array(outputPixels),
+      outputPixels,
       inputComponents: 3,
       outputComponents: 4,
       pixelCount,

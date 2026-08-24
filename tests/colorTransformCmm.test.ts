@@ -302,6 +302,27 @@ export async function runColorTransformTests() {
     lcms.cmsCloseProfile(h);
   }
 
+  // 17. Teste de Transformação em Lote / Chunking de Imagem Grande (> CHUNK_PIXELS)
+  const largePixelCount = 600_000; // 1.8 MB RGB -> 2.4 MB CMYK (cruza múltiplos blocos de 250k pixels)
+  const largeRgb = new Uint8Array(largePixelCount * 3);
+  for (let i = 0; i < largePixelCount; i++) {
+    largeRgb[i * 3] = (i * 7) % 256;
+    largeRgb[i * 3 + 1] = (i * 13) % 256;
+    largeRgb[i * 3 + 2] = (i * 17) % 256;
+  }
+  const chunkedResult = await transformRgbToCmyk({
+    rgbPixels: largeRgb,
+    sourceIcc: 'built-in-srgb',
+    destinationIcc: cmykBytes,
+    renderingIntent: 'RelativeColorimetric',
+  });
+  assert(
+    chunkedResult.success === true &&
+    chunkedResult.outputPixels !== undefined &&
+    chunkedResult.outputPixels.length === largePixelCount * 4,
+    `TEST 17: Transformação LittleCMS por chunks executa com sucesso para imagem grande (${largePixelCount} pixels, ${chunkedResult.outputPixels?.length} bytes CMYK sem estourar heap WASM)`
+  );
+
   console.log(`\nCMM LittleCMS/WASM Suite: ${passed}/${total} testes aprovados.\n`);
 }
 

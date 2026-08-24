@@ -647,7 +647,7 @@ export async function applyImageColorFix(
   const originalBytesCopy = originalPdfBuffer instanceof Uint8Array ? originalPdfBuffer : new Uint8Array(originalPdfBuffer);
   let pdfDoc: PDFDocument;
   try {
-    pdfDoc = await PDFDocument.load(originalBytesCopy, { ignoreEncryption: true });
+    pdfDoc = await PDFDocument.load(originalBytesCopy);
   } catch (loadErr: any) {
     const contract = evaluateFixContract(
       ruleId,

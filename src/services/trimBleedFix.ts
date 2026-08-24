@@ -228,7 +228,7 @@ export async function applyTrimBleedFix(
   }
 
   // Load the original PDF to create a copy
-  const pdfDoc = await PDFDocument.load(originalPdfBytes, { ignoreEncryption: true, updateMetadata: false });
+  const pdfDoc = await PDFDocument.load(originalPdfBytes, { updateMetadata: false });
   const pages = pdfDoc.getPages();
 
   const pageChanges: TrimBleedFixAuditEntry['pageChanges'] = [];
