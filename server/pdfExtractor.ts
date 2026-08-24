@@ -355,14 +355,125 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
           contentBytes = decodeStream(stream);
         }
         if (contentBytes) {
-          imagePlacements = parseImagePlacements(contentBytes);
+        imagePlacements = parseImagePlacements(contentBytes);
         }
       }
     } catch {}
 
-    // Extract resources
-    const resources = page.node.Resources();
+    // Extract resources (resolving PDFRef and inheriting from Parent if needed)
+    let rawRes = page.node.get(PDFName.of('Resources'));
+    let resources = rawRes ? pdfDoc.context.lookup(rawRes) : undefined;
+    if (!(resources instanceof PDFDict)) {
+      let parent = page.node.Parent ? page.node.Parent() : undefined;
+      while (parent && !(resources instanceof PDFDict)) {
+        const parentRes = parent.get(PDFName.of('Resources'));
+        if (parentRes) {
+          resources = pdfDoc.context.lookup(parentRes);
+        }
+        parent = parent.Parent ? parent.Parent() : undefined;
+      }
+    }
+
     let hasTransparency = false;
+
+    // Track font resource names actually used by Tf operators on this page
+    const usedFontNamesOnPage = new Set<string>();
+    if (contentBytes && contentBytes.length > 0) {
+      const text = Buffer.from(contentBytes).toString('latin1');
+      const tfRegex = /\/([^\s\/\(\)\[\]<>{}%]+)\s+[\d\.\-+]+\s+Tf/g;
+      let match;
+      while ((match = tfRegex.exec(text)) !== null) {
+        usedFontNamesOnPage.add(match[1]);
+      }
+    }
+
+    const processFontsDict = (fontsDictRefOrObj: any, formContentBytes?: Uint8Array) => {
+      const fontsDict = pdfDoc.context.lookup(fontsDictRefOrObj);
+      if (fontsDict instanceof PDFDict) {
+        const formUsedFontNames = new Set<string>();
+        if (formContentBytes && formContentBytes.length > 0) {
+          const formText = Buffer.from(formContentBytes).toString('latin1');
+          const formTfRegex = /\/([^\s\/\(\)\[\]<>{}%]+)\s+[\d\.\-+]+\s+Tf/g;
+          let formMatch;
+          while ((formMatch = formTfRegex.exec(formText)) !== null) {
+            formUsedFontNames.add(formMatch[1]);
+          }
+        }
+
+        const fEntries = fontsDict.entries();
+        for (const [fName, fRef] of fEntries) {
+          const fontObj = pdfDoc.context.lookup(fRef);
+          if (fontObj instanceof PDFDict) {
+            const rawFName = (typeof fName.asString === 'function' ? fName.asString() : (fName.value || String(fName))).replace(/^\//, '');
+            const fontBaseVal = fontObj.get(PDFName.of('BaseFont'));
+            const baseFontStr = (fontBaseVal ? String(fontBaseVal) : String(rawFName)).replace(/^\//, '');
+            const baseFont: string = baseFontStr;
+            const subtype = fontObj.get(PDFName.of('Subtype'))?.toString()?.replace(/^\//, '') || 'Type1';
+
+            let fontDescriptor = fontObj.get(PDFName.of('FontDescriptor'));
+            if (!fontDescriptor && (subtype === 'Type0' || subtype === 'CIDFontType0' || subtype === 'CIDFontType2')) {
+              const descendant = fontObj.get(PDFName.of('DescendantFonts'));
+              if (descendant) {
+                const descObj = pdfDoc.context.lookup(descendant);
+                if (descObj instanceof PDFArray && descObj.size() > 0) {
+                  const cidRef = descObj.get(0);
+                  const cidFont = pdfDoc.context.lookup(cidRef);
+                  if (cidFont instanceof PDFDict) {
+                    fontDescriptor = cidFont.get(PDFName.of('FontDescriptor'));
+                  }
+                }
+              }
+            }
+
+            let isEmbedded: 'yes' | 'no' | 'subset' | 'undetermined' = 'no';
+            if (fontDescriptor) {
+              const fd = pdfDoc.context.lookup(fontDescriptor);
+              if (fd instanceof PDFDict) {
+                const hasFontFile = fd.get(PDFName.of('FontFile')) || fd.get(PDFName.of('FontFile2')) || fd.get(PDFName.of('FontFile3'));
+                if (hasFontFile) {
+                  isEmbedded = baseFont.includes('+') ? 'subset' : 'yes';
+                } else {
+                  isEmbedded = 'no';
+                }
+              }
+            } else if (subtype === 'Type3') {
+              isEmbedded = 'yes';
+            } else {
+              // Base14 standard Type1 font (Helvetica, Times-Roman, Courier, etc.) without FontDescriptor -> NOT embedded
+              isEmbedded = 'no';
+            }
+
+            const isUsed = (usedFontNamesOnPage.size > 0 || formUsedFontNames.size > 0)
+              ? (usedFontNamesOnPage.has(rawFName) || usedFontNamesOnPage.has(baseFont) || formUsedFontNames.has(rawFName) || formUsedFontNames.has(baseFont))
+              : true;
+
+            if (!fontsMap.has(baseFont)) {
+              fontsMap.set(baseFont, {
+                id: baseFont,
+                baseFont,
+                cleanFontName: baseFont.replace(/^[A-Z]{6}\+/, ''),
+                subtype,
+                isEmbedded,
+                isUsedInContent: isUsed,
+                usedPages: isUsed ? [pageNum] : [],
+                declaredPages: [pageNum],
+              });
+            } else {
+              const existing = fontsMap.get(baseFont)!;
+              if (isUsed) {
+                existing.isUsedInContent = true;
+                if (!existing.usedPages?.includes(pageNum)) {
+                  existing.usedPages?.push(pageNum);
+                }
+              }
+              if (!existing.declaredPages?.includes(pageNum)) {
+                existing.declaredPages?.push(pageNum);
+              }
+            }
+          }
+        }
+      }
+    };
 
     if (resources instanceof PDFDict) {
       // Check XObjects (Images and Forms)
@@ -408,43 +519,39 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
                   const streamDict: any = (iccStream as any)?.dict || iccStream;
                   const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
                   const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
-                  colorSpace = n === 4 ? 'ICCBased (CMYK)' : n === 3 ? 'ICCBased (RGB)' : n === 1 ? 'ICCBased (Gray)' : (alt || 'ICCBased');
-                } else {
-                  colorSpace = csObj.toString().replace(/^\//, '');
+                  if (n === 4 || alt?.includes('CMYK')) {
+                    colorSpace = 'ICCBased CMYK';
+                  } else if (n === 1 || alt?.includes('Gray')) {
+                    colorSpace = 'ICCBased Gray';
+                  } else {
+                    colorSpace = 'ICCBased RGB';
+                  }
+                } else if (first?.includes('DeviceCMYK')) {
+                  colorSpace = 'DeviceCMYK';
+                } else if (first?.includes('DeviceGray')) {
+                  colorSpace = 'DeviceGray';
+                } else if (first?.includes('Separation') || first?.includes('DeviceN')) {
+                  colorSpace = 'Spot';
                 }
-              } else if (csObj) {
-                colorSpace = csObj.toString().replace(/^\//, '');
               }
 
-              if (colorSpace.includes('RGB')) {
-                hasGlobalRgb = true;
-                detectedFamilies.add('DeviceRGB');
-              } else if (colorSpace.includes('CMYK')) {
-                hasGlobalCmyk = true;
-                detectedFamilies.add('DeviceCMYK');
-              }
+              const rawImgName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
+              const placement = imagePlacements.get(rawImgName);
 
-              const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
-              const imgName = typeof rawName === 'string' ? rawName : String(rawName);
-
-              // Look up placement from content stream
-              const placement = imagePlacements.get(imgName);
               const appliedWidthPt = placement?.appliedWidthPt;
               const appliedHeightPt = placement?.appliedHeightPt;
-
-              // Calculate display size and DPI
-              // Use applied dimensions from content stream if available, otherwise fall back to page size
               const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
               const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
+
               const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
               const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
               const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
               const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
 
               imageOccurrences.push({
-                id: imgName || `img_${pageNum}_${imageOccurrences.length + 1}`,
+                id: `img_${pageNum}_${imageOccurrences.length + 1}`,
                 page: pageNum,
-                name: imgName,
+                name: rawImgName,
                 widthPx,
                 heightPx,
                 bitsPerComponent,
@@ -460,164 +567,152 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
                 yPt: placement?.yPt,
                 ctm: placement?.ctm,
               });
+
+              if (colorSpace.includes('RGB')) {
+                hasGlobalRgb = true;
+                detectedFamilies.add('DeviceRGB');
+              } else if (colorSpace.includes('CMYK')) {
+                hasGlobalCmyk = true;
+                detectedFamilies.add('DeviceCMYK');
+              } else if (colorSpace.includes('Spot')) {
+                hasGlobalSpot = true;
+                detectedFamilies.add('Spot');
+              }
             } else if (subtypeStr === '/Form') {
-              // Form XObject: Traverse and inspect nested Image XObjects with composite CTM
-              const formRawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
-              const formName = typeof formRawName === 'string' ? formRawName : String(formRawName);
+              const formName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
               const formPlacement = imagePlacements.get(formName);
-              const formCtm = formPlacement?.ctm || [1, 0, 0, 1, 0, 0];
-
-              // Form Matrix
+              const formMatrixObj = dict.get(PDFName.of('Matrix'));
               let formMatrix = [1, 0, 0, 1, 0, 0];
-              const matrixObj = dict.get(PDFName.of('Matrix'));
-              if (matrixObj instanceof PDFArray && matrixObj.size() >= 6) {
+              if (formMatrixObj instanceof PDFArray && formMatrixObj.size() >= 6) {
                 formMatrix = [
-                  matrixObj.get(0)?.asNumber?.() ?? 1,
-                  matrixObj.get(1)?.asNumber?.() ?? 0,
-                  matrixObj.get(2)?.asNumber?.() ?? 0,
-                  matrixObj.get(3)?.asNumber?.() ?? 1,
-                  matrixObj.get(4)?.asNumber?.() ?? 0,
-                  matrixObj.get(5)?.asNumber?.() ?? 0,
+                  formMatrixObj.get(0)?.asNumber?.() ?? 1,
+                  formMatrixObj.get(1)?.asNumber?.() ?? 0,
+                  formMatrixObj.get(2)?.asNumber?.() ?? 0,
+                  formMatrixObj.get(3)?.asNumber?.() ?? 1,
+                  formMatrixObj.get(4)?.asNumber?.() ?? 0,
+                  formMatrixObj.get(5)?.asNumber?.() ?? 0,
                 ];
               }
 
-              function multiplyAffine(m: number[], c: number[]): number[] {
-                return [
-                  m[0] * c[0] + m[1] * c[2],
-                  m[0] * c[1] + m[1] * c[3],
-                  m[2] * c[0] + m[3] * c[2],
-                  m[2] * c[1] + m[3] * c[3],
-                  m[4] * c[0] + m[5] * c[2] + c[4],
-                  m[4] * c[1] + m[5] * c[3] + c[5],
-                ];
-              }
-
-              const effectiveFormCtm = multiplyAffine(formMatrix, formCtm);
-
-              // Form BBox
-              const bboxObj = dict.get(PDFName.of('BBox'));
+              const formBboxObj = dict.get(PDFName.of('BBox'));
               let formBboxW = 0;
               let formBboxH = 0;
-              if (bboxObj instanceof PDFArray && bboxObj.size() >= 4) {
-                const bx0 = bboxObj.get(0)?.asNumber?.() ?? 0;
-                const by0 = bboxObj.get(1)?.asNumber?.() ?? 0;
-                const bx1 = bboxObj.get(2)?.asNumber?.() ?? 0;
-                const by1 = bboxObj.get(3)?.asNumber?.() ?? 0;
+              if (formBboxObj instanceof PDFArray && formBboxObj.size() >= 4) {
+                const bx0 = formBboxObj.get(0)?.asNumber?.() ?? 0;
+                const by0 = formBboxObj.get(1)?.asNumber?.() ?? 0;
+                const bx1 = formBboxObj.get(2)?.asNumber?.() ?? 0;
+                const by1 = formBboxObj.get(3)?.asNumber?.() ?? 0;
                 formBboxW = Math.abs(bx1 - bx0);
                 formBboxH = Math.abs(by1 - by0);
               }
 
-              // Decode Form content stream
-              let formContentBytes: Uint8Array | null = null;
+              let formBytes: Uint8Array | undefined;
               try {
-                formContentBytes = decodeStream(xobj);
+                formBytes = decodeStream(xobj);
               } catch {}
-              const innerPlacements = formContentBytes ? parseImagePlacements(formContentBytes) : new Map<string, ImagePlacement>();
 
-              // Check inner Resources of the Form
-              const formResources = dict.get(PDFName.of('Resources'));
-              const innerXObjects = formResources instanceof PDFDict ? formResources.get(PDFName.of('XObject')) : null;
-              if (innerXObjects instanceof PDFDict) {
-                const innerEntries = innerXObjects.entries();
-                for (const [innerNameKey, innerRef] of innerEntries) {
-                  const innerXObj = pdfDoc.context.lookup(innerRef);
-                  if (!innerXObj) continue;
-                  const innerDict: PDFDict = (innerXObj as any).dict || (innerXObj instanceof PDFDict ? innerXObj : null);
-                  if (!innerDict) continue;
-                  const innerSubtype = innerDict.get(PDFName.of('Subtype'))?.toString();
-                  if (innerSubtype === '/Image') {
-                    const innerNameRaw = typeof innerNameKey.asString === 'function' ? innerNameKey.asString() : (innerNameKey.value || String(innerNameKey));
-                    const innerImgName = typeof innerNameRaw === 'string' ? innerNameRaw : String(innerNameRaw);
-                    const compositeName = `${formName}/${innerImgName}`;
+              const formRes = dict.get(PDFName.of('Resources'));
+              const formResDict = formRes ? pdfDoc.context.lookup(formRes) : undefined;
+              if (formResDict instanceof PDFDict) {
+                // Check fonts inside Form XObject
+                const formFonts = formResDict.get(PDFName.of('Font'));
+                if (formFonts) {
+                  processFontsDict(formFonts, formBytes);
+                }
 
-                    const widthPx = innerDict.get(PDFName.of('Width'))?.asNumber?.() || 100;
-                    const heightPx = innerDict.get(PDFName.of('Height'))?.asNumber?.() || 100;
-                    const bitsPerComponent = innerDict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+                const formXObjs = formResDict.get(PDFName.of('XObject'));
+                const formXObjsDict = formXObjs ? pdfDoc.context.lookup(formXObjs) : undefined;
+                if (formXObjsDict instanceof PDFDict) {
+                  let innerPlacements = new Map<string, ImagePlacement>();
+                  if (formBytes) {
+                    innerPlacements = parseImagePlacements(formBytes);
+                  }
 
-                    let filterVal = 'None';
-                    const fObj = innerDict.get(PDFName.of('Filter'));
-                    if (fObj instanceof PDFName) {
-                      filterVal = fObj.toString().replace(/^\//, '');
-                    } else if (fObj instanceof PDFArray) {
-                      const fList: string[] = [];
-                      for (let fi = 0; fi < fObj.size(); fi++) {
-                        const fn = fObj.get(fi)?.toString()?.replace(/^\//, '');
-                        if (fn) fList.push(fn);
+                  const innerEntries = formXObjsDict.entries();
+                  for (const [innerNameKey, innerRef] of innerEntries) {
+                    const innerXobj = pdfDoc.context.lookup(innerRef);
+                    const innerDict = (innerXobj as any)?.dict || innerXobj;
+                    const innerSubtype = innerDict?.get?.(PDFName.of('Subtype'))?.toString();
+
+                    if (innerSubtype === '/Image') {
+                      const innerName = (typeof innerNameKey.asString === 'function' ? innerNameKey.asString() : (innerNameKey.value || String(innerNameKey))).replace(/^\//, '');
+                      const compositeName = `${formName}/${innerName}`;
+                      const widthPx = innerDict.get(PDFName.of('Width'))?.asNumber?.() || 100;
+                      const heightPx = innerDict.get(PDFName.of('Height'))?.asNumber?.() || 100;
+                      const bitsPerComponent = innerDict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+
+                      let filterVal = 'None';
+                      const filterObj = innerDict.get(PDFName.of('Filter'));
+                      if (filterObj instanceof PDFName) {
+                        filterVal = filterObj.toString().replace(/^\//, '');
+                      } else if (filterObj instanceof PDFArray) {
+                        const fList: string[] = [];
+                        for (let fi = 0; fi < filterObj.size(); fi++) {
+                          const fn = filterObj.get(fi)?.toString()?.replace(/^\//, '');
+                          if (fn) fList.push(fn);
+                        }
+                        filterVal = fList.join('+') || 'None';
+                      } else if (filterObj) {
+                        filterVal = filterObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
                       }
-                      filterVal = fList.join('+') || 'None';
-                    } else if (fObj) {
-                      filterVal = fObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
-                    }
 
-                    let colorSpace = 'DeviceRGB';
-                    const csObj = innerDict.get(PDFName.of('ColorSpace'));
-                    if (csObj instanceof PDFName) {
-                      colorSpace = csObj.toString().replace(/^\//, '');
-                    } else if (csObj instanceof PDFArray) {
-                      const first = csObj.get(0)?.toString();
-                      if (first?.includes('ICCBased')) {
-                        const iccRef = csObj.get(1);
-                        const iccStream = iccRef ? pdfDoc.context.lookup(iccRef) : null;
-                        const streamDict: any = (iccStream as any)?.dict || iccStream;
-                        const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
-                        const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
-                        colorSpace = n === 4 ? 'ICCBased (CMYK)' : n === 3 ? 'ICCBased (RGB)' : n === 1 ? 'ICCBased (Gray)' : (alt || 'ICCBased');
-                      } else {
+                      let colorSpace = 'DeviceRGB';
+                      const csObj = innerDict.get(PDFName.of('ColorSpace'));
+                      if (csObj instanceof PDFName) {
                         colorSpace = csObj.toString().replace(/^\//, '');
+                      } else if (csObj instanceof PDFArray) {
+                        const first = csObj.get(0)?.toString();
+                        if (first?.includes('DeviceCMYK')) colorSpace = 'DeviceCMYK';
+                        else if (first?.includes('DeviceGray')) colorSpace = 'DeviceGray';
+                        else if (first?.includes('Separation') || first?.includes('DeviceN')) colorSpace = 'Spot';
+                        else colorSpace = 'DeviceRGB';
                       }
-                    } else if (csObj) {
-                      colorSpace = csObj.toString().replace(/^\//, '');
+
+                      const innerPlacement = innerPlacements.get(innerName);
+                      let appliedWidthPt = innerPlacement?.appliedWidthPt;
+                      let appliedHeightPt = innerPlacement?.appliedHeightPt;
+                      let imgCtm = innerPlacement?.ctm || [1, 0, 0, 1, 0, 0];
+
+                      const pageFormCtm = formPlacement?.ctm || [1, 0, 0, 1, 0, 0];
+                      const effectiveFormCtm = multiplyAffine(pageFormCtm, formMatrix);
+
+                      if (innerPlacement) {
+                        imgCtm = multiplyAffine(effectiveFormCtm, innerPlacement.ctm);
+                        appliedWidthPt = Math.sqrt(imgCtm[0] * imgCtm[0] + imgCtm[1] * imgCtm[1]);
+                        appliedHeightPt = Math.sqrt(imgCtm[2] * imgCtm[2] + imgCtm[3] * imgCtm[3]);
+                      } else {
+                        appliedWidthPt = formPlacement?.appliedWidthPt || (formBboxW > 0 ? formBboxW : widthPt);
+                        appliedHeightPt = formPlacement?.appliedHeightPt || (formBboxH > 0 ? formBboxH : heightPt);
+                        imgCtm = effectiveFormCtm;
+                      }
+
+                      const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
+                      const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
+                      const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
+                      const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
+                      const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
+                      const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
+
+                      imageOccurrences.push({
+                        id: compositeName || `img_${pageNum}_${imageOccurrences.length + 1}`,
+                        page: pageNum,
+                        name: compositeName,
+                        widthPx,
+                        heightPx,
+                        bitsPerComponent,
+                        filter: filterVal,
+                        displayWidthMm,
+                        displayHeightMm,
+                        effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
+                        effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
+                        colorSpace,
+                        appliedWidthPt,
+                        appliedHeightPt,
+                        xPt: imgCtm[4],
+                        yPt: imgCtm[5],
+                        ctm: imgCtm,
+                      });
                     }
-
-                    if (colorSpace.includes('RGB')) {
-                      hasGlobalRgb = true;
-                      detectedFamilies.add('DeviceRGB');
-                    } else if (colorSpace.includes('CMYK')) {
-                      hasGlobalCmyk = true;
-                      detectedFamilies.add('DeviceCMYK');
-                    }
-
-                    const innerPl = innerPlacements.get(innerImgName);
-                    let imgCtm: number[];
-                    let appliedWidthPt: number;
-                    let appliedHeightPt: number;
-
-                    if (innerPl && innerPl.ctm) {
-                      imgCtm = multiplyAffine(innerPl.ctm, effectiveFormCtm);
-                      appliedWidthPt = Math.hypot(imgCtm[0], imgCtm[1]);
-                      appliedHeightPt = Math.hypot(imgCtm[2], imgCtm[3]);
-                    } else {
-                      appliedWidthPt = formPlacement?.appliedWidthPt || (formBboxW > 0 ? formBboxW : widthPt);
-                      appliedHeightPt = formPlacement?.appliedHeightPt || (formBboxH > 0 ? formBboxH : heightPt);
-                      imgCtm = effectiveFormCtm;
-                    }
-
-                    const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
-                    const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
-                    const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
-                    const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
-                    const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
-                    const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
-
-                    imageOccurrences.push({
-                      id: compositeName || `img_${pageNum}_${imageOccurrences.length + 1}`,
-                      page: pageNum,
-                      name: compositeName,
-                      widthPx,
-                      heightPx,
-                      bitsPerComponent,
-                      filter: filterVal,
-                      displayWidthMm,
-                      displayHeightMm,
-                      effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
-                      effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
-                      colorSpace,
-                      appliedWidthPt,
-                      appliedHeightPt,
-                      xPt: imgCtm[4],
-                      yPt: imgCtm[5],
-                      ctm: imgCtm,
-                    });
                   }
                 }
               }
@@ -626,70 +721,10 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
         }
       }
 
-      // Check ExtGState for Transparency
-      const extGState = resources.get(PDFName.of('ExtGState'));
-      if (extGState instanceof PDFDict) {
-        const gsEntries = extGState.entries();
-        for (const [, gsRef] of gsEntries) {
-          const gs = pdfDoc.context.lookup(gsRef);
-          if (gs instanceof PDFDict) {
-            const caObj = gs.get(PDFName.of('ca'));
-            const CAObj = gs.get(PDFName.of('CA'));
-            const ca = caObj instanceof PDFNumber ? caObj.asNumber() : undefined;
-            const CA = CAObj instanceof PDFNumber ? CAObj.asNumber() : undefined;
-            const bm = gs.get(PDFName.of('BM'))?.toString();
-            if ((ca !== undefined && ca < 1) || (CA !== undefined && CA < 1) || (bm && bm !== '/Normal' && bm !== '/Compatible')) {
-              hasTransparency = true;
-            }
-          }
-        }
-      }
-
       // Check Fonts
       const fontsDict = resources.get(PDFName.of('Font'));
-      if (fontsDict instanceof PDFDict) {
-        const fEntries = fontsDict.entries();
-        for (const [fName, fRef] of fEntries) {
-          const fontObj = pdfDoc.context.lookup(fRef);
-          if (fontObj instanceof PDFDict) {
-            const rawFName = typeof fName.asString === 'function' ? fName.asString() : (fName.value || String(fName));
-            const fontBaseVal = fontObj.get(PDFName.of('BaseFont'));
-            const baseFontStr = (fontBaseVal ? String(fontBaseVal) : String(rawFName)).replace(/^\//, '');
-            const baseFont: string = baseFontStr;
-            const subtype = fontObj.get(PDFName.of('Subtype'))?.toString()?.replace(/^\//, '') || 'Type1';
-            const fontDescriptor = fontObj.get(PDFName.of('FontDescriptor'));
-            let isEmbedded: 'yes' | 'no' | 'subset' | 'undetermined' = 'no';
-
-            if (fontDescriptor) {
-              const fd = pdfDoc.context.lookup(fontDescriptor);
-              if (fd instanceof PDFDict) {
-                const hasFontFile = fd.get(PDFName.of('FontFile')) || fd.get(PDFName.of('FontFile2')) || fd.get(PDFName.of('FontFile3'));
-                if (hasFontFile) {
-                  isEmbedded = baseFont.includes('+') ? 'subset' : 'yes';
-                }
-              }
-            } else if (subtype === 'Type3') {
-              isEmbedded = 'yes';
-            }
-
-            if (!fontsMap.has(baseFont)) {
-              fontsMap.set(baseFont, {
-                id: baseFont,
-                baseFont,
-                cleanFontName: baseFont.replace(/^[A-Z]{6}\+/, ''),
-                subtype,
-                isEmbedded,
-                isUsedInContent: true,
-                usedPages: [pageNum],
-              });
-            } else {
-              const existing = fontsMap.get(baseFont)!;
-              if (!existing.usedPages?.includes(pageNum)) {
-                existing.usedPages?.push(pageNum);
-              }
-            }
-          }
-        }
+      if (fontsDict) {
+        processFontsDict(fontsDict);
       }
     }
 

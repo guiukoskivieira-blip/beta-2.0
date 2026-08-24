@@ -476,3 +476,46 @@ test('14. QA 02 Regression: DPI efetivo de imagem em Form XObject calcula 300 DP
   assert.equal(effectiveDpiY, 300);
 });
 
+test('15. QA 06 Regression: Fontes Base14 não incorporadas usadas no conteúdo bloqueiam PDF/X-4 com PDFX_FONT_NOT_EMBEDDED', () => {
+  const doc = createMockDoc();
+  doc.fonts = [
+    {
+      id: 'Helvetica',
+      baseFont: 'Helvetica',
+      cleanFontName: 'Helvetica',
+      subtype: 'Type1',
+      isEmbedded: 'no',
+      isUsedInContent: true,
+      usedPages: [1],
+    },
+    {
+      id: 'Times-Roman',
+      baseFont: 'Times-Roman',
+      cleanFontName: 'Times-Roman',
+      subtype: 'Type1',
+      isEmbedded: 'no',
+      isUsedInContent: true,
+      usedPages: [1],
+    },
+  ];
+
+  const res = evaluatePdfx4Eligibility(doc, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    ruleResults: mockApprovedRules,
+  });
+
+  assert.equal(res.status, 'manual_required');
+  assert.equal(res.eligible, false);
+  assert.equal(res.verifiedPdfX, false);
+
+  const fontCheck = res.checks.find((c) => c.id === 'PDFX_FONTS');
+  assert.equal(fontCheck?.status, 'manual_required');
+  assert.equal(fontCheck?.reasonCode, 'PDFX_FONT_NOT_EMBEDDED');
+  assert.ok(fontCheck?.message.includes('Helvetica'));
+  assert.ok(fontCheck?.message.includes('Times-Roman'));
+
+  const blocker = res.blockers.find((b) => b.code === 'PDFX_FONT_NOT_EMBEDDED');
+  assert.ok(blocker);
+});
+
+

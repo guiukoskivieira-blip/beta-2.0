@@ -417,6 +417,84 @@ test('PDF/X ausente em perfil large_format (recommendsPdfX=false) é aprovado', 
 });
 
 // ============================================================================
+// QA 06: Regressão Fontes Base14 Não Incorporadas e PDF/X-4
+// ============================================================================
+
+test('QA 06: Fontes Base14 (Helvetica e Times-Roman) sem FontDescriptor/FontFile são detectadas como não incorporadas', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+
+  // Create Type1 Base14 font dictionaries without FontDescriptor
+  const helvDict = pdfDoc.context.obj({
+    Type: 'Font',
+    Subtype: 'Type1',
+    BaseFont: 'Helvetica',
+    Encoding: 'WinAnsiEncoding',
+  });
+  const helvRef = pdfDoc.context.register(helvDict);
+
+  const timesDict = pdfDoc.context.obj({
+    Type: 'Font',
+    Subtype: 'Type1',
+    BaseFont: 'Times-Roman',
+    Encoding: 'WinAnsiEncoding',
+  });
+  const timesRef = pdfDoc.context.register(timesDict);
+
+  page.node.set(
+    PDFName.of('Resources'),
+    pdfDoc.context.obj({
+      Font: {
+        F1: helvRef,
+        F2: timesRef,
+      },
+    })
+  );
+
+  // Content stream invoking /F1 and /F2 via Tf
+  const contentStream = Buffer.from('BT /F1 12 Tf 50 700 Td (Texto em Helvetica) Tj /F2 14 Tf 0 -20 Td (Texto em Times) Tj ET', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, contentStream)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 2, 'Deve detectar 2 fontes no documento');
+  const helv = structure.fonts.find((f) => f.baseFont === 'Helvetica');
+  const times = structure.fonts.find((f) => f.baseFont === 'Times-Roman');
+
+  assert.ok(helv, 'Helvetica encontrada');
+  assert.equal(helv?.isUsedInContent, true, 'Helvetica usada no conteúdo (Tf)');
+  assert.equal(helv?.isEmbedded, 'no', 'Helvetica Base14 sem FontFile NÃO incorporada');
+
+  assert.ok(times, 'Times-Roman encontrada');
+  assert.equal(times?.isUsedInContent, true, 'Times-Roman usada no conteúdo (Tf)');
+  assert.equal(times?.isEmbedded, 'no', 'Times-Roman Base14 sem FontFile NÃO incorporada');
+
+  // Rule Engine: RULE-FONT-001 must FAIL
+  const rules = runDeterministicRuleEngine(structure, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const fontRule = rules.results.find((r) => r.ruleId === 'RULE-FONT-001');
+  assert.equal(fontRule?.status, 'error', 'RULE-FONT-001 deve reprovar (error)');
+  assert.ok(fontRule?.evidence.includes('Helvetica'), 'Evidência cita Helvetica');
+  assert.ok(fontRule?.evidence.includes('Times-Roman'), 'Evidência cita Times-Roman');
+});
+
+test('QA 06: Documento apenas com curvas/vetores (sem Tf nem Font) aprova RULE-FONT-001', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const vectorContent = Buffer.from('100 100 200 200 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, vectorContent)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.fonts.length, 0, '0 fontes declaradas');
+  const rules = runDeterministicRuleEngine(structure, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const fontRule = rules.results.find((r) => r.ruleId === 'RULE-FONT-001');
+  assert.equal(fontRule?.status, 'approved');
+  assert.ok(fontRule?.evidence.includes('Nenhum elemento tipográfico externo declarado ou fontes convertidas em curvas'));
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
@@ -427,3 +505,4 @@ if (bugs.length > 0) {
 }
 
 export { bugs as pdfBugs, passed as pdfPassed, failed as pdfFailed };
+
