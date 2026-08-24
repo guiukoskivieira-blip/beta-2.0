@@ -7,7 +7,7 @@ import { createServer as createViteServer } from "vite";
 import { randomUUID } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { extractPdfStructure, inspectPayload, DiagnosticTracker, formatBytes, PdfEncryptedError } from "./server/pdfExtractor";
-import { applyTrimBleedFix } from "./src/services/trimBleedFix";
+import { applyTrimBleedFix, checkTrimBleedEligibility } from "./src/services/trimBleedFix";
 import { applyOutputIntentFix } from "./src/services/outputIntentFix";
 import { applyImageColorFix } from "./src/services/imageColorFix";
 import { preparePdfForPdfx4 } from "./src/services/pdfxPreparation";

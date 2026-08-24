@@ -12,6 +12,7 @@ function createDummyAnalysis(): PreflightAnalysis {
     fileName: 'teste_documento.pdf',
     fileSizeBytes: 1024,
     createdAt: Date.now(),
+    profileId: COMMERCIAL_PRINT_300DPI_PROFILE.id,
     document: {
       pageCount: 1,
       pages: [
@@ -29,6 +30,8 @@ function createDummyAnalysis(): PreflightAnalysis {
           trimBox: { status: 'explicit', xPt: 8.5, yPt: 8.5, widthPt: 255.126, heightPt: 141.74, xMm: 3, yMm: 3, widthMm: 90, heightMm: 50 },
           bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 272.126, heightPt: 158.74, xMm: 0, yMm: 0, widthMm: 96, heightMm: 56 },
           hasTransparency: false,
+          imageOccurrences: [],
+          colorOccurrences: [],
         },
       ],
       fonts: [],
@@ -40,13 +43,34 @@ function createDummyAnalysis(): PreflightAnalysis {
       },
     },
     ruleResults: {
-      results: [],
-      universalRules: [],
-      profileRules: [],
+      profileUsed: {
+        id: COMMERCIAL_PRINT_300DPI_PROFILE.id,
+        name: COMMERCIAL_PRINT_300DPI_PROFILE.name,
+      },
+      totalRules: 10,
       approvedCount: 10,
       warningCount: 0,
       errorCount: 0,
       undeterminedCount: 0,
+      universalRules: [],
+      profileRules: [],
+      results: [],
+      scoreSummary: {
+        score: 100,
+        classification: 'approved',
+        label: 'Aprovado',
+        color: '#00D18F',
+        approvedCount: 10,
+        warningCount: 0,
+        errorCount: 0,
+        undeterminedCount: 0,
+      },
+      grouped: {
+        approved: [],
+        warning: [],
+        error: [],
+        undetermined: [],
+      },
     },
   };
 }

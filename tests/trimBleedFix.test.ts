@@ -332,15 +332,16 @@ test('Perfil sem sangria (large_format) não oferece correção', () => {
   assert.match(eligibility.globalReason, /não exige sangria/i);
 });
 
-test('Perfil sem dimensões esperadas não oferece correção', () => {
+test('Perfil comercial genérico sem dimensões fixas infere TrimBox dinamicamente', () => {
   const doc = makeDocFromPages([{
     widthMm: 216, heightMm: 303,
     mediaBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612, heightPt: 858, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
   }]);
-  // COMMERCIAL_PRINT_300DPI_PROFILE has expectedBleedMm but no expectedWidthMm/expectedHeightMm
+  // COMMERCIAL_PRINT_300DPI_PROFILE has expectedBleedMm=3 but no fixed expectedWidthMm/expectedHeightMm
   const eligibility = checkTrimBleedEligibility(doc, COMMERCIAL_PRINT_300DPI_PROFILE);
-  assert.equal(eligibility.eligible, false, 'Perfil sem dimensões não deve ser elegível');
-  assert.match(eligibility.globalReason, /dimensões finais/i);
+  assert.equal(eligibility.eligible, true, 'Perfil genérico deve inferir caixas dinamicamente a partir do MediaBox e sangria');
+  assert.equal(eligibility.pages[0].expectedWidthMm, 210);
+  assert.equal(eligibility.pages[0].expectedHeightMm, 297);
 });
 
 // ============================================================================

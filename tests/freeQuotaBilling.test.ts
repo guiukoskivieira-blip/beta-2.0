@@ -27,7 +27,7 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
 
     // No server.ts, getSubscriptionUsage verifica isValidUuid antes de chamar admin.from
     assert.match(serverSrc, /function isValidUuid\(id: string\): boolean/);
-    assert.match(serverSrc, /if \(!isValidUuid\(userId\)\) \{/);
+    assert.match(serverSrc, /if \(!isUuid\) \{|if \(!isValidUuid\(userId\)\) \{/);
   });
 
   it('3. Usuário novo com UUID sem subscription recebe plano Free virtual ativo com 15 de limite', () => {

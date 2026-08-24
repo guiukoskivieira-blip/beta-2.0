@@ -4,7 +4,7 @@
  * Não altera testes antigos nem corrige bugs encontrados.
  */
 import assert from 'node:assert/strict';
-import { PDFDocument, PDFName, PDFDict, PDFNumber } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFDict, PDFNumber, PDFRawStream } from 'pdf-lib';
 import { extractPdfStructure } from '../server/pdfExtractor';
 import { runDeterministicRuleEngine } from '../src/utils/ruleEngine';
 import {
@@ -368,10 +368,12 @@ test('Transparência detectada: hasTransparency=true na página', async () => {
     ca: 0.5,
   });
   const extGStateRef = pdfDoc.context.register(extGStateDict);
-  const resourcesDict = page.node.Resources() as any;
-  if (resourcesDict instanceof PDFDict) {
-    resourcesDict.set(PDFName.of('ExtGState'), pdfDoc.context.obj({ GS1: extGStateRef }));
+  let resourcesDict = page.node.Resources() as any;
+  if (!resourcesDict || !(resourcesDict instanceof PDFDict)) {
+    resourcesDict = pdfDoc.context.obj({});
+    page.node.set(PDFName.of('Resources'), resourcesDict);
   }
+  resourcesDict.set(PDFName.of('ExtGState'), pdfDoc.context.obj({ GS1: extGStateRef }));
   const buf = Buffer.from(await pdfDoc.save());
   const structure = await extractPdfStructure(buf);
   assert.equal(structure.pages[0].hasTransparency, true);

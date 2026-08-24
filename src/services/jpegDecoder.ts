@@ -621,6 +621,6 @@ export function decodeJpegToRgb(jpegBuffer: Uint8Array | Buffer): JpegDecodeResu
     width,
     height,
     data: rgbData,
-    components: 3,
+    components: componentCount,
   };
 }

@@ -86,6 +86,8 @@ export interface PdfImageOccurrence {
   rotationDeg?: number;
   ctm?: number[];
   filter?: string;
+  widthPt?: number;
+  heightPt?: number;
   xPt?: number;
   yPt?: number;
 }
@@ -110,6 +112,8 @@ export interface PdfFontItem {
   isUsedInContent: boolean;
   usedPages?: number[];
 }
+
+export type PdfFontInfo = PdfFontItem;
 
 export interface PdfColorOccurrence {
   page: number;
@@ -155,6 +159,9 @@ export interface PdfPageStructure {
   hasTransparency: boolean;
   hasRgbRaster?: boolean;
   hasRgbVector?: boolean;
+  hasCmykVector?: boolean;
+  hasSpotVector?: boolean;
+  hasGrayVector?: boolean;
   imageOccurrences: PdfImageOccurrence[];
   colorOccurrences: PdfColorOccurrence[];
   fonts?: any[];
@@ -205,11 +212,17 @@ export interface PdfDocumentStructure {
     hasRgbRaster?: boolean;
     hasRgbVector?: boolean;
     hasCmyk: boolean;
+    hasCmykVector?: boolean;
     hasSpotColors: boolean;
+    hasSpotVector?: boolean;
+    hasGrayVector?: boolean;
     familiesDetected: string[];
+    spotPlates?: string[];
   };
   pdfxInfo?: {
     isDeclaredPdfX: boolean;
+    hasXmpMetadata?: boolean;
+    xmpPdfxVersion?: string;
     declarationStatus?: 'declared' | 'inconsistent' | 'partially_declared' | 'not_declared' | string;
     pdfVersion?: string;
     headerPdfVersion?: string;

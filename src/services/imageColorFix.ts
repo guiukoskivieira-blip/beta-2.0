@@ -274,7 +274,7 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
             const rawInnerXObj = formResources.get(PDFName.of('XObject'));
             const innerXObj = rawInnerXObj ? pdfDoc.context.lookup(rawInnerXObj) : undefined;
             if (innerXObj instanceof PDFDict) {
-              const rawName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
+              const rawName = (typeof (nameKey as any).asString === 'function' ? (nameKey as any).asString() : ((nameKey as any).value || String(nameKey))).replace(/^\//, '');
               processXObjects(innerXObj, `${formPrefix}${rawName}/`, currentVisited, depth + 1);
             }
           }
@@ -283,7 +283,7 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
 
         if (subtype?.toString() !== '/Image') continue;
 
-        const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
+        const rawName = typeof (nameKey as any).asString === 'function' ? (nameKey as any).asString() : ((nameKey as any).value || String(nameKey));
         const imgName = `${formPrefix}${typeof rawName === 'string' ? rawName : String(rawName)}`;
         const uniqueKey = `p${pageNum}_${imgName}_${ref.tag}`;
 

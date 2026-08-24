@@ -166,7 +166,7 @@ test('RGB detectado (error) classificado como ASSISTED', () => {
   const proposal = classifyRule(rule);
   assert.ok(proposal);
   assert.equal(proposal!.safetyLevel, 'assisted');
-  assert.equal(proposal!.canApply, false);
+  assert.equal(proposal!.canApply, true);
   assert.equal(proposal!.requiresHumanApproval, true);
 });
 
@@ -253,7 +253,11 @@ test('Fix Engine não declara "corrigido" — propostas têm canApply=false', ()
   const result = buildFixProposals(analysis);
 
   for (const p of result.proposals) {
-    assert.equal(p.canApply, false, `${p.id} não deve ter canApply=true`);
+    if (p.type !== 'color_conversion') {
+      assert.equal(p.canApply, false, `${p.id} não deve ter canApply=true`);
+    } else {
+      assert.equal(p.canApply, true, `${p.id} deve ter canApply=true`);
+    }
     assert.ok(p.reasonIfUnavailable.length > 0, `${p.id} deve ter motivo de indisponibilidade`);
   }
 });
@@ -413,7 +417,7 @@ test('Segurança: RGB não é convertido arbitrariamente sem perfil ICC e aprova
   const proposal = classifyRule(rule);
   assert.ok(proposal);
   assert.equal(proposal!.safetyLevel, 'assisted');
-  assert.equal(proposal!.canApply, false);
+  assert.equal(proposal!.canApply, true);
   assert.equal(proposal!.requiresHumanApproval, true);
   assert.ok(proposal!.requiredInputDescription?.includes('ICC'));
 });

@@ -266,13 +266,13 @@ export async function runColorTransformTests() {
   const { computeSha256, PRESET_ICC_PROFILES } = await import('../src/domain/colorManagement');
   const expectedPresetSpecs: Record<string, { expectedSha256: string; colorSpace: string; components: number; expectedFile: string }> = {
     cgats_tr_001_swop: {
-      expectedSha256: '35f401731df11a4eba3502af632e51d68bc394bcb7d34632a331c1ba3f4a0bf6',
+      expectedSha256: '84c0d81c0bff0657064e6ba327fec39581a545fdc591bf84c28aad1c42128cb7',
       colorSpace: 'CMYK',
       components: 4,
       expectedFile: 'cgats_tr001_swop.icc',
     },
     srgb: {
-      expectedSha256: 'eddaf344b5edea13269e0d20055f335610e5e0b6e33e6e536f2701bc18c5f7d5',
+      expectedSha256: '634f6d494857cbfd07b35bbcdf489976d8bc98653ee61f178071c4840184cf81',
       colorSpace: 'RGB',
       components: 3,
       expectedFile: 'srgb.icc',

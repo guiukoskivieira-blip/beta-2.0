@@ -136,7 +136,7 @@ interface ImagePlacement {
   yPt: number;
   appliedWidthPt: number;
   appliedHeightPt: number;
-  ctm: number[];
+  ctm: [number, number, number, number, number, number];
 }
 
 /** Multiplies two 2D affine transformation matrices [a, b, c, d, e, f]. */
@@ -196,27 +196,42 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
   }
 
   let stack: number[] = [];
-  let matrixStack: number[][] = [];
-  const identity = [1, 0, 0, 1, 0, 0];
-  let currentMatrix = [...identity];
+  let matrixStack: Array<[number, number, number, number, number, number]> = [];
+  const identity: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+  let currentMatrix: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
 
   for (let t = 0; t < tokens.length; t++) {
     const tok = tokens[t];
-    if (/^-?\d+(\.\d+)?$/.test(tok)) {
+    if (/^[\d.\-+eE]+$/.test(tok)) {
       stack.push(parseFloat(tok));
       continue;
     }
-    if (tok === 'cm') {
-      if (stack.length >= 6) {
-        const m = stack.splice(-6);
-        currentMatrix = multiplyAffine(m, currentMatrix);
-      }
+    if (tok === 'q') {
+      matrixStack.push([...currentMatrix]);
+      stack = [];
       continue;
     }
-    if (tok === 'q') { matrixStack.push([...currentMatrix]); continue; }
-    if (tok === 'Q') { currentMatrix = matrixStack.pop() || [...identity]; continue; }
+    if (tok === 'Q') {
+      if (matrixStack.length > 0) currentMatrix = matrixStack.pop()!;
+      else currentMatrix = [...identity];
+      stack = [];
+      continue;
+    }
+    if (tok === 'cm' && stack.length >= 6) {
+      const cmVals: [number, number, number, number, number, number] = [
+        stack[stack.length - 6],
+        stack[stack.length - 5],
+        stack[stack.length - 4],
+        stack[stack.length - 3],
+        stack[stack.length - 2],
+        stack[stack.length - 1],
+      ];
+      currentMatrix = multiplyAffine(currentMatrix, cmVals);
+      stack = [];
+      continue;
+    }
     if (tok === 'Do') {
-      if (stack.length === 0 && t > 0) {
+      if (t > 0) {
         const prev = tokens[t - 1];
         if (prev && prev.startsWith('/')) {
           const name = prev.slice(1);
@@ -228,7 +243,7 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
               yPt: m[5],
               appliedWidthPt: Math.hypot(m[0], m[1]),
               appliedHeightPt: Math.hypot(m[2], m[3]),
-              ctm: [...m],
+              ctm: [m[0], m[1], m[2], m[3], m[4], m[5]],
             });
           }
         }
@@ -579,7 +594,7 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
   const detectedFamilies = new Set<string>();
 
   const pages: PdfPageStructure[] = [];
-  const fontsMap = new Map<string, PdfFontInfo>();
+  const fontsMap = new Map<string, PdfFontItem>();
 
   for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
     const page = rawPages[pageIdx];
@@ -665,7 +680,7 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     // Track vector color operators on this page (rg, RG, k, K, g, G, cs, CS, sc, SC, scn, SCN)
     const pageVectorAnalysis = parseContentStreamVectorColors(
       contentBytes,
-      resources?.get?.(PDFName.of('ColorSpace')),
+      resources instanceof PDFDict ? resources.get(PDFName.of('ColorSpace')) : undefined,
       pdfDoc.context
     );
     let pageHasRgbVector = pageVectorAnalysis.hasRgbVector;
@@ -685,7 +700,7 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
         for (const [fName, fRef] of fEntries) {
           const fontObj = pdfDoc.context.lookup(fRef);
           if (fontObj instanceof PDFDict) {
-            const rawFName = (typeof fName.asString === 'function' ? fName.asString() : (fName.value || String(fName))).replace(/^\//, '');
+            const rawFName = (typeof (fName as any).asString === 'function' ? (fName as any).asString() : ((fName as any).value || String(fName))).replace(/^\//, '');
             const fontBaseVal = fontObj.get(PDFName.of('BaseFont'));
             const baseFontStr = (fontBaseVal ? String(fontBaseVal) : String(rawFName)).replace(/^\//, '');
             const baseFont: string = baseFontStr;
@@ -786,14 +801,17 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
           const dict: PDFDict = (xobj as any).dict || (xobj instanceof PDFDict ? xobj : null);
           if (!dict) continue;
 
-          const rawName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
+          const rawName = (typeof (nameKey as any).asString === 'function' ? (nameKey as any).asString() : ((nameKey as any).value || String(nameKey))).replace(/^\//, '');
           const currentPath = pathPrefix ? `${pathPrefix}/${rawName}` : rawName;
           const subtype = dict.get(PDFName.of('Subtype'))?.toString();
 
           if (subtype === '/Image') {
-            const widthPx = dict.get(PDFName.of('Width'))?.asNumber?.() || 100;
-            const heightPx = dict.get(PDFName.of('Height'))?.asNumber?.() || 100;
-            const bitsPerComponent = dict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+            const wVal = dict.get(PDFName.of('Width'));
+            const widthPx = wVal instanceof PDFNumber ? wVal.asNumber() : 100;
+            const hVal = dict.get(PDFName.of('Height'));
+            const heightPx = hVal instanceof PDFNumber ? hVal.asNumber() : 100;
+            const bpcVal = dict.get(PDFName.of('BitsPerComponent'));
+            const bitsPerComponent = bpcVal instanceof PDFNumber ? bpcVal.asNumber() : 8;
 
             let filterVal = 'None';
             const filterObj = dict.get(PDFName.of('Filter'));
@@ -902,13 +920,17 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
             const formMatrixObj = dict.get(PDFName.of('Matrix'));
             let formMatrix: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
             if (formMatrixObj instanceof PDFArray && formMatrixObj.size() >= 6) {
+              const getNum = (idx: number, defVal: number): number => {
+                const item = formMatrixObj.get(idx);
+                return item instanceof PDFNumber ? item.asNumber() : defVal;
+              };
               formMatrix = [
-                formMatrixObj.get(0)?.asNumber?.() ?? 1,
-                formMatrixObj.get(1)?.asNumber?.() ?? 0,
-                formMatrixObj.get(2)?.asNumber?.() ?? 0,
-                formMatrixObj.get(3)?.asNumber?.() ?? 1,
-                formMatrixObj.get(4)?.asNumber?.() ?? 0,
-                formMatrixObj.get(5)?.asNumber?.() ?? 0,
+                getNum(0, 1),
+                getNum(1, 0),
+                getNum(2, 0),
+                getNum(3, 1),
+                getNum(4, 0),
+                getNum(5, 0),
               ];
             }
 
@@ -964,6 +986,26 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
       const fontsDict = rawFonts ? pdfDoc.context.lookup(rawFonts) : undefined;
       if (fontsDict) {
         processFontsDict(fontsDict);
+      }
+
+      // Check ExtGState for Transparency
+      const rawExtGState = resources.get(PDFName.of('ExtGState'));
+      const extGState = rawExtGState ? pdfDoc.context.lookup(rawExtGState) : undefined;
+      if (extGState instanceof PDFDict) {
+        const gsEntries = extGState.entries();
+        for (const [, gsRef] of gsEntries) {
+          const gs = pdfDoc.context.lookup(gsRef);
+          if (gs instanceof PDFDict) {
+            const caObj = gs.get(PDFName.of('ca'));
+            const CAObj = gs.get(PDFName.of('CA'));
+            const ca = caObj instanceof PDFNumber ? caObj.asNumber() : undefined;
+            const CA = CAObj instanceof PDFNumber ? CAObj.asNumber() : undefined;
+            const bm = gs.get(PDFName.of('BM'))?.toString();
+            if ((ca !== undefined && ca < 1) || (CA !== undefined && CA < 1) || (bm && bm !== '/Normal' && bm !== '/Compatible')) {
+              hasTransparency = true;
+            }
+          }
+        }
       }
     }
 

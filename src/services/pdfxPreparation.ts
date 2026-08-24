@@ -70,6 +70,7 @@ export interface PdfxPreparationResult {
   status: PdfxPreparationStatus;
   steps: PdfxPreparationStepResult[];
   pdfBytes?: Uint8Array;
+  preparedPdfBytes?: Uint8Array;
   originalSha256: string;
   preparedSha256?: string;
   eligibleAfterPreparation: PdfxEligibilityResult;
@@ -311,20 +312,16 @@ export async function preparePdfForPdfx4(
   const oiCheck = currentEligibility.checks.find((c) => c.id === 'PDFX_OUTPUT_INTENT');
   if (oiCheck && oiCheck.status === 'fixable') {
     try {
-      const oiFixResult = await applyOutputIntentFix(workingBytes, {
-        contract: {
-          ruleId: 'RULE-PDFX-001',
-          fixId: 'fix_output_intent',
-          statusBefore: 'warning',
-          actionAttempted: 'Configurar Output Intent GTS_PDFX',
-          actionResult: 'corrected',
-          verified: true,
-          message: 'Geração de Output Intent para conformidade PDF/X-4',
+      const oiFixResult = await applyOutputIntentFix(
+        workingBytes,
+        {
+          outputConditionIdentifier: 'CGATS TR 001 (SWOP)',
+          iccProfileId: options.destinationIccPresetId || 'cgats_tr_001_swop',
+          targetColorSpace: 'CMYK',
         },
-        profile,
-        iccProfileId: options.destinationIccPresetId || 'cgats_tr_001_swop',
-        iccBytes: options.destinationIccBytes,
-      });
+        options.destinationIccBytes,
+        profile
+      );
 
       if (oiFixResult.success && oiFixResult.pdfBytes) {
         // Re-analyze with Motor 1
@@ -455,8 +452,8 @@ export async function preparePdfForPdfx4(
           status: 'failed',
           before: 'Caixas incompletas',
           after: 'Não alterado',
-          evidence: boxResult.globalReason || 'Falha ao aplicar caixas técnicas',
-          error: boxResult.globalReason,
+          evidence: boxResult.error || 'Falha ao aplicar caixas técnicas',
+          error: boxResult.error,
         });
 
         const updatedEligibility = evaluatePdfx4Eligibility(currentStructure, {
@@ -535,6 +532,7 @@ export async function preparePdfForPdfx4(
     status: isFullyPrepared ? 'prepared' : 'partially_prepared',
     steps,
     pdfBytes: workingBytes,
+    preparedPdfBytes: workingBytes,
     originalSha256,
     preparedSha256,
     eligibleAfterPreparation: finalEligibility,

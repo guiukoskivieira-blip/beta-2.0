@@ -544,14 +544,16 @@ export async function finalizePdfx4Document(
     pdfBytes: preparedBytes,
   });
 
-  if (!initialEligibility.eligible) {
+  if (initialEligibility.status !== 'eligible') {
     return {
       success: false,
       declaredPdfX: null,
       verifiedPdfX: false,
       targetStandard: 'PDF/X-4',
       checks: [],
-      failures: initialEligibility.blockers.map((b) => `${b.code}: ${b.reason}`),
+      failures: initialEligibility.blockers.length > 0
+        ? initialEligibility.blockers.map((b) => `${b.code}: ${b.reason}`)
+        : [initialEligibility.summaryMessage || 'Documento possui correções pendentes antes da finalização.'],
       warnings: initialEligibility.warnings.map((w) => `${w.code}: ${w.reason}`),
       preparedSha256,
       summaryMessage: 'Documento não elegível para PDF/X-4. A finalização requer que todos os itens de elegibilidade estejam aprovados.',

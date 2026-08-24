@@ -66,6 +66,10 @@ export function resolveIccBytes(
     return iccBytes instanceof Uint8Array ? iccBytes : new Uint8Array(iccBytes);
   }
 
+  if (presetId && !PRESET_ICC_PROFILES[presetId]) {
+    return null;
+  }
+
   const targetPreset = presetId || 'cgats_tr_001_swop';
   const preset = PRESET_ICC_PROFILES[targetPreset];
   const candidates = [
