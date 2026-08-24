@@ -195,16 +195,16 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
   const isEligible = eligibility?.eligible === true;
 
   return (
-    <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl mb-8">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl mb-8">
       {/* Header */}
-      <div className="flex items-center justify-between pb-5 border-b border-[#243244]">
+      <div className="flex items-center justify-between pb-5 border-b border-slate-200">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 rounded-lg bg-[#00D18F]/15 border border-[#00D18F]/40 flex items-center justify-center text-[#00D18F]">
             <Scissors className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">Correção de Caixas Técnicas</h3>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <h3 className="text-lg font-bold text-[#0F172A]">Correção de Caixas Técnicas</h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
               TrimBox e BleedBox — quando deterministicamente seguro
             </p>
           </div>
@@ -246,7 +246,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
               <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-[#FFB800]/5 border border-[#FFB800]/20 mb-4">
                 <ShieldCheck className="w-4 h-4 text-[#FFB800] shrink-0 mt-0.5" />
                 <p className="text-xs text-[#A6B4C9]">
-                  Esta correção altera <span className="text-white font-medium">somente as caixas técnicas</span> do PDF.
+                  Esta correção altera <span className="text-[#0F172A] font-medium">somente as caixas técnicas</span> do PDF.
                   O conteúdo gráfico não será modificado.
                 </p>
               </div>
@@ -271,7 +271,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
                 <p className="text-xs text-[#A6B4C9] mt-1">{eligibility.globalReason}</p>
                 {eligibility.pages.map((p) => (
                   !p.eligible ? (
-                    <p key={p.page} className="text-xs text-[#6B778C] mt-1.5">
+                    <p key={p.page} className="text-xs text-slate-400 mt-1.5">
                       Página {p.page}: {p.reason}
                     </p>
                   ) : null
@@ -292,7 +292,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
           <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-[#FFB800]/5 border border-[#FFB800]/20 mb-5">
             <ShieldCheck className="w-4 h-4 text-[#FFB800] shrink-0 mt-0.5" />
             <p className="text-xs text-[#A6B4C9]">
-              Esta correção altera <span className="text-white font-medium">somente as caixas técnicas</span> do PDF.
+              Esta correção altera <span className="text-[#0F172A] font-medium">somente as caixas técnicas</span> do PDF.
               O conteúdo gráfico não foi modificado.
             </p>
           </div>
@@ -301,7 +301,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
             {/* Before */}
             <div>
-              <h4 className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider mb-2">Antes</h4>
+              <h4 className="text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-2">Antes</h4>
               <BoxPreview
                 mediaBox={previewData.before.mediaBox}
                 trimBox={previewData.before.trimBox}
@@ -324,16 +324,16 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
 
           {/* Measurements */}
           <div className="grid grid-cols-3 gap-3 mb-5">
-            <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244] text-center">
-              <span className="text-[10px] text-[#6B778C] block">Sangria</span>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 text-center">
+              <span className="text-[10px] text-slate-400 block">Sangria</span>
               <span className="text-lg font-bold text-[#00D18F]">{previewData.bleedMm} mm</span>
             </div>
-            <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244] text-center">
-              <span className="text-[10px] text-[#6B778C] block">Formato</span>
-              <span className="text-sm font-bold text-white">{previewData.trimWidthMm} × {previewData.trimHeightMm} mm</span>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 text-center">
+              <span className="text-[10px] text-slate-400 block">Formato</span>
+              <span className="text-sm font-bold text-[#0F172A]">{previewData.trimWidthMm} × {previewData.trimHeightMm} mm</span>
             </div>
-            <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244] text-center">
-              <span className="text-[10px] text-[#6B778C] block">Alteração</span>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 text-center">
+              <span className="text-[10px] text-slate-400 block">Alteração</span>
               <span className="text-sm font-bold text-[#007BFF]">Caixas técnicas</span>
             </div>
           </div>
@@ -352,7 +352,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
             <button
               type="button"
               onClick={handleCancel}
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
             >
               <X className="w-4 h-4 mr-2" />
               Cancelar
@@ -459,7 +459,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
             >
               <RefreshCw className="w-4 h-4 mr-2" />
               Recomeçar
@@ -474,8 +474,8 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
       {/* Cancelled state */}
       {phase === 'cancelled' && (
         <div className="mt-5">
-          <div className="flex items-start space-x-2.5 p-4 rounded-xl bg-[#243244]/30 border border-[#243244] mb-4">
-            <X className="w-4 h-4 text-[#8E98A7] shrink-0 mt-0.5" />
+          <div className="flex items-start space-x-2.5 p-4 rounded-xl bg-[#243244]/30 border border-slate-200 mb-4">
+            <X className="w-4 h-4 text-[#64748B] shrink-0 mt-0.5" />
             <p className="text-sm text-[#A6B4C9]">
               Correção cancelada. Nenhuma alteração foi aplicada. O PDF original permanece intacto.
             </p>
@@ -483,7 +483,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Voltar
@@ -506,7 +506,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Tentar novamente
@@ -524,7 +524,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Tentar novamente
@@ -568,7 +568,7 @@ const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, la
   return (
     <div className="flex flex-col items-center">
       <div
-        className="relative bg-[#0B1018] border border-[#243244] rounded-lg shadow-2xl overflow-hidden"
+        className="relative bg-slate-50/80 border border-slate-200 rounded-lg shadow-2xl overflow-hidden"
         style={{
           width: '100%',
           maxWidth: aspect > 1 ? '280px' : '200px',
@@ -619,11 +619,11 @@ const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, la
         {/* Fallback if no trim/bleed */}
         {!trimPct && !bleedPct && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[10px] text-[#6B778C]">Sem caixas técnicas</span>
+            <span className="text-[10px] text-slate-400">Sem caixas técnicas</span>
           </div>
         )}
       </div>
-      <span className="text-xs text-[#6B778C] mt-2">{label}</span>
+      <span className="text-xs text-slate-400 mt-2">{label}</span>
     </div>
   );
 };

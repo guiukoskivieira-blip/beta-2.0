@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Check, Crown, CreditCard, BarChart3, CalendarDays, Loader2 } from 'lucide-react';
+import { X, Check, Crown, CreditCard, BarChart3, CalendarDays, Loader2, Sparkles } from 'lucide-react';
 import { PLANS, type BillingPeriod, type BillingStatus, type PlanCode } from '../domain/billing';
 import { createCheckout, getBillingStatus } from '../services/billing';
 import { auth } from '../auth';
@@ -44,7 +44,6 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   const money = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const checkout = async (code: PlanCode) => {
-    // Impede clique duplicado
     if (loadingPlanCode !== null) return;
 
     try {
@@ -77,183 +76,152 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   const usagePercent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="max-w-6xl mx-auto my-6 rounded-2xl border border-[#243244] bg-[#0B1018] shadow-2xl">
-        <div className="p-5 border-b border-[#243244] flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-white">Planos e assinatura</h2>
-            <p className="text-sm text-[#8E98A7]">Escolha o volume ideal para sua produção.</p>
+    <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto flex items-center justify-center select-none">
+      <div className="w-full max-w-5xl my-6 rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+              <Crown className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-[#0F172A] tracking-tight">Planos e Assinaturas</h2>
+              <p className="text-xs text-[#64748B] font-medium">Escolha o volume e a capacidade de processamento ideal para sua gráfica.</p>
+            </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/5">
-            <X className="w-5 h-5 text-[#8E98A7]" />
+          <button 
+            onClick={onClose} 
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Fechar"
+          >
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Indicador de carregamento discreto do status de assinatura */}
-        {isLoadingStatus && (
-          <div className="m-5 p-3.5 rounded-xl border border-[#243244] bg-[#101722] flex items-center justify-center gap-2.5 text-xs text-[#8E98A7]">
-            <Loader2 className="w-4 h-4 text-[#007BFF] animate-spin" />
-            <span>Consultando dados da assinatura...</span>
-          </div>
-        )}
-
-        {/* Resumo superior do status sem qualquer possibilidade de NaN */}
-        {!isLoadingStatus && status && (
-          <div className="m-5 p-4 rounded-xl border border-blue-500/30 bg-blue-500/5 grid md:grid-cols-4 gap-4 text-sm">
+        <div className="p-6 space-y-6 bg-[#F8FAFC]">
+          {/* Usage Status Card */}
+          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <span className="text-[#8E98A7]">Plano atual</span>
-              <div className="font-bold text-white">{PLANS[status.plan]?.name || status.plan}</div>
-            </div>
-            <div>
-              <span className="text-[#8E98A7]">Uso do ciclo</span>
-              <div className="font-bold">
-                {used} de {limit}{' '}
-                <span className="text-xs text-blue-400 font-normal">
-                  ({remaining} restantes)
-                </span>
+              <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">Uso da Assinatura Atual</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-[#0F172A]">{used} / {limit} análises</span>
+                <span className="text-xs text-slate-500 font-medium">({remaining} restantes)</span>
               </div>
             </div>
-            <div>
-              <span className="text-[#8E98A7]">Renovação</span>
-              <div className="font-bold">
-                {status.renewsAt ? new Date(status.renewsAt).toLocaleDateString('pt-BR') : 'Mensal'}
+
+            <div className="sm:w-64 space-y-1.5">
+              <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden border border-slate-200/60">
+                <div 
+                  className="h-full bg-gradient-to-r from-[#0066FF] to-[#7C3AED] rounded-full transition-all duration-300"
+                  style={{ width: `${usagePercent}%` }}
+                />
               </div>
-            </div>
-            <div>
-              <span className="text-[#8E98A7]">Status</span>
-              <div className="font-bold uppercase text-emerald-400">{status.status || 'Ativo'}</div>
-            </div>
-            <div className="md:col-span-4 h-2 bg-[#182231] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#007BFF] to-[#6A00FF]"
-                style={{ width: `${usagePercent}%` }}
-              />
+              <span className="text-[10px] text-slate-500 font-semibold block text-right">{usagePercent}% utilizado</span>
             </div>
           </div>
-        )}
 
-        <div className="px-5 flex justify-center">
-          <div className="inline-flex rounded-xl bg-[#121820] border border-[#243244] p-1">
-            <button
-              onClick={() => setPeriod('monthly')}
-              disabled={loadingPlanCode !== null}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                period === 'monthly' ? 'bg-[#007BFF] text-white' : 'text-[#8E98A7] hover:text-white'
-              } disabled:opacity-50`}
-            >
-              Mensal
-            </button>
-            <button
-              onClick={() => setPeriod('yearly')}
-              disabled={loadingPlanCode !== null}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                period === 'yearly' ? 'bg-[#007BFF] text-white' : 'text-[#8E98A7] hover:text-white'
-              } disabled:opacity-50`}
-            >
-              Anual
-            </button>
-          </div>
-        </div>
-
-        {message && (
-          <div className="mx-5 mt-4 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm">
-            {message}
-          </div>
-        )}
-
-        <div className="p-5 grid md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {plans.map((p) => {
-            const unavailable = p.id === 'professional_launch' && period === 'yearly';
-            const price = period === 'yearly' ? p.yearlyPrice : p.monthlyPrice;
-            const isCurrent = currentPlan === p.id;
-            const isLoadingThis = loadingPlanCode === p.id;
-            const isAnyLoading = loadingPlanCode !== null;
-
-            return (
-              <div
-                key={p.id}
-                className={`relative rounded-2xl border p-5 bg-[#121820] ${
-                  p.id === 'professional_launch' || p.id === 'professional'
-                    ? 'border-[#007BFF] shadow-[0_0_30px_rgba(0,123,255,.12)]'
-                    : 'border-[#243244]'
+          {/* Period Toggle */}
+          <div className="flex items-center justify-center">
+            <div className="bg-slate-200/70 p-1 rounded-2xl border border-slate-200 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPeriod('monthly')}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  period === 'monthly'
+                    ? 'bg-white text-[#0F172A] shadow-2xs'
+                    : 'text-[#64748B] hover:text-[#0F172A]'
                 }`}
               >
-                {p.id === 'professional' && (
-                  <span className="absolute -top-3 left-4 px-3 py-1 rounded-full bg-gradient-to-r from-[#007BFF] to-[#6A00FF] text-[10px] font-bold uppercase text-white">
-                    Mais escolhido
-                  </span>
-                )}
-                {p.id === 'professional_launch' && (
-                  <span className="absolute -top-3 left-4 px-3 py-1 rounded-full bg-[#00D18F] text-[#07130f] text-[10px] font-bold uppercase">
-                    Lançamento
-                  </span>
-                )}
-                <h3 className="text-lg font-bold text-white mt-1">{p.name}</h3>
-                <div className="my-4 text-3xl font-bold text-white">
-                  {price ? money(price) : 'Grátis'}
-                  <span className="text-xs text-[#8E98A7] font-normal">
-                    /{period === 'monthly' ? 'mês' : 'ano'}
-                  </span>
-                </div>
-                <ul className="space-y-2 text-sm text-[#C3CBD6]">
-                  <li className="flex gap-2">
-                    <Check className="w-4 text-[#00D18F]" />
-                    {p.analysisLimit} análises por ciclo
-                  </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 text-[#00D18F]" />
-                    Até {p.maxUploadMb} MB por PDF
-                  </li>
-                  {p.launchCycles && (
-                    <li className="flex gap-2">
-                      <Crown className="w-4 text-amber-400" />
-                      Preço promocional por {p.launchCycles} ciclos
-                    </li>
-                  )}
-                </ul>
-                <button
-                  disabled={unavailable || isCurrent || isAnyLoading}
-                  onClick={() => checkout(p.id)}
-                  className={`mt-5 w-full py-2.5 rounded-xl font-semibold transition flex items-center justify-center gap-2 ${
-                    isCurrent
-                      ? 'bg-[#182231] text-[#8E98A7] cursor-default border border-[#243244]'
-                      : isLoadingThis
-                      ? 'bg-[#007BFF] text-white opacity-90 cursor-wait'
-                      : 'bg-gradient-to-r from-[#007BFF] to-[#6A00FF] text-white hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+                Mensal
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriod('yearly')}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  period === 'yearly'
+                    ? 'bg-white text-[#2563EB] shadow-2xs'
+                    : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                Anual <span className="ml-1 px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 text-[10px] font-extrabold">20% OFF</span>
+              </button>
+            </div>
+          </div>
+
+          {message && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-center">
+              {message}
+            </div>
+          )}
+
+          {/* Plans Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {plans.map((p) => {
+              const price = period === 'monthly' ? p.monthlyPrice : p.yearlyPrice;
+              const isCurrent = currentPlan === p.id;
+              const isPro = p.id === 'professional' || p.id === 'professional_launch';
+
+              return (
+                <div
+                  key={p.id}
+                  className={`rounded-2xl p-5 border transition-all flex flex-col justify-between ${
+                    isPro
+                      ? 'bg-gradient-to-b from-indigo-50/40 via-white to-white border-indigo-200 shadow-md shadow-indigo-100/50 ring-1 ring-indigo-200'
+                      : 'bg-white border-slate-200/90 shadow-2xs'
                   }`}
                 >
-                  {isLoadingThis ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Abrindo pagamento...</span>
-                    </>
-                  ) : isCurrent ? (
-                    'Plano atual'
-                  ) : (
-                    'Escolher plano'
-                  )}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-wider text-[#0F172A]">{p.name}</span>
+                        {p.badge && (
+                          <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED] text-white text-[9px] font-extrabold uppercase">
+                            {p.badge}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-[#0F172A]">{money(price)}</span>
+                        <span className="text-xs text-[#64748B] font-medium">/{period === 'monthly' ? 'mês' : 'ano'}</span>
+                      </div>
+                    </div>
 
-        <div className="px-5 pb-5 text-xs text-[#667386] flex gap-4 flex-wrap">
-          <span className="flex gap-1">
-            <CreditCard className="w-3.5" />
-            Cartão processado pelo provedor de pagamento quando configurado.
-          </span>
-          <span className="flex gap-1">
-            <BarChart3 className="w-3.5" />
-            Uso não acumula entre ciclos.
-          </span>
-          <span className="flex gap-1">
-            <CalendarDays className="w-3.5" />
-            Ciclo segue a assinatura real.
-          </span>
+                    <ul className="space-y-2 pt-2 border-t border-slate-100 text-xs font-medium text-[#334155]">
+                      {p.features.map((f, fIdx) => (
+                        <li key={fIdx} className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => checkout(p.id)}
+                    disabled={isCurrent || loadingPlanCode !== null}
+                    className={`w-full mt-6 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      isCurrent
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                        : isPro
+                        ? 'bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 text-white shadow-sm shadow-blue-500/20'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
+                    }`}
+                  >
+                    {loadingPlanCode === p.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    ) : isCurrent ? (
+                      'Plano Ativo'
+                    ) : (
+                      'Assinar Plano'
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

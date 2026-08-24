@@ -10,7 +10,6 @@ import {
   User,
   LogOut
 } from 'lucide-react';
-import { LogoIcon } from './BrandLogos';
 import type { BetaUser } from '../domain/beta';
 
 interface SidebarProps {
@@ -37,7 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'files', label: 'Arquivos', icon: FolderOpen },
+    { id: 'files', label: 'Arquivos & Análises', icon: FolderOpen },
     { id: 'verifications', label: 'Verificações', icon: CheckSquare },
     { id: 'reports', label: 'Relatórios', icon: FileSpreadsheet },
     { id: 'history', label: 'Histórico', icon: History },
@@ -50,22 +49,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const percentage = Math.min(100, Math.round((used / limit) * 100));
 
   return (
-    <aside className="w-64 shrink-0 bg-white border-r border-slate-200/90 flex flex-col justify-between p-4 min-h-screen select-none">
-      {/* Top Section: Logo & Nav Items */}
-      <div className="space-y-6">
-        {/* Brand Icon & Name */}
-        <div className="flex items-center gap-3 px-2 py-1.5">
-          <LogoIcon size={38} />
-          <div>
-            <span className="text-base font-black text-[#0F172A] tracking-tight block leading-tight">
-              ArteCheck
-            </span>
-            <span className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider block">
-              Agente de Impressão
-            </span>
-          </div>
-        </div>
-
+    <aside className="w-64 shrink-0 bg-white border-r border-slate-200/90 flex flex-col justify-between p-4 min-h-[calc(100vh-61px)] select-none">
+      {/* Top Section: Nav Items */}
+      <div className="space-y-4">
         {/* Navigation Links */}
         <nav className="space-y-1">
           {menuItems.map((item) => {

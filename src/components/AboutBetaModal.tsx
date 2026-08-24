@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Info, ShieldCheck, CheckCircle2, Cpu } from 'lucide-react';
+import { X, Info, ShieldCheck, Cpu } from 'lucide-react';
 
 interface AboutBetaModalProps {
   isOpen: boolean;
@@ -10,49 +10,53 @@ export const AboutBetaModal: React.FC<AboutBetaModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-      <div className="bg-[#101722] border border-[#243244] rounded-2xl w-full max-w-lg p-6 shadow-2xl relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-lg p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-[#8E98A7] hover:text-white p-1"
+          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="mb-4">
-          <h3 className="text-xl font-bold text-white flex items-center">
-            <Info className="w-5 h-5 mr-2 text-[#007BFF]" />
-            Sobre o ArteCheck IA
-          </h3>
-          <p className="text-xs text-[#8E98A7] mt-1">
-            Plataforma de validação técnica determinística de PDF para a indústria gráfica.
-          </p>
+        <div className="mb-5 flex items-center gap-3">
+          <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+            <Info className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+              Sobre o ArteCheck IA
+            </h3>
+            <p className="text-xs text-[#64748B] font-medium mt-0.5">
+              Plataforma de validação técnica determinística de PDF para a indústria gráfica.
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-4 text-xs text-[#C3CBD6] leading-relaxed">
-          <div className="p-3.5 bg-[#0B1018] rounded-xl border border-[#243244]">
-            <h4 className="font-semibold text-white mb-1 flex items-center">
-              <ShieldCheck className="w-4 h-4 mr-1.5 text-[#00D18F]" />
+        <div className="space-y-3.5 text-xs text-[#334155] leading-relaxed">
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1">
+            <h4 className="font-bold text-[#0F172A] flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
               Zero Armazenamento Permanente
             </h4>
-            <p className="text-[#8E98A7]">
+            <p className="text-[#64748B]">
               Seus arquivos PDF são inspecionados em buffers de memória volátil e descartados imediatamente após a extração da estrutura geométrica. Nenhuma arte gráfica de cliente é mantida em disco.
             </p>
           </div>
 
-          <div className="p-3.5 bg-[#0B1018] rounded-xl border border-[#243244]">
-            <h4 className="font-semibold text-white mb-1 flex items-center">
-              <Cpu className="w-4 h-4 mr-1.5 text-[#007BFF]" />
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1">
+            <h4 className="font-bold text-[#0F172A] flex items-center gap-1.5">
+              <Cpu className="w-4 h-4 text-[#2563EB]" />
               Motor Determinístico de Regras
             </h4>
-            <p className="text-[#8E98A7]">
+            <p className="text-[#64748B]">
               A validação de caixas de corte (MediaBox, TrimBox, BleedBox), espaços de cor (CMYK/RGB/Spot) e resolução efetiva (DPI) é calculada por fórmulas matemáticas exatas, sem alucinações.
             </p>
           </div>
 
-          <p className="text-[11px] text-[#6B778C] text-center pt-2">
-            ArteCheck IA • Versão Beta 1.0 • Desenvolvido para Gráficas e Agências
+          <p className="text-[11px] text-[#94A3B8] text-center pt-2 font-medium">
+            ArteCheck IA • Agente de Impressão • Desenvolvido para Gráficas e Agências
           </p>
         </div>
       </div>

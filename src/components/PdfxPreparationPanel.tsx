@@ -58,37 +58,37 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
   const statusBadgeConfig = {
     verified: {
       label: 'PDF/X-4 Verificado pelo ArteCheck',
-      bg: 'bg-[#00D18F]/15',
-      border: 'border-[#00D18F]/50',
-      text: 'text-[#00D18F]',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+      text: 'text-emerald-700',
       icon: Award,
     },
     eligible: {
       label: preparationResult ? 'Arquivo Preparado para PDF/X-4' : 'Elegível para PDF/X-4',
-      bg: 'bg-[#00D18F]/10',
-      border: 'border-[#00D18F]/30',
-      text: 'text-[#00D18F]',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+      text: 'text-emerald-700',
       icon: CheckCircle2,
     },
     fixable: {
       label: 'Elegível com Correções',
-      bg: 'bg-[#007BFF]/10',
-      border: 'border-[#007BFF]/30',
-      text: 'text-[#007BFF]',
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      text: 'text-blue-700',
       icon: Wrench,
     },
     manual_required: {
       label: 'Requer Intervenção Manual',
-      bg: 'bg-[#FFA500]/10',
-      border: 'border-[#FFA500]/30',
-      text: 'text-[#FFA500]',
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+      text: 'text-amber-700',
       icon: AlertTriangle,
     },
     blocked: {
       label: 'Bloqueado para PDF/X-4',
-      bg: 'bg-[#FF4D4D]/10',
-      border: 'border-[#FF4D4D]/30',
-      text: 'text-[#FF4D4D]',
+      bg: 'bg-rose-50',
+      border: 'border-rose-200',
+      text: 'text-rose-700',
       icon: XCircle,
     },
   };
@@ -257,21 +257,21 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
   };
 
   return (
-    <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl mb-8">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl mb-8">
       {/* Header */}
-      <div className="flex items-center justify-between pb-5 border-b border-[#243244]">
+      <div className="flex items-center justify-between pb-5 border-b border-slate-200">
         <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-[#007BFF]/15 border border-[#007BFF]/40 flex items-center justify-center text-[#007BFF]">
+          <div className="w-9 h-9 rounded-lg bg-[#007BFF]/15 border border-[#007BFF]/40 flex items-center justify-center text-blue-700">
             <FileCode className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="text-lg font-bold text-white">Preparação e Verificação PDF/X-4 (ISO 15930-7)</h3>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-[#243244] text-[#8E98A7]">
+              <h3 className="text-lg font-bold text-[#0F172A]">Preparação e Verificação PDF/X-4 (ISO 15930-7)</h3>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-[#243244] text-[#64748B]">
                 {isVerified ? 'Fase 3 • Verificado' : 'Fase 3 • Orquestrador'}
               </span>
             </div>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <p className="text-xs text-[#64748B] mt-0.5">
               Pipeline determinístico de adequação, geração de metadados XMP e validação pós-serialização
             </p>
           </div>
@@ -287,7 +287,7 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 rounded-lg text-[#8E98A7] hover:text-white hover:bg-[#1A2332] transition-all cursor-pointer"
+            className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-slate-100 transition-all cursor-pointer"
           >
             {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
           </button>
@@ -297,13 +297,13 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
       {isExpanded && (
         <div className="mt-5 space-y-5">
           {/* Summary Alert */}
-          <div className="p-4 rounded-xl bg-[#0B1018] border border-[#243244] flex items-start space-x-3">
-            <Info className="w-5 h-5 text-[#007BFF] shrink-0 mt-0.5" />
+          <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200 flex items-start space-x-3">
+            <Info className="w-5 h-5 text-blue-700 shrink-0 mt-0.5" />
             <div className="flex-1 text-xs">
-              <p className="text-white font-medium">
+              <p className="text-[#0F172A] font-medium">
                 {finalizeResult?.summaryMessage || eligibility.summaryMessage}
               </p>
-              <p className="text-[#8E98A7] mt-1 leading-relaxed">
+              <p className="text-[#64748B] mt-1 leading-relaxed">
                 <span className="font-semibold text-[#FFB800]">Conformidade Normativa:</span>{' '}
                 {isVerified
                   ? 'O arquivo PDF/X-4 foi gerado, serializado em disco, reaberto independentemente e aprovado pelo Motor 1.'
@@ -314,10 +314,10 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
           {/* Action Trigger 1: Preparation (Before Phase 2 execution) */}
           {canExecutePreparation && (
-            <div className="p-4 rounded-xl bg-[#007BFF]/10 border border-[#007BFF]/30 flex items-center justify-between">
+            <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-bold text-white">Preparação Automática Disponível</h4>
-                <p className="text-xs text-[#8E98A7] mt-0.5">
+                <h4 className="text-sm font-bold text-[#0F172A]">Preparação Automática Disponível</h4>
+                <p className="text-xs text-[#64748B] mt-0.5">
                   Aplica conversão LittleCMS RGB → CMYK, Output Intent GTS_PDFX e ajuste geométrico de caixas.
                 </p>
               </div>
@@ -325,7 +325,7 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                 type="button"
                 onClick={handleExecutePreparation}
                 disabled={isExecuting}
-                className="px-4 py-2 bg-[#007BFF] hover:bg-[#0066D6] text-white text-xs font-semibold rounded-xl transition-all flex items-center space-x-2 disabled:opacity-50 cursor-pointer"
+                className="px-4 py-2 bg-[#007BFF] hover:bg-[#0066D6] text-[#0F172A] text-xs font-semibold rounded-xl transition-all flex items-center space-x-2 disabled:opacity-50 cursor-pointer"
               >
                 {isExecuting ? (
                   <>
@@ -344,10 +344,10 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
           {/* Action Trigger 2: Initial Finalization (Only if original file was already 100% eligible without preparation) */}
           {canExecuteFinalizeInitial && (
-            <div className="p-4 rounded-xl bg-[#00D18F]/10 border border-[#00D18F]/30 flex items-center justify-between">
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-bold text-white">Arquivo Elegível para Geração PDF/X-4</h4>
-                <p className="text-xs text-[#8E98A7] mt-0.5">
+                <h4 className="text-sm font-bold text-[#0F172A]">Arquivo Elegível para Geração PDF/X-4</h4>
+                <p className="text-xs text-[#64748B] mt-0.5">
                   Escreve metadados XMP, declaração GTS_PDFX e executa verificação pós-serialização.
                 </p>
               </div>
@@ -376,23 +376,23 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
           {preparationResult && !finalizeResult && (
             <div
               className={`p-4 rounded-xl ${
-                isPrepFullyReady ? 'bg-[#00D18F]/10 border-[#00D18F]/30' : 'bg-[#FFA500]/10 border-[#FFA500]/30'
+                isPrepFullyReady ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
               } border space-y-3`}
             >
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center space-x-2.5">
                   <div
                     className={`w-8 h-8 rounded-lg ${
-                      isPrepFullyReady ? 'bg-[#00D18F]/20 text-[#00D18F]' : 'bg-[#FFA500]/20 text-[#FFA500]'
+                      isPrepFullyReady ? 'bg-[#00D18F]/20 text-emerald-700' : 'bg-[#FFA500]/20 text-amber-700'
                     } flex items-center justify-center shrink-0`}
                   >
                     {isPrepFullyReady ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white">
+                    <h4 className="text-sm font-bold text-[#0F172A]">
                       {isPrepFullyReady ? 'Arquivo tecnicamente preparado' : 'Preparação parcial com pendências'}
                     </h4>
-                    <p className="text-xs text-[#8E98A7]">
+                    <p className="text-xs text-[#64748B]">
                       {isPrepFullyReady
                         ? 'Pronto para geração PDF/X-4 • Cores, Output Intent e caixas ajustados'
                         : 'Algumas etapas de preparação falharam ou requerem intervenção manual antes da finalização PDF/X-4.'}
@@ -406,7 +406,7 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => handleDownloadPdf(preparationResult.preparedPdfBase64, 'preparado')}
-                      className="px-3 py-2 bg-[#1A2332] hover:bg-[#243244] text-white text-xs font-medium rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer border border-[#243244]"
+                      className="px-3 py-2 bg-slate-100 hover:bg-[#243244] text-[#0F172A] text-xs font-medium rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer border border-slate-200"
                     >
                       <Download className="w-3.5 h-3.5 mr-1" />
                       <span>Baixar PDF preparado</span>
@@ -449,16 +449,16 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                       step.status === 'not_needed' ||
                       step.status === 'already_compliant';
                     return (
-                      <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
-                        <div className="flex items-center space-x-1.5 font-semibold text-white">
+                      <div key={idx} className="p-2 rounded-lg bg-slate-50/80/60 text-xs">
+                        <div className="flex items-center space-x-1.5 font-semibold text-[#0F172A]">
                           {isStepApplied ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
                           ) : (
-                            <XCircle className="w-3.5 h-3.5 text-[#FF4D4D]" />
+                            <XCircle className="w-3.5 h-3.5 text-rose-700" />
                           )}
                           <span>{step.title}</span>
                         </div>
-                        <p className={`text-[11px] mt-1 ${isStepApplied ? 'text-[#8E98A7]' : 'text-[#FF4D4D]'}`}>
+                        <p className={`text-[11px] mt-1 ${isStepApplied ? 'text-[#64748B]' : 'text-rose-700'}`}>
                           {step.evidence || step.error || 'Etapa não concluída'}
                         </p>
                       </div>
@@ -471,15 +471,15 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
           {/* Phase 3 Finalized Verification Success Card */}
           {isVerified && finalizeResult && (
-            <div className="p-4 rounded-xl bg-[#00D18F]/15 border border-[#00D18F]/40 space-y-3 shadow-lg">
+            <div className="p-4 rounded-xl bg-emerald-50 border border-[#00D18F]/40 space-y-3 shadow-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#00D18F]/20 flex items-center justify-center text-[#00D18F]">
+                  <div className="w-8 h-8 rounded-lg bg-[#00D18F]/20 flex items-center justify-center text-emerald-700">
                     <Award className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white">PDF/X-4 verificado pelo ArteCheck</h4>
-                    <p className="text-xs text-[#00D18F]/80">
+                    <h4 className="text-sm font-bold text-[#0F172A]">PDF/X-4 verificado pelo ArteCheck</h4>
+                    <p className="text-xs text-emerald-700/80">
                       Padrão ISO 15930-7 confirmado em arquivo serializado e reaberto
                     </p>
                   </div>
@@ -499,12 +499,12 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
               {/* Verification Checklist */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-[#00D18F]/20">
                 {finalizeResult.checks.map((check, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/80 text-xs border border-[#00D18F]/20">
-                    <div className="flex items-center space-x-1.5 font-semibold text-white">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
+                  <div key={idx} className="p-2 rounded-lg bg-slate-50/80/80 text-xs border border-[#00D18F]/20">
+                    <div className="flex items-center space-x-1.5 font-semibold text-[#0F172A]">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
                       <span>{check.title}</span>
                     </div>
-                    <p className="text-[11px] text-[#8E98A7] mt-1">{check.evidence}</p>
+                    <p className="text-[11px] text-[#64748B] mt-1">{check.evidence}</p>
                   </div>
                 ))}
               </div>
@@ -513,14 +513,14 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
           {/* Phase 3 Finalization Failure Card (when verifiedPdfX === false) */}
           {finalizeResult && !finalizeResult.verifiedPdfX && (
-            <div className="p-4 rounded-xl bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 space-y-3 shadow-lg">
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 space-y-3 shadow-lg">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#FF4D4D]/20 flex items-center justify-center text-[#FF4D4D] shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-[#FF4D4D]/20 flex items-center justify-center text-rose-700 shrink-0">
                   <XCircle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">PDF/X-4 não pôde ser verificado</h4>
-                  <p className="text-xs text-[#FF4D4D]">
+                  <h4 className="text-sm font-bold text-[#0F172A]">PDF/X-4 não pôde ser verificado</h4>
+                  <p className="text-xs text-rose-700">
                     A declaração foi gravada, porém a reanálise da estrutura serializada identificou inconformidades:
                   </p>
                 </div>
@@ -529,9 +529,9 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
               {finalizeResult.failures && finalizeResult.failures.length > 0 && (
                 <div className="space-y-1.5 pt-2 border-t border-[#FF4D4D]/20">
                   {finalizeResult.failures.map((fail, idx) => (
-                    <div key={idx} className="flex items-start space-x-2 p-2.5 rounded-lg bg-[#0B1018]/80 text-xs border border-[#FF4D4D]/20">
-                      <AlertTriangle className="w-4 h-4 text-[#FF4D4D] shrink-0 mt-0.5" />
-                      <span className="text-white leading-relaxed">{fail}</span>
+                    <div key={idx} className="flex items-start space-x-2 p-2.5 rounded-lg bg-slate-50/80/80 text-xs border border-[#FF4D4D]/20">
+                      <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
+                      <span className="text-[#0F172A] leading-relaxed">{fail}</span>
                     </div>
                   ))}
                 </div>
@@ -540,7 +540,7 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
           )}
 
           {errorMessage && (
-            <div className="p-3 rounded-xl bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 flex items-center space-x-2 text-xs text-[#FF4D4D]">
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-center space-x-2 text-xs text-rose-700">
               <XCircle className="w-4 h-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
@@ -549,13 +549,13 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
           {/* Quick Check Grid */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+              <h4 className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
                 Auditoria de Elegibilidade ({passedChecksCount}/{totalChecksCount} Aprovados)
               </h4>
               <button
                 type="button"
                 onClick={() => setShowCheckDetails(!showCheckDetails)}
-                className="text-xs text-[#007BFF] hover:underline cursor-pointer font-medium"
+                className="text-xs text-blue-700 hover:underline cursor-pointer font-medium"
               >
                 {showCheckDetails ? 'Ocultar detalhes' : 'Ver todos os detalhes'}
               </button>
@@ -573,30 +573,30 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                     key={check.id}
                     className={`p-3 rounded-xl border text-xs transition-all ${
                       isPassed
-                        ? 'bg-[#0B1018]/50 border-[#243244]'
+                        ? 'bg-slate-50/80/50 border-slate-200'
                         : isFixable
-                        ? 'bg-[#007BFF]/5 border-[#007BFF]/30'
+                        ? 'bg-[#007BFF]/5 border-blue-200'
                         : isManual
-                        ? 'bg-[#FFA500]/5 border-[#FFA500]/30'
-                        : 'bg-[#FF4D4D]/5 border-[#FF4D4D]/30'
+                        ? 'bg-[#FFA500]/5 border-amber-200'
+                        : 'bg-[#FF4D4D]/5 border-rose-200'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        {isPassed && <CheckCircle2 className="w-4 h-4 text-[#00D18F] shrink-0" />}
-                        {isFixable && <Wrench className="w-4 h-4 text-[#007BFF] shrink-0" />}
-                        {isManual && <AlertTriangle className="w-4 h-4 text-[#FFA500] shrink-0" />}
-                        {isBlocked && <XCircle className="w-4 h-4 text-[#FF4D4D] shrink-0" />}
-                        <span className="font-semibold text-white">{check.title}</span>
+                        {isPassed && <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />}
+                        {isFixable && <Wrench className="w-4 h-4 text-blue-700 shrink-0" />}
+                        {isManual && <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />}
+                        {isBlocked && <XCircle className="w-4 h-4 text-rose-700 shrink-0" />}
+                        <span className="font-semibold text-[#0F172A]">{check.title}</span>
                       </div>
                       {check.reasonCode && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-[#8E98A7] bg-[#1A2332]">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-[#64748B] bg-slate-100">
                           {check.reasonCode}
                         </span>
                       )}
                     </div>
                     {(showCheckDetails || !isPassed) && (
-                      <p className="text-[#8E98A7] text-[11px] mt-1.5 pl-6 leading-relaxed">
+                      <p className="text-[#64748B] text-[11px] mt-1.5 pl-6 leading-relaxed">
                         {check.message}
                       </p>
                     )}

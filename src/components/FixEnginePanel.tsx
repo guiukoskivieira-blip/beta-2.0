@@ -45,16 +45,16 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
   };
 
   return (
-    <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl mb-8">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl mb-8">
       {/* Header */}
-      <div className="flex items-center justify-between pb-5 border-b border-[#243244]">
+      <div className="flex items-center justify-between pb-5 border-b border-slate-200">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 rounded-lg bg-[#007BFF]/15 border border-[#007BFF]/40 flex items-center justify-center text-[#007BFF]">
             <Wrench className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">Correções disponíveis</h3>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <h3 className="text-lg font-bold text-[#0F172A]">Correções disponíveis</h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
               Análise de viabilidade de correção — nenhuma alteração é aplicada automaticamente
             </p>
           </div>
@@ -104,8 +104,8 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2.5 mb-1">
-                    <span className="text-xs font-mono text-[#6B778C] font-semibold">{proposal.ruleId}</span>
-                    <h4 className="text-sm font-semibold text-white truncate">{proposal.title}</h4>
+                    <span className="text-xs font-mono text-slate-400 font-semibold">{proposal.ruleId}</span>
+                    <h4 className="text-sm font-semibold text-[#0F172A] truncate">{proposal.title}</h4>
                   </div>
                   <p className="text-xs text-[#A6B4C9] line-clamp-2">{proposal.description}</p>
                 </div>
@@ -114,23 +114,23 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.border} border`} style={{ color: cfg.color }}>
                     <SafetyIcon className="w-3.5 h-3.5 mr-1" /> {cfg.label}
                   </span>
-                  <button type="button" className="text-[#8E98A7] hover:text-white p-1">
+                  <button type="button" className="text-[#64748B] hover:text-[#0F172A] p-1">
                     {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
               {isExpanded && (
-                <div className="mt-3 pl-4 border-l-2 border-[#243244] ml-2 space-y-3 text-xs">
+                <div className="mt-3 pl-4 border-l-2 border-slate-200 ml-2 space-y-3 text-xs">
                   {/* Status */}
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-[#0B1018] border border-[#243244]">
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50/80 border border-slate-200">
                     <div className="flex items-center space-x-2">
                       {proposal.canApply ? (
                         <Wrench className="w-4 h-4 text-[#00D18F]" />
                       ) : (
                         <Ban className="w-4 h-4 text-[#FF4D4D]" />
                       )}
-                      <span className="text-[#8E98A7] font-medium">Correção automática:</span>
+                      <span className="text-[#64748B] font-medium">Correção automática:</span>
                       <span className={proposal.canApply ? 'text-[#00D18F] font-semibold' : 'text-[#FF4D4D] font-semibold'}>
                         {proposal.canApply ? 'disponível' : 'indisponível'}
                       </span>
@@ -144,22 +144,22 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
 
                   {/* Reason */}
                   <div>
-                    <span className="text-[#8E98A7] font-medium block mb-0.5">Motivo:</span>
-                    <p className="text-[#C3CBD6]">{proposal.reasonIfUnavailable}</p>
+                    <span className="text-[#64748B] font-medium block mb-0.5">Motivo:</span>
+                    <p className="text-[#334155]">{proposal.reasonIfUnavailable}</p>
                   </div>
 
                   {/* Measured vs Expected */}
                   {(proposal.measuredValue || proposal.expectedValue) && (
                     <div className="grid grid-cols-2 gap-3">
                       {proposal.measuredValue && (
-                        <div className="p-2.5 rounded-lg bg-[#0B1018] border border-[#243244]">
-                          <span className="text-[#6B778C] text-[10px] block">Medido</span>
+                        <div className="p-2.5 rounded-lg bg-slate-50/80 border border-slate-200">
+                          <span className="text-slate-400 text-[10px] block">Medido</span>
                           <span className="text-[#FF4D4D] font-semibold">{proposal.measuredValue}</span>
                         </div>
                       )}
                       {proposal.expectedValue && (
-                        <div className="p-2.5 rounded-lg bg-[#0B1018] border border-[#243244]">
-                          <span className="text-[#6B778C] text-[10px] block">Esperado</span>
+                        <div className="p-2.5 rounded-lg bg-slate-50/80 border border-slate-200">
+                          <span className="text-slate-400 text-[10px] block">Esperado</span>
                           <span className="text-[#00D18F] font-semibold">{proposal.expectedValue}</span>
                         </div>
                       )}
@@ -168,19 +168,19 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
 
                   {/* Required Action / Input Description */}
                   {proposal.requiredInputDescription && (
-                    <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244]">
-                      <span className="text-[#8E98A7] font-medium block mb-1">
+                    <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-200">
+                      <span className="text-[#64748B] font-medium block mb-1">
                         {proposal.safetyLevel === 'assisted' ? 'Requisitos para fechamento assistido:' : 'Ação técnica no software de origem:'}
                       </span>
-                      <p className="text-[#C3CBD6]">{proposal.requiredInputDescription}</p>
+                      <p className="text-[#334155]">{proposal.requiredInputDescription}</p>
                     </div>
                   )}
 
                   {/* Affected pages */}
                   {proposal.affectedPages.length > 0 && (
                     <div>
-                      <span className="text-[#8E98A7] font-medium block mb-0.5">Páginas afetadas:</span>
-                      <span className="text-[#C3CBD6]">{proposal.affectedPages.join(', ')}</span>
+                      <span className="text-[#64748B] font-medium block mb-0.5">Páginas afetadas:</span>
+                      <span className="text-[#334155]">{proposal.affectedPages.join(', ')}</span>
                     </div>
                   )}
                 </div>

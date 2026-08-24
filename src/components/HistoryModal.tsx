@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, History, FileText, Download, Trash2, Loader2, ArrowRight } from 'lucide-react';
+import { X, History, FileText, Download, Trash2, Loader2, ArrowRight, CheckCircle2, AlertTriangle, XCircle, FileCheck2 } from 'lucide-react';
 import type { AnalysisRecordSummary } from '../domain/beta';
 import { LocalStorageProvider } from '../storage/LocalStorageProvider';
 import { formatBytes } from '../../server/pdfExtractor';
@@ -9,9 +9,10 @@ import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnica
 interface HistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSelectAnalysis?: (id: string) => void;
 }
 
-export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose }) => {
+export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onSelectAnalysis }) => {
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const storage = new LocalStorageProvider();
@@ -43,7 +44,6 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose }) =
       }
 
       if (!reportData) {
-        // Fallback básico caso o registro seja legado sem snapshot completo
         const syntheticSnapshot: any = {
           id: item.id,
           createdAt: item.createdAt,
@@ -84,87 +84,95 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose }) =
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-      <div className="bg-[#101722] border border-[#243244] rounded-2xl w-full max-w-2xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-4 right-4 text-[#8E98A7] hover:text-white p-1"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <div className="mb-4">
-          <h3 className="text-xl font-bold text-white flex items-center">
-            <History className="w-5 h-5 mr-2 text-[#007BFF]" />
-            Histórico de Análises e Relatórios
-          </h3>
-          <p className="text-xs text-[#8E98A7] mt-1">
-            Registro das últimas checagens de pré-impressão realizadas com opção de exportação de relatório PDF.
-          </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-3xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+                Histórico de Análises
+              </h3>
+              <p className="text-xs text-[#64748B] font-medium">
+                Registros de arquivos processados e relatórios técnicos disponíveis para exportação.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Fechar"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+        {/* Content list */}
+        <div className="py-4 overflow-y-auto flex-1 space-y-3">
           {history.length === 0 ? (
-            <div className="text-center py-12 text-[#8E98A7] text-xs">
-              Nenhuma análise salva no histórico recente.
+            <div className="p-12 text-center text-[#64748B] space-y-2">
+              <FileText className="w-8 h-8 mx-auto text-slate-300 stroke-[1.5]" />
+              <p className="text-sm font-semibold text-slate-700">Nenhuma análise no histórico</p>
+              <p className="text-xs text-slate-400">Os arquivos verificados aparecerão salvos aqui automaticamente.</p>
             </div>
           ) : (
             history.map((item) => {
-              const hasComparison = Boolean(item.postFixSnapshot && item.initialSnapshot);
+              const dateStr = new Date(item.createdAt).toLocaleString('pt-BR');
+              const statusBg =
+                item.status === 'approved'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : item.status === 'review'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : 'bg-rose-50 text-rose-700 border-rose-200';
+
               return (
                 <div
                   key={item.id}
-                  className="bg-[#0B1018] border border-[#243244] rounded-xl p-4 flex items-center justify-between gap-4"
+                  className="p-4 rounded-2xl bg-slate-50/70 hover:bg-slate-50 border border-slate-200/80 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
                 >
-                  <div className="flex items-center space-x-3 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-[#16202E] flex items-center justify-center text-[#007BFF] shrink-0">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="text-sm font-semibold text-white truncate max-w-xs sm:max-w-md">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-[#0F172A] truncate max-w-xs sm:max-w-md">
                         {item.fileName}
-                      </h4>
-                      <p className="text-xs text-[#8E98A7]">
-                        {new Date(item.createdAt).toLocaleString('pt-BR')} • {formatBytes(item.fileSizeBytes)}
-                      </p>
-                      {hasComparison && (
-                        <span className="inline-flex items-center text-[10px] font-medium text-[#00D18F] mt-1">
-                          Corrigido: {item.initialSnapshot?.score} <ArrowRight className="w-2.5 h-2.5 mx-1" /> {item.score}/100
-                        </span>
-                      )}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${statusBg}`}>
+                        Score {item.score}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-[#64748B]">
+                      <span>{dateStr}</span>
+                      <span>•</span>
+                      <span>{formatBytes(item.fileSizeBytes)}</span>
+                      <span>•</span>
+                      <span className="truncate max-w-[150px]">{item.productName || 'Perfil Padrão'}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-3 shrink-0">
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-white block">
-                        {item.score}/100
-                      </span>
-                      <span className="text-[10px] text-[#8E98A7] uppercase font-semibold">
-                        {item.status}
-                      </span>
-                    </div>
-
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => handleExportReport(item)}
                       disabled={exportingId === item.id}
-                      title="Exportar Relatório Técnico em PDF"
-                      className="p-2 text-[#A6B4C9] hover:text-[#007BFF] bg-[#16202E] hover:bg-[#1C283A] rounded-lg transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-xs font-bold text-[#334155] shadow-2xs transition-colors cursor-pointer"
+                      title="Exportar PDF do Relatório Técnico"
                     >
                       {exportingId === item.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-[#007BFF]" />
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        <Download className="w-4 h-4" />
+                        <Download className="w-3.5 h-3.5 text-slate-500" />
                       )}
+                      <span>Relatório</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleDelete(item.id)}
-                      title="Excluir do histórico"
-                      className="p-2 text-[#8E98A7] hover:text-[#FF4D4D] rounded-lg transition-colors cursor-pointer"
+                      className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                      title="Excluir do Histórico"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

@@ -15,6 +15,7 @@ import { CustomProfilesModal } from './components/CustomProfilesModal';
 import { HistoryModal } from './components/HistoryModal';
 import { AboutBetaModal } from './components/AboutBetaModal';
 import { PlansModal } from './components/PlansModal';
+import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
@@ -28,6 +29,7 @@ import { uploadPdfForExtraction } from './services/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
 import type { BillingStatus } from './domain/billing';
+import { FileText, FolderOpen, CheckSquare, Plus } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
@@ -36,6 +38,9 @@ export const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
+
+  // Active navigation tab
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
 
   // View mode: 'operational' (concise, decision-first) vs 'technical' (expanded details)
   const [viewMode, setViewMode] = useState<'operational' | 'technical'>('operational');
@@ -51,6 +56,7 @@ export const App: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isPlansOpen, setIsPlansOpen] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
 
   // User state
   const [currentUser, setCurrentUser] = useState<BetaUser | null>(null);
@@ -90,6 +96,7 @@ export const App: React.FC = () => {
     setJobCheckResult(null);
     setProcessingStatus('idle');
     setErrorMessage(null);
+    setActiveTab('dashboard');
   };
 
   const handleStartAnalysis = async () => {
@@ -163,6 +170,7 @@ export const App: React.FC = () => {
       }
 
       setProcessingStatus('idle');
+      setActiveTab('dashboard');
     } catch (err: any) {
       console.error('Erro na análise:', err);
       setProcessingStatus('error');
@@ -179,12 +187,28 @@ export const App: React.FC = () => {
     setProcessingStatus('idle');
     setErrorMessage(null);
     setLimitReached(false);
+    setActiveTab('dashboard');
   };
 
   const scrollToFixes = () => {
     const el = window.document.getElementById('correcoes-disponiveis');
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const handleSidebarTabSelect = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === 'history') {
+      setIsHistoryOpen(true);
+    } else if (tab === 'settings') {
+      setIsProfilesOpen(true);
+    } else if (tab === 'reports') {
+      if (currentAnalysis) {
+        setIsReportOpen(true);
+      } else {
+        setIsHistoryOpen(true);
+      }
     }
   };
 
@@ -198,22 +222,15 @@ export const App: React.FC = () => {
         onToggleViewMode={(mode) => setViewMode(mode)}
         selectedProfile={selectedProfile}
         onOpenProfiles={() => setIsProfilesOpen(true)}
-        notificationCount={
-          currentAnalysis
-            ? currentAnalysis.ruleResults.errorCount + currentAnalysis.ruleResults.warningCount
-            : 3
-        }
+        
       />
 
       {/* Main Layout Area */}
       <div className="flex flex-1 min-w-0">
         {/* Left Narrow Sidebar */}
         <Sidebar
-          activeTab="dashboard"
-          onSelectTab={(tab) => {
-            if (tab === 'history') setIsHistoryOpen(true);
-            if (tab === 'settings') setIsProfilesOpen(true);
-          }}
+          activeTab={activeTab}
+          onSelectTab={handleSidebarTabSelect}
           billingStatus={{
             planCode: billingStatus?.plan || 'free',
             used: billingStatus?.usedAnalyses || 0,
@@ -238,6 +255,50 @@ export const App: React.FC = () => {
               onRetry={handleStartAnalysis}
               onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
             />
+          ) : activeTab === 'verifications' && !currentAnalysis ? (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-4 max-w-lg mx-auto my-12">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-[#4F46E5] flex items-center justify-center mx-auto border border-indigo-100">
+                <CheckSquare className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-black text-[#0F172A]">Nenhuma Verificação Ativa</h3>
+              <p className="text-xs text-[#64748B] font-medium leading-relaxed">
+                Envie um arquivo PDF ou selecione um item do histórico para inspecionar regras e métricas técnicas.
+              </p>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 shadow-sm transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Analisar Novo Arquivo</span>
+              </button>
+            </div>
+          ) : activeTab === 'files' && !currentAnalysis ? (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-4 max-w-lg mx-auto my-12">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto border border-blue-100">
+                <FolderOpen className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-black text-[#0F172A]">Nenhum Arquivo Selecionado</h3>
+              <p className="text-xs text-[#64748B] font-medium leading-relaxed">
+                Envie um documento PDF para iniciar a validação automatizada ou consulte seus relatórios no Histórico.
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] shadow-2xs transition-all cursor-pointer"
+                >
+                  Enviar PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsHistoryOpen(true)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all cursor-pointer"
+                >
+                  Ver Histórico
+                </button>
+              </div>
+            </div>
           ) : currentAnalysis ? (
             <div className="space-y-6">
               {/* Operational Decision Banner */}
@@ -255,6 +316,7 @@ export const App: React.FC = () => {
                 analysis={currentAnalysis}
                 profile={selectedProfile}
                 file={selectedFile}
+                onOpenReportModal={() => setIsReportOpen(true)}
                 onOpenProfiles={() => setIsProfilesOpen(true)}
                 userName={currentUser?.name}
               />
@@ -351,6 +413,12 @@ export const App: React.FC = () => {
       <PlansModal
         isOpen={isPlansOpen}
         onClose={() => setIsPlansOpen(false)}
+      />
+      <TechnicalReportModal
+        isOpen={isReportOpen}
+        onClose={() => setIsReportOpen(false)}
+        analysis={currentAnalysis}
+        profile={selectedProfile}
       />
     </div>
   );

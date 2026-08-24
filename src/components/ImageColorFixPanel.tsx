@@ -221,16 +221,16 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
   if (!hasRgb) return null;
 
   return (
-    <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl mb-8">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl mb-8">
       {/* Header */}
-      <div className="flex items-center justify-between pb-5 border-b border-[#243244]">
+      <div className="flex items-center justify-between pb-5 border-b border-slate-200">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 rounded-lg bg-[#007BFF]/15 border border-[#007BFF]/40 flex items-center justify-center text-[#007BFF]">
             <Palette className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">Conversão de Cores de Imagens (RGB → CMYK)</h3>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <h3 className="text-lg font-bold text-[#0F172A]">Conversão de Cores de Imagens (RGB → CMYK)</h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
               LittleCMS CMM WebAssembly — Conversão fotográfica determinística com perfis ICC reais
             </p>
           </div>
@@ -253,16 +253,16 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           </div>
 
           {rgbImagesList.length > 0 && (
-            <div className="p-3 rounded-xl bg-[#0B1018] border border-[#243244] text-xs">
-              <span className="text-[#8E98A7] font-semibold block mb-2">Imagens RGB Identificadas:</span>
+            <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 text-xs">
+              <span className="text-[#64748B] font-semibold block mb-2">Imagens RGB Identificadas:</span>
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                 {rgbImagesList.map((img, i) => (
-                  <div key={`${img.id}_${i}`} className="flex items-center justify-between text-[#C3CBD6] bg-[#16202E]/60 p-2 rounded-lg">
+                  <div key={`${img.id}_${i}`} className="flex items-center justify-between text-[#334155] bg-[#16202E]/60 p-2 rounded-lg">
                     <span className="flex items-center gap-1.5 font-mono">
                       <ImageIcon className="w-3.5 h-3.5 text-[#007BFF]" />
                       {img.name} (Pág. {img.page})
                     </span>
-                    <span className="text-[#8E98A7]">
+                    <span className="text-[#64748B]">
                       {img.widthPx}×{img.heightPx} px · {img.dpi} DPI
                     </span>
                   </div>
@@ -274,7 +274,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           <div className="flex items-start space-x-2.5 p-3 rounded-xl bg-[#FFB800]/5 border border-[#FFB800]/20">
             <ShieldCheck className="w-4 h-4 text-[#FFB800] shrink-0 mt-0.5" />
             <p className="text-xs text-[#A6B4C9]">
-              A conversão cria uma <span className="text-white font-medium">nova cópia do PDF</span> aplicando matrizes CMM LittleCMS sem fallbacks matemáticos simplificados. O PDF original permanece intacto.
+              A conversão cria uma <span className="text-[#0F172A] font-medium">nova cópia do PDF</span> aplicando matrizes CMM LittleCMS sem fallbacks matemáticos simplificados. O PDF original permanece intacto.
             </p>
           </div>
 
@@ -294,56 +294,56 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
         <div className="mt-5 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* ICC Destination Preset */}
-            <div className="p-4 rounded-xl bg-[#0B1018] border border-[#243244]">
-              <label className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider block mb-2">
+            <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200">
+              <label className="text-xs font-semibold text-[#64748B] uppercase tracking-wider block mb-2">
                 Perfil ICC CMYK de Destino
               </label>
               <select
                 value={destinationIccPresetId}
                 onChange={(e) => setDestinationIccPresetId(e.target.value)}
-                className="w-full bg-[#16202E] border border-[#243244] text-white text-xs rounded-lg p-2.5 focus:outline-none focus:border-[#007BFF]"
+                className="w-full bg-[#16202E] border border-slate-200 text-[#0F172A] text-xs rounded-lg p-2.5 focus:outline-none focus:border-[#007BFF]"
               >
                 <option value="cgats_tr_001_swop">CGATS TR 001 / U.S. Web Coated (SWOP) [Padrão]</option>
                 <option value="fogra39">Coated FOGRA39 (ISO 12647-2)</option>
                 <option value="iso_coated_v2">ISO Coated v2 300% (ECI)</option>
               </select>
-              <p className="text-[11px] text-[#6B778C] mt-2">
+              <p className="text-[11px] text-slate-400 mt-2">
                 {PRESET_ICC_PROFILES[destinationIccPresetId]?.description || 'Perfil CMYK calibrado para produção gráfica.'}
               </p>
             </div>
 
             {/* Rendering Intent */}
-            <div className="p-4 rounded-xl bg-[#0B1018] border border-[#243244]">
-              <label className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider block mb-2">
+            <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200">
+              <label className="text-xs font-semibold text-[#64748B] uppercase tracking-wider block mb-2">
                 Intenção de Renderização (Rendering Intent)
               </label>
               <select
                 value={renderingIntent}
                 onChange={(e) => setRenderingIntent(e.target.value as RenderingIntent)}
-                className="w-full bg-[#16202E] border border-[#243244] text-white text-xs rounded-lg p-2.5 focus:outline-none focus:border-[#007BFF]"
+                className="w-full bg-[#16202E] border border-slate-200 text-[#0F172A] text-xs rounded-lg p-2.5 focus:outline-none focus:border-[#007BFF]"
               >
                 <option value="RelativeColorimetric">Colorimétrico Relativo (Padrão para Fotos e Impressão)</option>
                 <option value="Perceptual">Perceptual (Preserva Relações Visuais Globais)</option>
                 <option value="Saturation">Saturação (Gráficos Comerciais e Diagramas)</option>
                 <option value="AbsoluteColorimetric">Colorimétrico Absoluto (Simulação de Prova)</option>
               </select>
-              <p className="text-[11px] text-[#6B778C] mt-2">
+              <p className="text-[11px] text-slate-400 mt-2">
                 Define como as cores fora do gamut CMYK serão remapeadas pelo CMM LittleCMS.
               </p>
             </div>
           </div>
 
           {/* sRGB Fallback Checkbox */}
-          <div className="p-3.5 rounded-xl bg-[#0B1018] border border-[#243244] flex items-start gap-3">
+          <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 flex items-start gap-3">
             <input
               type="checkbox"
               id="fallbackSrgb"
               checked={allowFallbackSrgb}
               onChange={(e) => setAllowFallbackSrgb(e.target.checked)}
-              className="mt-0.5 rounded border-[#243244] text-[#007BFF] focus:ring-0 cursor-pointer"
+              className="mt-0.5 rounded border-slate-200 text-[#007BFF] focus:ring-0 cursor-pointer"
             />
-            <label htmlFor="fallbackSrgb" className="text-xs text-[#C3CBD6] cursor-pointer">
-              <strong className="text-white block">Permitir fallback para espaço padrão sRGB</strong>
+            <label htmlFor="fallbackSrgb" className="text-xs text-[#334155] cursor-pointer">
+              <strong className="text-[#0F172A] block">Permitir fallback para espaço padrão sRGB</strong>
               Caso a imagem não tenha perfil ICC embutido, assume sRGB calibrado em vez de bloquear como conversão manual.
             </label>
           </div>
@@ -362,7 +362,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
             <button
               type="button"
               onClick={handleCancel}
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
             >
               <X className="w-4 h-4 mr-2" />
               Cancelar
@@ -454,7 +454,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
             >
               <RefreshCw className="w-4 h-4 mr-2" />
               Recomeçar
@@ -466,8 +466,8 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
       {/* Cancelled Phase */}
       {phase === 'cancelled' && (
         <div className="mt-5">
-          <div className="flex items-start space-x-2.5 p-4 rounded-xl bg-[#243244]/30 border border-[#243244] mb-4">
-            <X className="w-4 h-4 text-[#8E98A7] shrink-0 mt-0.5" />
+          <div className="flex items-start space-x-2.5 p-4 rounded-xl bg-[#243244]/30 border border-slate-200 mb-4">
+            <X className="w-4 h-4 text-[#64748B] shrink-0 mt-0.5" />
             <p className="text-sm text-[#A6B4C9]">
               Conversão cancelada. O PDF original permanece inalterado.
             </p>
@@ -475,7 +475,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Voltar
@@ -508,14 +508,14 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           {/* List of images with their reasons if available */}
           {conversionResponse?.imageResults && conversionResponse.imageResults.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+              <p className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
                 Detalhamento dos Objetos RGB
               </p>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {conversionResponse.imageResults.map((img, idx) => (
-                  <div key={idx} className="p-3 rounded-lg bg-[#0B1018] border border-[#243244] text-xs">
+                  <div key={idx} className="p-3 rounded-lg bg-slate-50/80 border border-slate-200 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-white font-medium">{img.objectId} (Pág. {img.page})</span>
+                      <span className="font-mono text-[#0F172A] font-medium">{img.objectId} (Pág. {img.page})</span>
                       <span className="px-2 py-0.5 rounded text-[10px] bg-[#FFA500]/15 text-[#FFA500] border border-[#FFA500]/30 uppercase font-semibold">
                         {img.status}
                       </span>
@@ -525,7 +525,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
                         Código: {img.reasonCode}
                       </p>
                     )}
-                    <p className="text-[#8E98A7] text-[11px] mt-0.5">
+                    <p className="text-[#64748B] text-[11px] mt-0.5">
                       {img.reason || 'Exige calibração ou decodificação manual no software de origem.'}
                     </p>
                   </div>
@@ -537,7 +537,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Voltar
@@ -560,7 +560,7 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           <button
             type="button"
             onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-[#1A2332] border border-[#243244] text-[#8E98A7] hover:bg-[#243244] hover:text-white cursor-pointer transition-all"
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-slate-100 border border-slate-200 text-[#64748B] hover:bg-[#243244] hover:text-[#0F172A] cursor-pointer transition-all"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Tentar novamente

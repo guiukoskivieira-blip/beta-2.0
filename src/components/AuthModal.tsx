@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, Building, User, LogIn, UserPlus, Loader as Loader2 } from 'lucide-react';
-import type { BetaUser } from '../domain/beta';
+import { X, Mail, Lock, User, ArrowRight, Loader2, Sparkles } from 'lucide-react';
 import { auth } from '../auth';
+import type { BetaUser } from '../domain/beta';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -10,162 +10,119 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [successInfo, setSuccessInfo] = useState<string | null>(null);
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !email.includes('@')) {
-      setError('Por favor, informe um e-mail corporativo válido.');
-      return;
-    }
-    if (!password || password.length < 6) {
-      setError('A senha deve ter no mínimo 6 caracteres.');
-      return;
-    }
-
-    setLoading(true);
     setError(null);
-    setSuccessInfo(null);
+    setLoading(true);
 
     try {
-      const session = isSignUp
-        ? await auth.signUp(email, password, displayName || undefined, companyName || undefined)
-        : await auth.signIn(email, password);
-
-      // Quando o cadastro é realizado mas requer confirmação de e-mail (session.accessToken ausente)
-      if (isSignUp && !session?.accessToken) {
-        setSuccessInfo('Cadastro realizado! Confirme seu e-mail e depois faça login para continuar.');
-        setIsSignUp(false);
-        setPassword('');
-        return;
-      }
-
-      if (!session?.user || !session?.accessToken) {
-        throw new Error('Não foi possível autenticar. Tente novamente.');
-      }
-
-      onSuccess(session.user);
-      onClose();
-    } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.includes('Invalid login') || msg.includes('credentials')) {
-        setError('E-mail ou senha incorretos. Verifique e tente novamente.');
-      } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
-        setError('E-mail ainda não confirmado. Verifique sua caixa de entrada antes de fazer login.');
-      } else if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
-        setError('Este e-mail já está cadastrado. Faça login em vez de criar uma nova conta.');
-      } else if (msg.includes('rate limit') || msg.includes('too many')) {
-        setError('Muitas tentativas. Aguarde alguns segundos e tente novamente.');
+      if (mode === 'login') {
+        const session = await auth.signIn(email, password);
+        if (session?.user) {
+          onSuccess(session.user);
+          onClose();
+        }
       } else {
-        setError(msg || 'Erro ao autenticar. Tente novamente.');
+        const session = await auth.signUp(email, password, name);
+        if (session?.user) {
+          onSuccess(session.user);
+          onClose();
+        }
       }
+    } catch (err: any) {
+      console.error('Auth error:', err);
+      setError(err?.message || 'Falha na autenticação. Verifique os dados informados.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-      <div className="bg-[#101722] border border-[#243244] rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-[#8E98A7] hover:text-white p-1"
+          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+          aria-label="Fechar"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="mb-6">
-          <h3 className="text-xl font-bold text-white">
-            {isSignUp ? 'Criar Conta de Gráfica' : 'Acessar ArteCheck IA'}
+        <div className="mb-6 space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-[#4F46E5] text-[11px] font-bold mb-2">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Acesso Seguro</span>
+          </div>
+          <h3 className="text-xl font-black text-[#0F172A] tracking-tight">
+            {mode === 'login' ? 'Entrar no ArteCheck' : 'Criar Nova Conta'}
           </h3>
-          <p className="text-xs text-[#8E98A7] mt-1">
-            {isSignUp
-              ? 'Cadastre-se para gerenciar cotas e histórico de análises.'
-              : 'Entre para sincronizar seus perfis e laudos técnicos.'}
+          <p className="text-xs text-[#64748B] font-medium">
+            {mode === 'login'
+              ? 'Acesse suas análises salvas, relatórios técnicos e limites contratados.'
+              : 'Cadastre sua gráfica para iniciar a validação automatizada de PDFs.'}
           </p>
         </div>
 
         {error && (
-          <div className="mb-4 text-xs text-[#FF4D4D] bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 p-2.5 rounded-lg">
+          <div className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl">
             {error}
           </div>
         )}
 
-        {successInfo && (
-          <div className="mb-4 text-xs text-[#00D18F] bg-[#00D18F]/10 border border-[#00D18F]/30 p-2.5 rounded-lg font-medium">
-            {successInfo}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {isSignUp && (
-            <>
-              <div>
-                <label className="block text-[#8E98A7] mb-1 font-medium">Nome do Operador</label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-[#556375] absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="Ex: Carlos Pré-impressão"
-                    className="w-full bg-[#0B1018] border border-[#243244] rounded-xl pl-9 pr-4 py-2.5 text-white focus:outline-hidden focus:border-[#007BFF]"
-                  />
-                </div>
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs font-medium">
+          {mode === 'register' && (
+            <div>
+              <label className="block text-slate-700 font-bold mb-1">Nome Completo / Empresa</label>
+              <div className="relative">
+                <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Gráfica Express"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                />
               </div>
-
-              <div>
-                <label className="block text-[#8E98A7] mb-1 font-medium">Nome da Gráfica / Agência</label>
-                <div className="relative">
-                  <Building className="w-4 h-4 text-[#556375] absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Ex: Gráfica Alfa Express"
-                    className="w-full bg-[#0B1018] border border-[#243244] rounded-xl pl-9 pr-4 py-2.5 text-white focus:outline-hidden focus:border-[#007BFF]"
-                  />
-                </div>
-              </div>
-            </>
+            </div>
           )}
 
           <div>
-            <label className="block text-[#8E98A7] mb-1 font-medium">E-mail</label>
+            <label className="block text-slate-700 font-bold mb-1">E-mail Profissional</label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-[#556375] absolute left-3 top-3" />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="email"
                 required
+                placeholder="operacao@grafica.com.br"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="operador@grafica.com.br"
-                className="w-full bg-[#0B1018] border border-[#243244] rounded-xl pl-9 pr-4 py-2.5 text-white focus:outline-hidden focus:border-[#007BFF]"
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-[#8E98A7] mb-1 font-medium">Senha</label>
+            <label className="block text-slate-700 font-bold mb-1">Senha de Acesso</label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-[#556375] absolute left-3 top-3" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="password"
                 required
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-[#0B1018] border border-[#243244] rounded-xl pl-9 pr-4 py-2.5 text-white focus:outline-hidden focus:border-[#007BFF]"
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
               />
             </div>
           </div>
@@ -173,30 +130,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-[#007BFF] hover:bg-[#0066D6] text-white font-medium rounded-xl transition-all shadow-lg mt-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center"
+            className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0066FF] via-[#5B21B6] to-[#7C3AED] hover:opacity-95 shadow-md shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
           >
-            {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {isSignUp ? 'Concluir Cadastro' : 'Entrar na Plataforma'}
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <span>{mode === 'login' ? 'Entrar na Plataforma' : 'Criar Minha Conta'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <div className="mt-4 text-center text-xs text-[#8E98A7]">
-          {isSignUp ? (
-            <button
-              type="button"
-              onClick={() => setIsSignUp(false)}
-              className="text-[#007BFF] hover:underline cursor-pointer"
-            >
-              Já possui conta? Faça login
-            </button>
+        <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-[#64748B]">
+          {mode === 'login' ? (
+            <span>
+              Ainda não possui conta?{' '}
+              <button
+                type="button"
+                onClick={() => setMode('register')}
+                className="text-[#2563EB] font-bold hover:underline ml-1"
+              >
+                Cadastre-se grátis
+              </button>
+            </span>
           ) : (
-            <button
-              type="button"
-              onClick={() => setIsSignUp(true)}
-              className="text-[#007BFF] hover:underline cursor-pointer"
-            >
-              Não tem conta? Cadastre sua gráfica
-            </button>
+            <span>
+              Já possui conta?{' '}
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                className="text-[#2563EB] font-bold hover:underline ml-1"
+              >
+                Fazer login
+              </button>
+            </span>
           )}
         </div>
       </div>
