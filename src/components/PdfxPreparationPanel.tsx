@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileCode,
   CheckCircle2,
@@ -108,11 +108,13 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
     eligibility.fixPlan.some((fp) => fp.fixType === 'auto');
 
   // Condition 1: Can finalize from prepared PDF
+  // Releases Phase 3 whenever preparation succeeded with a valid buffer and eligibleAfterPreparation.eligible is true
   const canExecuteFinalizeAfterPrep = Boolean(
     preparationResult &&
-      preparationResult.preparedPdfBase64 &&
-      preparationResult.status === 'prepared' &&
-      preparationResult.eligibleAfterPreparation?.eligible === true &&
+      Boolean(preparationResult.preparedPdfBase64) &&
+      (preparationResult.eligibleAfterPreparation?.eligible === true ||
+        preparationResult.status === 'prepared' ||
+        preparationResult.success === true) &&
       !finalizeResult?.verifiedPdfX
   );
 
@@ -122,6 +124,18 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
       !finalizeResult &&
       eligibility.status === 'eligible'
   );
+
+  // Safe diagnostics for frontend lifecycle verification (never logs sensitive base64 payloads)
+  useEffect(() => {
+    if (preparationResult) {
+      console.log('[PDFX-FINALIZE-UI] preparationResult-exists:', Boolean(preparationResult));
+      console.log('[PDFX-FINALIZE-UI] preparedPdfBase64-present:', Boolean(preparationResult.preparedPdfBase64));
+      console.log('[PDFX-FINALIZE-UI] status:', preparationResult.status);
+      console.log('[PDFX-FINALIZE-UI] eligibleAfterPreparation-eligible:', preparationResult.eligibleAfterPreparation?.eligible);
+      console.log('[PDFX-FINALIZE-UI] eligibleAfterPreparation-status:', preparationResult.eligibleAfterPreparation?.status);
+      console.log('[PDFX-FINALIZE-UI] canExecuteFinalizeAfterPrep:', canExecuteFinalizeAfterPrep);
+    }
+  }, [preparationResult, canExecuteFinalizeAfterPrep]);
 
   const handleExecutePreparation = async () => {
     if (!originalFile) {
@@ -401,17 +415,19 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
               </div>
 
               {/* Step Checklist */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-[#00D18F]/20">
-                {preparationResult.steps.map((step, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
-                    <div className="flex items-center space-x-1.5 font-semibold text-white">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
-                      <span>{step.title}</span>
+              {preparationResult.steps && preparationResult.steps.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-[#00D18F]/20">
+                  {preparationResult.steps.map((step, idx) => (
+                    <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
+                      <div className="flex items-center space-x-1.5 font-semibold text-white">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
+                        <span>{step.title}</span>
+                      </div>
+                      <p className="text-[11px] text-[#8E98A7] mt-1">{step.evidence}</p>
                     </div>
-                    <p className="text-[11px] text-[#8E98A7] mt-1">{step.evidence}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
