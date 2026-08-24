@@ -5,13 +5,13 @@
  */
 import assert from 'node:assert/strict';
 import { PDFDocument, PDFName, PDFDict, PDFNumber } from 'pdf-lib';
-import { extractPdfStructure } from '../server/pdfExtractor';
-import { runDeterministicRuleEngine } from '../src/utils/ruleEngine';
+import { extractPdfStructure } from '../server/pdfExtractor.ts';
+import { runDeterministicRuleEngine } from '../src/utils/ruleEngine.ts';
 import {
   COMMERCIAL_PRINT_300DPI_PROFILE,
   LARGE_FORMAT_BANNER_PROFILE,
   A4_COMMERCIAL_FLYER_PROFILE,
-} from '../src/utils/productionProfiles';
+} from '../src/utils/productionProfiles.ts';
 import * as pako from 'pako';
 import type { PdfDocumentStructure } from '../src/types';
 

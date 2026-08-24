@@ -4,7 +4,7 @@
  * e que falha da IA não afeta diagnóstico.
  */
 import assert from 'node:assert/strict';
-import { buildGroundedContext, buildGroundedSystemInstruction } from '../src/services/aiGrounding';
+import { buildGroundedContext, buildGroundedSystemInstruction } from '../src/services/aiGrounding.ts';
 import type { PreflightAnalysis } from '../src/types';
 
 let passed = 0;

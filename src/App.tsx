@@ -1,33 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { SummaryCards } from './components/SummaryCards';
+import { MainInspectionCard } from './components/MainInspectionCard';
+import { AvailableFixesSection } from './components/AvailableFixesSection';
+import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordion';
 import { UploadZone } from './components/UploadZone';
 import { FileSelected } from './components/FileSelected';
 import { ProcessingState } from './components/ProcessingState';
-import { OperationalSummary } from './components/OperationalSummary';
-import { DiagnosticPanel } from './components/DiagnosticPanel';
-import { AiAssistant } from './components/AiAssistant';
+import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
+import { JobCheckResults } from './components/JobCheckResults';
 import { AuthModal } from './components/AuthModal';
 import { CustomProfilesModal } from './components/CustomProfilesModal';
 import { HistoryModal } from './components/HistoryModal';
 import { AboutBetaModal } from './components/AboutBetaModal';
 import { PlansModal } from './components/PlansModal';
 import { Footer } from './components/Footer';
-import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
-import { JobCheckResults } from './components/JobCheckResults';
-import { VisualPreview } from './components/VisualPreview';
-import { FixEnginePanel } from './components/FixEnginePanel';
-import { TrimBleedFixPanel } from './components/TrimBleedFixPanel';
-import { ImageColorFixPanel } from './components/ImageColorFixPanel';
-import { PdfxPreparationPanel } from './components/PdfxPreparationPanel';
 
 import { STANDARD_PROFILES, COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
 import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
 import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
-import type { BetaUser, StoredProductionProfile } from './domain/beta';
-import type { PreflightAnalysis, PdfDocumentStructure } from './types';
+import type { BetaUser } from './domain/beta';
+import type { PreflightAnalysis } from './types';
 import { uploadPdfForExtraction } from './services/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
@@ -41,6 +37,10 @@ export const App: React.FC = () => {
   const [limitReached, setLimitReached] = useState(false);
   const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
 
+  // Active navigation tabs
+  const [activeSidebarTab, setActiveSidebarTab] = useState<string>('dashboard');
+  const [activeTechnicalTab, setActiveTechnicalTab] = useState<string>('rules');
+
   // Job Check state
   const [jobCheckEnabled, setJobCheckEnabled] = useState(false);
   const [jobCheckSpec, setJobCheckSpec] = useState<JobCheckSpec>(EMPTY_SPEC);
@@ -53,7 +53,7 @@ export const App: React.FC = () => {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isPlansOpen, setIsPlansOpen] = useState(false);
 
-  // User state
+  // User & Billing state
   const [currentUser, setCurrentUser] = useState<BetaUser | null>(null);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
 
@@ -150,12 +150,12 @@ export const App: React.FC = () => {
 
       setCurrentAnalysis(analysis);
 
-      // Refresh billing status after analysis to update usage counter
+      // Refresh billing status after analysis
       if (currentUser) {
         getBillingStatus().then(setBillingStatus).catch(() => {});
       }
 
-      // Run Job Check if enabled with spec data
+      // Run Job Check if enabled
       if (jobCheckEnabled) {
         const jcResult = runJobCheck(jobCheckSpec, analysis);
         setJobCheckResult(jcResult);
@@ -166,7 +166,7 @@ export const App: React.FC = () => {
       setProcessingStatus('idle');
     } catch (err: any) {
       console.error('Erro na análise:', err);
-      setProcessingStatus('error');
+      setProcessingStatus('error'); // setProcessingState('error') reset
       const msg = err?.message || 'Erro inesperado ao analisar o documento.';
       setErrorMessage(msg);
       setLimitReached(msg.includes('limite') || msg.includes('upgrade') || msg.includes('atingiu'));
@@ -183,13 +183,15 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0B1018] text-[#F3F4F6]">
-      <Header
-        onReset={handleReset}
-        canReset={Boolean(selectedFile || currentAnalysis)}
+    <div className="min-h-screen flex bg-[#F8FAFC] text-[#0F172A] antialiased">
+      {/* 1. LEFT SIDEBAR (Fixed Desktop) */}
+      <Sidebar
+        activeTab={activeSidebarTab}
+        onTabChange={setActiveSidebarTab}
+        currentUser={currentUser}
+        billingStatus={billingStatus}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
-        currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
         onSignOut={async () => {
           await auth.signOut();
@@ -198,104 +200,118 @@ export const App: React.FC = () => {
         }}
         onOpenProfiles={() => setIsProfilesOpen(true)}
         onOpenPlans={() => setIsPlansOpen(true)}
+        selectedProfile={selectedProfile}
+        onSelectProfile={(p) => {
+          setSelectedProfile(p);
+          if (currentAnalysis && currentAnalysis.document) {
+            const updatedRules = runDeterministicRuleEngine(currentAnalysis.document, p);
+            setCurrentAnalysis({
+              ...currentAnalysis,
+              profileId: p.id,
+              ruleResults: updatedRules,
+            });
+          }
+        }}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Billing status bar */}
-        {currentUser && billingStatus && billingStatus.limitAnalyses > 0 && (
-          <div className="mb-4 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-[#243244] bg-[#101722] text-sm">
-            <span className="text-[#8E98A7] text-xs">Plano <strong className="text-white">{billingStatus.plan}</strong></span>
-            <span className="text-[#8E98A7] text-xs">
-              Análises: <strong className="text-white">{billingStatus.usedAnalyses}/{billingStatus.limitAnalyses}</strong>
-              <span className="text-[#8E98A7] ml-1">({Math.max(0, billingStatus.limitAnalyses - billingStatus.usedAnalyses)} restantes)</span>
-            </span>
-            <div className="flex-1 h-1.5 bg-[#182231] rounded-full overflow-hidden max-w-[120px]">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  billingStatus.usedAnalyses >= billingStatus.limitAnalyses
-                    ? 'bg-[#FF4D4D]'
-                    : billingStatus.usedAnalyses / billingStatus.limitAnalyses > 0.8
-                    ? 'bg-[#FFB800]'
-                    : 'bg-[#00D18F]'
-                }`}
-                style={{ width: `${Math.min(100, Math.round((billingStatus.usedAnalyses / billingStatus.limitAnalyses) * 100))}%` }}
-              />
-            </div>
-            {billingStatus.usedAnalyses >= billingStatus.limitAnalyses && (
-              <button
-                type="button"
-                onClick={() => setIsPlansOpen(true)}
-                className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#007BFF] text-white hover:bg-[#0066D6] transition-colors"
-              >
-                Fazer upgrade
-              </button>
-            )}
-          </div>
-        )}
-        <div className="flex flex-col lg:flex-row gap-8">
-          <Sidebar
-            selectedProfile={selectedProfile}
-            onSelectProfile={(p) => {
-              setSelectedProfile(p);
-              if (currentAnalysis && currentAnalysis.document) {
-                const updatedRules = runDeterministicRuleEngine(currentAnalysis.document, p);
-                setCurrentAnalysis({
-                  ...currentAnalysis,
-                  profileId: p.id,
-                  ruleResults: updatedRules,
-                });
-              }
+      {/* 2. MAIN CONTENT AREA */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Sticky Header */}
+        <Header
+          onReset={handleReset}
+          canReset={Boolean(selectedFile || currentAnalysis)}
+          onOpenHistory={() => setIsHistoryOpen(true)}
+          onOpenAbout={() => setIsAboutOpen(true)}
+          currentUser={currentUser}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onSignOut={async () => {
+            await auth.signOut();
+            setCurrentUser(null);
+            setBillingStatus(null);
+          }}
+          onOpenProfiles={() => setIsProfilesOpen(true)}
+          onOpenPlans={() => setIsPlansOpen(true)}
+          notificationCount={currentAnalysis ? (currentAnalysis.ruleResults.errorCount + currentAnalysis.ruleResults.warningCount) : 3}
+        />
+
+        {/* Dashboard Canvas Container */}
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* Top 3 Summary Cards */}
+          <SummaryCards 
+            analysis={currentAnalysis} 
+            profile={selectedProfile}
+            onNavigateTab={(tab) => {
+              setActiveTechnicalTab(tab);
             }}
           />
 
-          <div className="flex-1 min-w-0">
-            {processingStatus !== 'idle' ? (
-              <ProcessingState
-                status={processingStatus}
-                errorMessage={errorMessage || undefined}
-                onRetry={handleStartAnalysis}
-                onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
+          {/* Dynamic Content based on processing status and analysis */}
+          {processingStatus !== 'idle' ? (
+            <ProcessingState
+              status={processingStatus}
+              errorMessage={errorMessage || undefined}
+              onRetry={handleStartAnalysis}
+              onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
+            />
+          ) : currentAnalysis ? (
+            <div className="space-y-6">
+              {/* Main File Inspection Card (3 Columns: PDF.js Preview, Checklist, Quality Gauge) */}
+              <MainInspectionCard 
+                analysis={currentAnalysis} 
+                profile={selectedProfile} 
+                file={selectedFile}
+                onOpenReportModal={() => setIsHistoryOpen(true)}
+                userName={currentUser?.name || 'Maria Silva'}
               />
-            ) : currentAnalysis ? (
-              <div>
-                <OperationalSummary analysis={currentAnalysis} profile={selectedProfile} />
-                <VisualPreview analysis={currentAnalysis} profile={selectedProfile} file={selectedFile} />
-                {jobCheckResult && (
+
+              {/* Job Check Results if enabled */}
+              {jobCheckResult && (
+                <div className="mb-6">
                   <JobCheckResults
                     result={jobCheckResult}
                     spec={jobCheckSpec}
                     analysis={currentAnalysis}
                   />
-                )}
-                <FixEnginePanel analysis={currentAnalysis} />
-                <TrimBleedFixPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <ImageColorFixPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <PdfxPreparationPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <DiagnosticPanel ruleResults={currentAnalysis.ruleResults} />
-                <AiAssistant analysis={currentAnalysis} />
-              </div>
-            ) : selectedFile ? (
-              <div>
-                <JobCheckForm
-                  enabled={jobCheckEnabled}
-                  onToggle={setJobCheckEnabled}
-                  spec={jobCheckSpec}
-                  onSpecChange={setJobCheckSpec}
-                />
-                <FileSelected
-                  file={selectedFile}
-                  onClear={handleReset}
-                  onAnalyze={handleStartAnalysis}
-                />
-              </div>
-            ) : (
-              <UploadZone onFileSelected={handleFileSelected} />
-            )}
-          </div>
-        </div>
-      </main>
+                </div>
+              )}
 
-      <Footer />
+              {/* Correções Disponíveis Section */}
+              <AvailableFixesSection 
+                analysis={currentAnalysis} 
+                profile={selectedProfile} 
+                originalFile={selectedFile}
+              />
+
+              {/* Informações Técnicas (para especialistas) Section */}
+              <TechnicalDetailsAccordion 
+                analysis={currentAnalysis} 
+                profile={selectedProfile} 
+                originalFile={selectedFile}
+                activeTab={activeTechnicalTab}
+                onTabChange={setActiveTechnicalTab}
+              />
+            </div>
+          ) : selectedFile ? (
+            <div className="space-y-6">
+              <JobCheckForm
+                enabled={jobCheckEnabled}
+                onToggle={setJobCheckEnabled}
+                spec={jobCheckSpec}
+                onSpecChange={setJobCheckSpec}
+              />
+              <FileSelected
+                file={selectedFile}
+                onClear={handleReset}
+                onAnalyze={handleStartAnalysis}
+              />
+            </div>
+          ) : (
+            <UploadZone onFileSelected={handleFileSelected} />
+          )}
+        </main>
+
+        <Footer />
+      </div>
 
       {/* Modals */}
       <AuthModal
@@ -337,4 +353,5 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
 export default App;
