@@ -21,25 +21,28 @@ import { evaluatePdfx4Eligibility, type PdfxEligibilityResult } from '../service
 import type { PdfxPreparationResult } from '../services/pdfxPreparation';
 import type { PdfxFinalizeResult } from '../services/pdfxFinalize';
 
-interface PdfxPreparationPanelProps {
+export interface PdfxPreparationPanelProps {
   analysis: PreflightAnalysis;
   profile?: ProductionProfile;
   originalFile?: File | null;
+  initialPreparationResult?: PdfxPreparationResult | null;
 }
 
 export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
   analysis,
   profile,
   originalFile,
+  initialPreparationResult = null,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [showCheckDetails, setShowCheckDetails] = useState<boolean>(false);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
-  const [preparationResult, setPreparationResult] = useState<PdfxPreparationResult | null>(null);
+  const [preparationResult, setPreparationResult] = useState<PdfxPreparationResult | null>(initialPreparationResult);
   const [finalizeResult, setFinalizeResult] = useState<PdfxFinalizeResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // When preparationResult exists, its eligibleAfterPreparation is the SOLE authority for PDF/X readiness
   const eligibility: PdfxEligibilityResult = useMemo(() => {
     if (preparationResult?.eligibleAfterPreparation) {
       return preparationResult.eligibleAfterPreparation;
@@ -104,10 +107,21 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
     eligibility.status === 'fixable' &&
     eligibility.fixPlan.some((fp) => fp.fixType === 'auto');
 
-  const canExecuteFinalization =
-    !finalizeResult &&
-    ((preparationResult && preparationResult.status === 'prepared') ||
-      (!preparationResult && eligibility.status === 'eligible'));
+  // Condition 1: Can finalize from prepared PDF
+  const canExecuteFinalizeAfterPrep = Boolean(
+    preparationResult &&
+      preparationResult.preparedPdfBase64 &&
+      preparationResult.status === 'prepared' &&
+      preparationResult.eligibleAfterPreparation?.eligible === true &&
+      !finalizeResult?.verifiedPdfX
+  );
+
+  // Condition 2: Can finalize from already eligible original PDF (100% compliant without auto-fixes)
+  const canExecuteFinalizeInitial = Boolean(
+    !preparationResult &&
+      !finalizeResult &&
+      eligibility.status === 'eligible'
+  );
 
   const handleExecutePreparation = async () => {
     if (!originalFile) {
@@ -148,8 +162,8 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
   };
 
   const handleExecuteFinalize = async () => {
-    // If we have preparedPdfBase64, convert to Blob/File for finalization
-    let fileToSend: Blob | File | null = originalFile || null;
+    // Flow rule: use EXCLUSIVELY preparedPdfBase64 from Phase 2 when available, or originalFile if already eligible
+    let fileToSend: Blob | File | null = null;
 
     if (preparationResult?.preparedPdfBase64) {
       const byteCharacters = atob(preparationResult.preparedPdfBase64);
@@ -158,6 +172,8 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       fileToSend = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+    } else if (originalFile) {
+      fileToSend = originalFile;
     }
 
     if (!fileToSend) {
@@ -272,7 +288,7 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
             </div>
           </div>
 
-          {/* Action Trigger 1: Preparation */}
+          {/* Action Trigger 1: Preparation (Before Phase 2 execution) */}
           {canExecutePreparation && (
             <div className="p-4 rounded-xl bg-[#007BFF]/10 border border-[#007BFF]/30 flex items-center justify-between">
               <div>
@@ -302,8 +318,8 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
             </div>
           )}
 
-          {/* Action Trigger 2: Finalization (Generate PDF/X-4) */}
-          {canExecuteFinalization && (
+          {/* Action Trigger 2: Initial Finalization (Only if original file was already 100% eligible without preparation) */}
+          {canExecuteFinalizeInitial && (
             <div className="p-4 rounded-xl bg-[#00D18F]/10 border border-[#00D18F]/30 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-bold text-white">Arquivo Elegível para Geração PDF/X-4</h4>
@@ -329,6 +345,73 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                   </>
                 )}
               </button>
+            </div>
+          )}
+
+          {/* Phase 2 Prepared Banner with "Baixar PDF preparado" AND "Gerar PDF/X-4" (When prepared and not finalized) */}
+          {preparationResult && !finalizeResult && (
+            <div className="p-4 rounded-xl bg-[#00D18F]/10 border border-[#00D18F]/30 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-[#00D18F]/20 flex items-center justify-center text-[#00D18F] shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Arquivo tecnicamente preparado</h4>
+                    <p className="text-xs text-[#8E98A7]">
+                      Pronto para geração PDF/X-4 • Cores, Output Intent e caixas ajustados
+                    </p>
+                  </div>
+                </div>
+
+                {/* Unified Action Buttons */}
+                <div className="flex items-center space-x-2.5 shrink-0">
+                  {preparationResult.preparedPdfBase64 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPdf(preparationResult.preparedPdfBase64, 'preparado')}
+                      className="px-3 py-2 bg-[#1A2332] hover:bg-[#243244] text-white text-xs font-medium rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer border border-[#243244]"
+                    >
+                      <Download className="w-3.5 h-3.5 mr-1" />
+                      <span>Baixar PDF preparado</span>
+                    </button>
+                  )}
+
+                  {canExecuteFinalizeAfterPrep && (
+                    <button
+                      type="button"
+                      onClick={handleExecuteFinalize}
+                      disabled={isFinalizing}
+                      className="px-4 py-2 bg-[#00D18F] hover:bg-[#00B57C] text-black text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer shadow-lg disabled:opacity-50"
+                    >
+                      {isFinalizing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                          <span>Gerando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-4 h-4 mr-1" />
+                          <span>Gerar PDF/X-4</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Step Checklist */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-[#00D18F]/20">
+                {preparationResult.steps.map((step, idx) => (
+                  <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
+                    <div className="flex items-center space-x-1.5 font-semibold text-white">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
+                      <span>{step.title}</span>
+                    </div>
+                    <p className="text-[11px] text-[#8E98A7] mt-1">{step.evidence}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -370,33 +453,6 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                     <p className="text-[11px] text-[#8E98A7] mt-1">{check.evidence}</p>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Phase 2 Prepared Banner (if not finalized yet) */}
-          {preparationResult && !finalizeResult && (
-            <div className="p-4 rounded-xl bg-[#007BFF]/10 border border-[#007BFF]/30 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <CheckCircle2 className="w-5 h-5 text-[#007BFF]" />
-                  <div>
-                    <h4 className="text-sm font-bold text-white">Arquivo tecnicamente preparado</h4>
-                    <p className="text-xs text-[#8E98A7]">
-                      Cores, Output Intent e caixas ajustados. Pronto para geração normativa.
-                    </p>
-                  </div>
-                </div>
-                {preparationResult.preparedPdfBase64 && (
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadPdf(preparationResult.preparedPdfBase64, 'preparado')}
-                    className="px-3 py-1.5 bg-[#1A2332] hover:bg-[#243244] text-white text-xs font-medium rounded-lg transition-all flex items-center space-x-1 cursor-pointer border border-[#243244]"
-                  >
-                    <Download className="w-3.5 h-3.5 mr-1" />
-                    <span>Baixar PDF preparado</span>
-                  </button>
-                )}
               </div>
             </div>
           )}
