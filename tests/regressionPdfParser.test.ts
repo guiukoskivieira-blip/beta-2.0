@@ -902,6 +902,59 @@ test('QA PDFRef: Runtime de extração executa instanceof PDFRef sem ReferenceEr
   assert.equal(structure.pages[0].imageOccurrences[0].name, 'Im0');
 });
 
+test('QA 19 Caso F (multiplyAffine): Extração em profundidade 2 (Page -> Fm2 -> Fm1 -> Im0) executa multiplyAffine no escopo global e compõe CTM corretamente (DPI 300x300)', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+
+  // 600x400 RGB image
+  const rawRgb = new Uint8Array(600 * 400 * 3);
+  const imgDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 600,
+    Height: 400,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'FlateDecode',
+  });
+  const imgStream = PDFRawStream.of(imgDict as any, pako.deflate(rawRgb));
+  const imgRef = pdfDoc.context.register(imgStream);
+
+  // Fm1 places Im0 with 144x96 pt
+  const form1Stream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: { XObject: { Im0: imgRef } },
+  }) as any, Buffer.from('q 144 0 0 96 0 0 cm /Im0 Do Q', 'utf-8'));
+  const form1Ref = pdfDoc.context.register(form1Stream);
+
+  // Fm2 contains Fm1
+  const form2Stream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: { XObject: { Fm1: form1Ref } },
+  }) as any, Buffer.from('q 1 0 0 1 0 0 cm /Fm1 Do Q', 'utf-8'));
+  const form2Ref = pdfDoc.context.register(form2Stream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Fm2: form2Ref } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('q 1 0 0 1 50 50 cm /Fm2 Do Q', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  // Extraction must succeed without "multiplyAffine is not defined" ReferenceError
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.pages[0].imageOccurrences.length, 1);
+  const occ = structure.pages[0].imageOccurrences[0];
+  assert.equal(occ.name, 'Fm2/Fm1/Im0');
+  assert.equal(occ.widthPx, 600);
+  assert.equal(occ.heightPx, 400);
+  assert.equal(occ.effectiveDpiX, 300);
+  assert.equal(occ.effectiveDpiY, 300);
+  assert.equal(structure.colorSummary.hasRgbRaster, true);
+});
+
 // ============================================================================
 // RELATÓRIO
 // ============================================================================

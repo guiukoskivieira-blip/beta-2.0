@@ -139,6 +139,18 @@ interface ImagePlacement {
   ctm: number[];
 }
 
+/** Multiplies two 2D affine transformation matrices [a, b, c, d, e, f]. */
+export function multiplyAffine(m: number[], c: number[]): [number, number, number, number, number, number] {
+  return [
+    m[0] * c[0] + m[1] * c[2],
+    m[0] * c[1] + m[1] * c[3],
+    m[2] * c[0] + m[3] * c[2],
+    m[2] * c[1] + m[3] * c[3],
+    m[4] * c[0] + m[5] * c[2] + c[4],
+    m[4] * c[1] + m[5] * c[3] + c[5],
+  ];
+}
+
 function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacement> {
   const placements = new Map<string, ImagePlacement>();
   const text = Buffer.from(contentBytes).toString('latin1');
@@ -187,17 +199,6 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
   let matrixStack: number[][] = [];
   const identity = [1, 0, 0, 1, 0, 0];
   let currentMatrix = [...identity];
-
-  function multiplyAffine(m: number[], c: number[]): number[] {
-    return [
-      m[0] * c[0] + m[1] * c[2],
-      m[0] * c[1] + m[1] * c[3],
-      m[2] * c[0] + m[3] * c[2],
-      m[2] * c[1] + m[3] * c[3],
-      m[4] * c[0] + m[5] * c[2] + c[4],
-      m[4] * c[1] + m[5] * c[3] + c[5],
-    ];
-  }
 
   for (let t = 0; t < tokens.length; t++) {
     const tok = tokens[t];
