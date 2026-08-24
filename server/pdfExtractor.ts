@@ -184,19 +184,18 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
   }
 
   let stack: number[] = [];
-  let pendingMatrix: number[] | null = null;
   let matrixStack: number[][] = [];
   const identity = [1, 0, 0, 1, 0, 0];
   let currentMatrix = [...identity];
 
-  function multiply(a: number[], b: number[]): number[] {
+  function multiplyAffine(m: number[], c: number[]): number[] {
     return [
-      a[0]*b[0] + a[1]*b[2],
-      a[0]*b[1] + a[1]*b[3],
-      a[2]*b[0] + a[3]*b[2],
-      a[2]*b[1] + a[3]*b[3],
-      a[4]*b[0] + a[5]*b[2] + b[4],
-      a[4]*b[1] + a[5]*b[3] + b[5],
+      m[0] * c[0] + m[1] * c[2],
+      m[0] * c[1] + m[1] * c[3],
+      m[2] * c[0] + m[3] * c[2],
+      m[2] * c[1] + m[3] * c[3],
+      m[4] * c[0] + m[5] * c[2] + c[4],
+      m[4] * c[1] + m[5] * c[3] + c[5],
     ];
   }
 
@@ -209,7 +208,7 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
     if (tok === 'cm') {
       if (stack.length >= 6) {
         const m = stack.splice(-6);
-        currentMatrix = multiply(currentMatrix, m);
+        currentMatrix = multiplyAffine(m, currentMatrix);
       }
       continue;
     }
@@ -226,8 +225,8 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
               name,
               xPt: m[4],
               yPt: m[5],
-              appliedWidthPt: Math.abs(m[0]),
-              appliedHeightPt: Math.abs(m[3]),
+              appliedWidthPt: Math.hypot(m[0], m[1]),
+              appliedHeightPt: Math.hypot(m[2], m[3]),
               ctm: [...m],
             });
           }
@@ -270,40 +269,42 @@ function parseBox(boxArray: any): PdfBoxInfo | undefined {
   };
 }
 
-export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promise<PdfDocumentStructure> {
-  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true, updateMetadata: false });
-  const pageCount = pdfDoc.getPageCount();
-  const pages: PdfPageStructure[] = [];
-  const fontsMap = new Map<string, PdfFontItem>();
-  const detectedFamilies = new Set<string>();
+function formatPdfBox(box?: PdfBoxInfo): string {
+  if (!box) return 'ausente';
+  return `[${box.xPt.toFixed(3)}, ${box.yPt.toFixed(3)}, ${(box.xPt + box.widthPt).toFixed(3)}, ${(box.yPt + box.heightPt).toFixed(3)}] pt (${box.widthMm.toFixed(2)} x ${box.heightMm.toFixed(2)} mm)`;
+}
+
+export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promise<PdfDocumentStructure> {
+  const started = Date.now();
+  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  const rawPages = pdfDoc.getPages();
+  const pageCount = rawPages.length;
 
   let hasGlobalRgb = false;
   let hasGlobalCmyk = false;
   let hasGlobalSpot = false;
+  const detectedFamilies = new Set<string>();
 
-  for (let i = 0; i < pageCount; i++) {
-    const pageNum = i + 1;
-    const page = pdfDoc.getPage(i);
+  const pages: PdfPageStructure[] = [];
+  const fontsMap = new Map<string, PdfFontInfo>();
+
+  for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+    const page = rawPages[pageIdx];
+    const pageNum = pageIdx + 1;
     const { width: widthPt, height: heightPt } = page.getSize();
-    const rotation = page.getRotation().angle || 0;
-
     const widthMm = Number((widthPt * PT_TO_MM).toFixed(2));
     const heightMm = Number((heightPt * PT_TO_MM).toFixed(2));
+    const rotation = page.getRotation().angle;
 
-    const isLandscape = (rotation === 90 || rotation === 270) ? heightMm > widthMm : widthMm > heightMm;
-    const isSquare = Math.abs(widthMm - heightMm) < 1.0;
-    const orientation = isSquare ? 'square' : isLandscape ? 'landscape' : 'portrait';
+    // Visual dimensions after orientation
+    const isRotated = rotation === 90 || rotation === 270;
+    const visualWidthMm = isRotated ? heightMm : widthMm;
+    const visualHeightMm = isRotated ? widthMm : heightMm;
+    const orientation = visualWidthMm >= visualHeightMm ? 'landscape' : 'portrait';
 
-    const visualWidthMm = (rotation === 90 || rotation === 270) ? heightMm : widthMm;
-    const visualHeightMm = (rotation === 90 || rotation === 270) ? widthMm : heightMm;
-
-    const mediaBoxRaw = page.node.MediaBox()?.asArray()?.map((v: any) => (v instanceof PDFNumber ? v.asNumber() : Number(v)));
-    const trimBoxRaw = page.node.TrimBox()?.asArray()?.map((v: any) => (v instanceof PDFNumber ? v.asNumber() : Number(v)));
-    const bleedBoxRaw = page.node.BleedBox()?.asArray()?.map((v: any) => (v instanceof PDFNumber ? v.asNumber() : Number(v)));
-    const cropBoxRaw = page.node.CropBox()?.asArray()?.map((v: any) => (v instanceof PDFNumber ? v.asNumber() : Number(v)));
-
-    const mediaBox: PdfBoxInfo = parseBox(mediaBoxRaw) || {
-      status: 'fallback',
+    // Page boxes
+    const mediaBox = parseBox(page.node.MediaBox()?.asArray()) || {
+      status: 'explicit',
       xPt: 0,
       yPt: 0,
       widthPt,
@@ -314,52 +315,50 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
       heightMm,
     };
 
-    const trimBox: PdfBoxInfo | undefined = trimBoxRaw ? parseBox(trimBoxRaw) : undefined;
-    const bleedBox: PdfBoxInfo | undefined = bleedBoxRaw ? parseBox(bleedBoxRaw) : undefined;
-    const cropBox: PdfBoxInfo | undefined = cropBoxRaw ? parseBox(cropBoxRaw) : undefined;
+    const trimBox = parseBox(page.node.TrimBox()?.asArray());
+    const bleedBox = parseBox(page.node.BleedBox()?.asArray());
+    const cropBox = parseBox(page.node.CropBox()?.asArray());
 
-    const imageOccurrences: PdfImageOccurrence[] = [];
     const colorOccurrences: PdfColorOccurrence[] = [];
+    const imageOccurrences: PdfImageOccurrence[] = [];
 
-    // Parse content stream for image placement coordinates
+    // Parse content streams for image coordinates (CTM tracking)
     let imagePlacements = new Map<string, ImagePlacement>();
     try {
-      const contentStreamRefs = page.node.Contents();
-      if (contentStreamRefs) {
+      const contents = page.node.Contents();
+      if (contents) {
+        const contentStreamRefs = contents instanceof PDFArray ? contents.asArray() : [contents];
         let contentBytes: Uint8Array | null = null;
-        if (contentStreamRefs instanceof PDFArray) {
+        if (contentStreamRefs.length > 1) {
           const parts: Uint8Array[] = [];
-          for (let c = 0; c < contentStreamRefs.size(); c++) {
-            const streamRef = contentStreamRefs.get(c);
-            const stream = pdfDoc.context.lookup(streamRef);
-            const decoded = decodeStream(stream);
-            if (decoded) parts.push(decoded);
+          for (const ref of contentStreamRefs) {
+            const stream = pdfDoc.context.lookup(ref);
+            const bytes = decodeStream(stream);
+            if (bytes) parts.push(bytes);
           }
           if (parts.length > 0) {
-            const total = parts.reduce((s, p) => s + p.length, 0);
+            const total = parts.reduce((acc, p) => acc + p.length, 0);
             const combined = new Uint8Array(total);
             let off = 0;
             for (const p of parts) { combined.set(p, off); off += p.length; }
             contentBytes = combined;
           }
         } else {
-          const stream = pdfDoc.context.lookup(contentStreamRefs);
+          const stream = pdfDoc.context.lookup(contentStreamRefs[0]);
           contentBytes = decodeStream(stream);
         }
         if (contentBytes) {
           imagePlacements = parseImagePlacements(contentBytes);
         }
       }
-    } catch {
-      // Content stream parsing is best-effort; if it fails we just don't have coordinates
-    }
+    } catch {}
 
     // Extract resources
     const resources = page.node.Resources();
     let hasTransparency = false;
 
     if (resources instanceof PDFDict) {
-      // Check XObjects (Images)
+      // Check XObjects (Images and Forms)
       const xObjects = resources.get(PDFName.of('XObject'));
       if (xObjects instanceof PDFDict) {
         const entries = xObjects.entries();
@@ -368,11 +367,27 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
           if (xobj instanceof PDFStream || xobj instanceof PDFRawStream || (xobj as any)?.dict) {
             const dict = (xobj as any).dict || xobj;
             const subtype = dict.get(PDFName.of('Subtype'));
-            if (subtype?.toString() === '/Image') {
+            const subtypeStr = subtype?.toString();
+
+            if (subtypeStr === '/Image') {
               const widthPx = dict.get(PDFName.of('Width'))?.asNumber?.() || 100;
               const heightPx = dict.get(PDFName.of('Height'))?.asNumber?.() || 100;
               const bitsPerComponent = dict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
-              const filterVal = dict.get(PDFName.of('Filter'))?.toString()?.replace(/^\//, '') || 'None';
+
+              let filterVal = 'None';
+              const filterObj = dict.get(PDFName.of('Filter'));
+              if (filterObj instanceof PDFName) {
+                filterVal = filterObj.toString().replace(/^\//, '');
+              } else if (filterObj instanceof PDFArray) {
+                const fList: string[] = [];
+                for (let fi = 0; fi < filterObj.size(); fi++) {
+                  const fn = filterObj.get(fi)?.toString()?.replace(/^\//, '');
+                  if (fn) fList.push(fn);
+                }
+                filterVal = fList.join('+') || 'None';
+              } else if (filterObj) {
+                filterVal = filterObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
+              }
 
               let colorSpace = 'DeviceRGB';
               const csObj = dict.get(PDFName.of('ColorSpace'));
@@ -438,6 +453,167 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
                 yPt: placement?.yPt,
                 ctm: placement?.ctm,
               });
+            } else if (subtypeStr === '/Form') {
+              // Form XObject: Traverse and inspect nested Image XObjects with composite CTM
+              const formRawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
+              const formName = typeof formRawName === 'string' ? formRawName : String(formRawName);
+              const formPlacement = imagePlacements.get(formName);
+              const formCtm = formPlacement?.ctm || [1, 0, 0, 1, 0, 0];
+
+              // Form Matrix
+              let formMatrix = [1, 0, 0, 1, 0, 0];
+              const matrixObj = dict.get(PDFName.of('Matrix'));
+              if (matrixObj instanceof PDFArray && matrixObj.size() >= 6) {
+                formMatrix = [
+                  matrixObj.get(0)?.asNumber?.() ?? 1,
+                  matrixObj.get(1)?.asNumber?.() ?? 0,
+                  matrixObj.get(2)?.asNumber?.() ?? 0,
+                  matrixObj.get(3)?.asNumber?.() ?? 1,
+                  matrixObj.get(4)?.asNumber?.() ?? 0,
+                  matrixObj.get(5)?.asNumber?.() ?? 0,
+                ];
+              }
+
+              function multiplyAffine(m: number[], c: number[]): number[] {
+                return [
+                  m[0] * c[0] + m[1] * c[2],
+                  m[0] * c[1] + m[1] * c[3],
+                  m[2] * c[0] + m[3] * c[2],
+                  m[2] * c[1] + m[3] * c[3],
+                  m[4] * c[0] + m[5] * c[2] + c[4],
+                  m[4] * c[1] + m[5] * c[3] + c[5],
+                ];
+              }
+
+              const effectiveFormCtm = multiplyAffine(formMatrix, formCtm);
+
+              // Form BBox
+              const bboxObj = dict.get(PDFName.of('BBox'));
+              let formBboxW = 0;
+              let formBboxH = 0;
+              if (bboxObj instanceof PDFArray && bboxObj.size() >= 4) {
+                const bx0 = bboxObj.get(0)?.asNumber?.() ?? 0;
+                const by0 = bboxObj.get(1)?.asNumber?.() ?? 0;
+                const bx1 = bboxObj.get(2)?.asNumber?.() ?? 0;
+                const by1 = bboxObj.get(3)?.asNumber?.() ?? 0;
+                formBboxW = Math.abs(bx1 - bx0);
+                formBboxH = Math.abs(by1 - by0);
+              }
+
+              // Decode Form content stream
+              let formContentBytes: Uint8Array | null = null;
+              try {
+                formContentBytes = decodeStream(xobj);
+              } catch {}
+              const innerPlacements = formContentBytes ? parseImagePlacements(formContentBytes) : new Map<string, ImagePlacement>();
+
+              // Check inner Resources of the Form
+              const formResources = dict.get(PDFName.of('Resources'));
+              const innerXObjects = formResources instanceof PDFDict ? formResources.get(PDFName.of('XObject')) : null;
+              if (innerXObjects instanceof PDFDict) {
+                const innerEntries = innerXObjects.entries();
+                for (const [innerNameKey, innerRef] of innerEntries) {
+                  const innerXObj = pdfDoc.context.lookup(innerRef);
+                  if (!innerXObj) continue;
+                  const innerDict: PDFDict = (innerXObj as any).dict || (innerXObj instanceof PDFDict ? innerXObj : null);
+                  if (!innerDict) continue;
+                  const innerSubtype = innerDict.get(PDFName.of('Subtype'))?.toString();
+                  if (innerSubtype === '/Image') {
+                    const innerNameRaw = typeof innerNameKey.asString === 'function' ? innerNameKey.asString() : (innerNameKey.value || String(innerNameKey));
+                    const innerImgName = typeof innerNameRaw === 'string' ? innerNameRaw : String(innerNameRaw);
+                    const compositeName = `${formName}/${innerImgName}`;
+
+                    const widthPx = innerDict.get(PDFName.of('Width'))?.asNumber?.() || 100;
+                    const heightPx = innerDict.get(PDFName.of('Height'))?.asNumber?.() || 100;
+                    const bitsPerComponent = innerDict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+
+                    let filterVal = 'None';
+                    const fObj = innerDict.get(PDFName.of('Filter'));
+                    if (fObj instanceof PDFName) {
+                      filterVal = fObj.toString().replace(/^\//, '');
+                    } else if (fObj instanceof PDFArray) {
+                      const fList: string[] = [];
+                      for (let fi = 0; fi < fObj.size(); fi++) {
+                        const fn = fObj.get(fi)?.toString()?.replace(/^\//, '');
+                        if (fn) fList.push(fn);
+                      }
+                      filterVal = fList.join('+') || 'None';
+                    } else if (fObj) {
+                      filterVal = fObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
+                    }
+
+                    let colorSpace = 'DeviceRGB';
+                    const csObj = innerDict.get(PDFName.of('ColorSpace'));
+                    if (csObj instanceof PDFName) {
+                      colorSpace = csObj.toString().replace(/^\//, '');
+                    } else if (csObj instanceof PDFArray) {
+                      const first = csObj.get(0)?.toString();
+                      if (first?.includes('ICCBased')) {
+                        const iccRef = csObj.get(1);
+                        const iccStream = iccRef ? pdfDoc.context.lookup(iccRef) : null;
+                        const streamDict: any = (iccStream as any)?.dict || iccStream;
+                        const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
+                        const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
+                        colorSpace = n === 4 ? 'ICCBased (CMYK)' : n === 3 ? 'ICCBased (RGB)' : n === 1 ? 'ICCBased (Gray)' : (alt || 'ICCBased');
+                      } else {
+                        colorSpace = csObj.toString().replace(/^\//, '');
+                      }
+                    } else if (csObj) {
+                      colorSpace = csObj.toString().replace(/^\//, '');
+                    }
+
+                    if (colorSpace.includes('RGB')) {
+                      hasGlobalRgb = true;
+                      detectedFamilies.add('DeviceRGB');
+                    } else if (colorSpace.includes('CMYK')) {
+                      hasGlobalCmyk = true;
+                      detectedFamilies.add('DeviceCMYK');
+                    }
+
+                    const innerPl = innerPlacements.get(innerImgName);
+                    let imgCtm: number[];
+                    let appliedWidthPt: number;
+                    let appliedHeightPt: number;
+
+                    if (innerPl && innerPl.ctm) {
+                      imgCtm = multiplyAffine(innerPl.ctm, effectiveFormCtm);
+                      appliedWidthPt = Math.hypot(imgCtm[0], imgCtm[1]);
+                      appliedHeightPt = Math.hypot(imgCtm[2], imgCtm[3]);
+                    } else {
+                      appliedWidthPt = formPlacement?.appliedWidthPt || (formBboxW > 0 ? formBboxW : widthPt);
+                      appliedHeightPt = formPlacement?.appliedHeightPt || (formBboxH > 0 ? formBboxH : heightPt);
+                      imgCtm = effectiveFormCtm;
+                    }
+
+                    const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
+                    const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
+                    const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
+                    const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
+                    const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
+                    const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
+
+                    imageOccurrences.push({
+                      id: compositeName || `img_${pageNum}_${imageOccurrences.length + 1}`,
+                      page: pageNum,
+                      name: compositeName,
+                      widthPx,
+                      heightPx,
+                      bitsPerComponent,
+                      filter: filterVal,
+                      displayWidthMm,
+                      displayHeightMm,
+                      effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
+                      effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
+                      colorSpace,
+                      appliedWidthPt,
+                      appliedHeightPt,
+                      xPt: imgCtm[4],
+                      yPt: imgCtm[5],
+                      ctm: imgCtm,
+                    });
+                  }
+                }
+              }
             }
           }
         }

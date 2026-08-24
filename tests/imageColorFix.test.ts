@@ -717,6 +717,89 @@ export async function runImageColorFixTests() {
   assert(mismatchAudit.audits[0].classification === 'MANUAL_REQUIRED', 'Tamanho divergente: classificado como MANUAL_REQUIRED');
   assert(mismatchAudit.audits[0].reasonCode === 'STREAM_LENGTH_MISMATCH', 'Tamanho divergente: reasonCode STREAM_LENGTH_MISMATCH');
 
+  // Test 19: Real JPEG DCT RGB 1800x1000 px em Form XObject (432x240 pt, A4) -> extractPdfStructure encontra objeto com 300 DPI
+  const formDoc = await PDFDocument.create();
+  const formPage = formDoc.addPage([595.28, 841.89]); // A4
+  const jpegBytes1800Real = generateTestJpeg(1800, 1000, 3);
+  const jpegDict = formDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 1800,
+    Height: 1000,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'DCTDecode',
+  });
+  const jpegStream = PDFRawStream.of(jpegDict as any, jpegBytes1800Real);
+  const jpegRef = formDoc.context.register(jpegStream);
+
+  const formDict = formDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 432, 240],
+    Resources: {
+      XObject: {
+        Im0: jpegRef,
+      },
+    },
+  });
+  const formContent = Buffer.from('q 432 0 0 240 0 0 cm /Im0 Do Q', 'utf-8');
+  const formStream = PDFRawStream.of(formDict as any, formContent);
+  const formRef = formDoc.context.register(formStream);
+
+  formPage.node.set(
+    PDFName.of('Resources'),
+    formDoc.context.obj({
+      XObject: {
+        'FormXob.1': formRef,
+      },
+    })
+  );
+  // Page content stream invoking FormXob.1
+  const pageStreamContent = Buffer.from('q 1 0 0 1 50 100 cm /FormXob.1 Do Q', 'utf-8');
+  formPage.node.set(PDFName.of('Contents'), formDoc.context.register(PDFRawStream.of(formDoc.context.obj({}) as any, pageStreamContent)));
+
+  const formPdfBytes = await formDoc.save({ useObjectStreams: false });
+  const formStruct = await extractPdfStructure(formPdfBytes);
+
+  assert(formStruct.pages[0].imageOccurrences.length >= 1, 'Parser: Encontrou imagem aninhada em Form XObject');
+  const imgOcc = formStruct.pages[0].imageOccurrences[0];
+  assert(imgOcc.name === 'FormXob.1/Im0', 'Parser: Nome composto FormXob.1/Im0 correto');
+  assert(imgOcc.filter === 'DCTDecode', 'Parser: Filtro DCTDecode identificado');
+  assert(imgOcc.colorSpace === 'DeviceRGB', 'Parser: ColorSpace DeviceRGB identificado');
+  assert(imgOcc.widthPx === 1800, 'Parser: Width 1800 px');
+  assert(imgOcc.heightPx === 1000, 'Parser: Height 1000 px');
+  assert(imgOcc.appliedWidthPt === 432, 'Parser: appliedWidthPt 432 pt');
+  assert(imgOcc.appliedHeightPt === 240, 'Parser: appliedHeightPt 240 pt');
+  assert(imgOcc.effectiveDpiX === 300, 'Parser: effectiveDpiX 300 DPI');
+  assert(imgOcc.effectiveDpiY === 300, 'Parser: effectiveDpiY 300 DPI');
+
+  // Test 20: Safe Scope Canônico e Auditoria
+  const formAudit = auditImageXObjects(await PDFDocument.load(formPdfBytes));
+  assert(formAudit.audits.length === 1, 'auditImageXObjects: 1 imagem detectada');
+  assert(formAudit.audits[0].classification === 'CONVERTIBLE', 'auditImageXObjects: classificado como CONVERTIBLE');
+  assert(formAudit.audits[0].reasonCode === 'CONVERTIBLE', 'auditImageXObjects: reasonCode CONVERTIBLE');
+
+  // Test 21: Conversão LittleCMS do JPEG Real no Form XObject e Revalidação Completa
+  const formFixResult = await applyImageColorFix(formPdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    allowFallbackSrgb: true,
+  });
+  assert(formFixResult.success === true, 'applyImageColorFix em JPEG Real Form XObject: sucesso');
+  assert(formFixResult.objectsSummary.convertedCount === 1, 'applyImageColorFix: 1 imagem convertida');
+  assert(formFixResult.structuralValidation?.valid === true, 'applyImageColorFix: PDF convertido estruturalmente válido');
+
+  const reloadedDoc = await extractPdfStructure(formFixResult.pdfBytes!);
+  assert(reloadedDoc.colorSummary.hasRgb === false, 'Reanálise: RGB removido');
+  assert(reloadedDoc.colorSummary.hasCmyk === true, 'Reanálise: CMYK presente');
+  const fixedImgOcc = reloadedDoc.pages[0].imageOccurrences[0];
+  assert(fixedImgOcc.widthPx === 1800, 'Reanálise: Width 1800 px preservado');
+  assert(fixedImgOcc.heightPx === 1000, 'Reanálise: Height 1000 px preservado');
+  assert(fixedImgOcc.appliedWidthPt === 432, 'Reanálise: CTM appliedWidthPt 432 pt preservado');
+  assert(fixedImgOcc.appliedHeightPt === 240, 'Reanálise: CTM appliedHeightPt 240 pt preservado');
+  assert(fixedImgOcc.effectiveDpiX === 300, 'Reanálise: DPI X 300 preservado');
+  assert(fixedImgOcc.effectiveDpiY === 300, 'Reanálise: DPI Y 300 preservado');
+
   console.log(`\n================================================================`);
   console.log(`ARTECHECK IMAGE COLOR FIX TESTS: ${passed}/${total} APROVADOS`);
   console.log(`================================================================\n`);
@@ -727,3 +810,4 @@ runImageColorFixTests().catch((err) => {
   console.error('Test suite failed:', err);
   process.exit(1);
 });
+

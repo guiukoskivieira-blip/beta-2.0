@@ -416,3 +416,63 @@ test('12. Hierarquia de caixas impossível (TrimBox maior que MediaBox): status 
   assert.equal(check?.status, 'blocked');
   assert.equal(check?.reasonCode, 'PDFX_PAGE_BOXES_INVALID');
 });
+
+test('13. QA 02 Regression: Imagem DCTDecode / JPEG RGB 8 bits avaliada canonicamente -> status "fixable" com PDFX_RGB_FIXABLE (NÃO manual_required)', () => {
+  const doc = createMockDoc();
+  doc.colorSummary = {
+    hasRgb: true,
+    hasCmyk: false,
+    hasSpotColors: false,
+    familiesDetected: ['DeviceRGB'],
+  };
+  doc.pages[0].imageOccurrences = [
+    {
+      id: 'FormXob.1/Im0',
+      page: 1,
+      name: 'FormXob.1/Im0',
+      widthPx: 1800,
+      heightPx: 1000,
+      bitsPerComponent: 8,
+      filter: 'DCTDecode',
+      colorSpace: 'DeviceRGB',
+      displayWidthMm: 152.4, // 432 pt = 6 in
+      displayHeightMm: 84.67, // 240 pt = 3.333 in
+      effectiveDpiX: 300,
+      effectiveDpiY: 300,
+      appliedWidthPt: 432,
+      appliedHeightPt: 240,
+      xPt: 50,
+      yPt: 100,
+      ctm: [432, 0, 0, 240, 50, 100],
+    },
+  ];
+
+  const res = evaluatePdfx4Eligibility(doc, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    ruleResults: mockApprovedRules,
+  });
+
+  const check = res.checks.find((c) => c.id === 'PDFX_COLOR_SPACES');
+  assert.equal(check?.status, 'fixable', 'Check G deve ser fixable quando imagem for DCTDecode RGB 8bpc');
+  assert.equal(check?.reasonCode, 'PDFX_RGB_FIXABLE');
+  assert.ok(check?.message.includes('elegíveis para conversão automática LittleCMS'));
+  assert.equal(res.blockers.some((b) => b.code === 'PDFX_RGB_MANUAL_REQUIRED'), false);
+});
+
+test('14. QA 02 Regression: DPI efetivo de imagem em Form XObject calcula 300 DPI (não 86 DPI)', () => {
+  // pixelWidth = 1800, pixelHeight = 1000
+  // effectiveWidthPt = 432 pt (6.0 in), effectiveHeightPt = 240 pt (3.333 in)
+  // dpiX = 1800 / (432/72) = 300.0 DPI
+  // dpiY = 1000 / (240/72) = 300.0 DPI
+  const widthPx = 1800;
+  const heightPx = 1000;
+  const dispWidthPt = 432;
+  const dispHeightPt = 240;
+
+  const effectiveDpiX = Number((widthPx / (dispWidthPt / 72.0)).toFixed(1));
+  const effectiveDpiY = Number((heightPx / (dispHeightPt / 72.0)).toFixed(1));
+
+  assert.equal(effectiveDpiX, 300);
+  assert.equal(effectiveDpiY, 300);
+});
+

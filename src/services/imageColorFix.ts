@@ -118,6 +118,112 @@ export function resolveIccBytes(
   return null;
 }
 
+export interface RgbConversionSupportResult {
+  isSupported: boolean;
+  classification: 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED';
+  reasonCode: string;
+  reason: string;
+}
+
+/**
+ * Canonical evaluator for RGB -> CMYK Safe Scope V1.2 conversion support.
+ * Consumed by Fix Engine, PDF/X Eligibility and Technical Reports.
+ */
+export function analyzeRgbConversionSupport(img: {
+  colorSpace?: string;
+  bitsPerComponent?: number;
+  widthPx?: number;
+  heightPx?: number;
+  filter?: string;
+  hasDecode?: boolean;
+  hasUnsupportedPredictor?: boolean;
+  hasMask?: boolean;
+  hasSMask?: boolean;
+}): RgbConversionSupportResult {
+  const colorSpace = img.colorSpace || '';
+  const isRgb = colorSpace.includes('RGB');
+  if (!isRgb) {
+    return {
+      isSupported: false,
+      classification: 'NOT_SUPPORTED',
+      reasonCode: 'NON_RGB_COLORSPACE',
+      reason: `Espaço de cores não é RGB (${colorSpace}).`,
+    };
+  }
+
+  const bpc = img.bitsPerComponent ?? 8;
+  if (bpc !== 8) {
+    return {
+      isSupported: false,
+      classification: 'MANUAL_REQUIRED',
+      reasonCode: 'UNSUPPORTED_BITS_PER_COMPONENT',
+      reason: `Profundidade de cor de ${bpc} bits/canal não suportada na Fase 1 (Safe Scope V1.2 exige 8 bits/canal).`,
+    };
+  }
+
+  const width = img.widthPx ?? 0;
+  const height = img.heightPx ?? 0;
+  if (width <= 0 || height <= 0) {
+    return {
+      isSupported: false,
+      classification: 'NOT_SUPPORTED',
+      reasonCode: 'INVALID_DIMENSIONS',
+      reason: `Dimensões de imagem inválidas ou zero (${width}x${height}).`,
+    };
+  }
+
+  if (img.hasDecode) {
+    return {
+      isSupported: false,
+      classification: 'MANUAL_REQUIRED',
+      reasonCode: 'CUSTOM_DECODE_MATRIX',
+      reason: 'Matriz de decodificação (/Decode) personalizada exige calibração manual no software de origem.',
+    };
+  }
+
+  if (img.hasUnsupportedPredictor) {
+    return {
+      isSupported: false,
+      classification: 'MANUAL_REQUIRED',
+      reasonCode: 'UNSUPPORTED_DECODE_PARMS',
+      reason: 'Parâmetro de predição em DecodeParms exige decodificação diferencial no software de origem.',
+    };
+  }
+
+  // Filter normalization
+  const rawFilter = img.filter || 'FlateDecode';
+  const normalizedFilter = rawFilter
+    .replace(/^\[|\]$/g, '')
+    .replace(/\//g, '')
+    .trim()
+    .replace(/\s*,\s*/g, '+')
+    .replace(/\s+/g, '+');
+
+  const isSafeFilter =
+    normalizedFilter === 'FlateDecode' ||
+    normalizedFilter === 'DCTDecode' ||
+    normalizedFilter === 'ASCII85Decode+FlateDecode' ||
+    normalizedFilter === 'ASCII85Decode' ||
+    normalizedFilter === 'None' ||
+    normalizedFilter === '';
+
+  if (!isSafeFilter) {
+    return {
+      isSupported: false,
+      classification: 'MANUAL_REQUIRED',
+      reasonCode: 'UNSUPPORTED_FILTER',
+      reason: `Filtro de compressão /${rawFilter} não suportado no Safe Scope V1.2.`,
+    };
+  }
+
+  return {
+    isSupported: true,
+    classification: 'CONVERTIBLE',
+    reasonCode: 'CONVERTIBLE',
+    reason: 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1.2).',
+  };
+}
+
 /**
  * Audits all Image XObjects in a loaded PDF document deterministically.
  */
@@ -134,291 +240,302 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
     const resources = page.node.Resources();
     if (!(resources instanceof PDFDict)) return;
 
-    const xObjects = resources.get(PDFName.of('XObject'));
-    if (!(xObjects instanceof PDFDict)) return;
+    const processXObjects = (xObjectsDict: PDFDict, formPrefix = '') => {
+      const entries = xObjectsDict.entries();
+      for (const [nameKey, ref] of entries) {
+        if (!(ref instanceof PDFRef)) continue;
+        const xobj = pdfDoc.context.lookup(ref);
+        if (!xobj) continue;
 
-    const entries = xObjects.entries();
-    for (const [nameKey, ref] of entries) {
-      if (!(ref instanceof PDFRef)) continue;
-      const xobj = pdfDoc.context.lookup(ref);
-      if (!xobj) continue;
+        const dict: PDFDict = (xobj as any).dict || (xobj instanceof PDFDict ? xobj : null);
+        if (!dict) continue;
 
-      const dict: PDFDict = (xobj as any).dict || (xobj instanceof PDFDict ? xobj : null);
-      if (!dict) continue;
-
-      const subtype = dict.get(PDFName.of('Subtype'));
-      if (subtype?.toString() !== '/Image') continue;
-
-      const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
-      const imgName = typeof rawName === 'string' ? rawName : String(rawName);
-      const uniqueKey = `p${pageNum}_${imgName}_${ref.tag}`;
-
-      const widthPx = (dict.get(PDFName.of('Width')) as any)?.asNumber?.() || 0;
-      const heightPx = (dict.get(PDFName.of('Height')) as any)?.asNumber?.() || 0;
-      const bitsPerComponent = (dict.get(PDFName.of('BitsPerComponent')) as any)?.asNumber?.() || 8;
-      // Filter & DecodeParms extraction
-      const filterObj = dict.get(PDFName.of('Filter'));
-      const filterList: string[] = [];
-      if (filterObj instanceof PDFName) {
-        const name = filterObj.toString().replace(/^\//, '');
-        if (name) filterList.push(name);
-      } else if (filterObj instanceof PDFArray) {
-        for (let i = 0; i < filterObj.size(); i++) {
-          const item = filterObj.get(i);
-          const name = item?.toString()?.replace(/^\//, '');
-          if (name) filterList.push(name);
-        }
-      } else if (filterObj) {
-        const str = filterObj.toString().replace(/^\[|\]$/g, '').trim();
-        if (str) {
-          str.split(/\s+/).forEach((s: string) => {
-            const name = s.replace(/^\//, '').replace(/,$/, '');
-            if (name) filterList.push(name);
-          });
-        }
-      }
-      const filterVal = filterList.length === 0 ? 'None' : filterList.join('+');
-
-      // DecodeParms extraction & validation
-      const decodeParmsObj = dict.get(PDFName.of('DecodeParms'));
-      let hasUnsupportedPredictor = false;
-      let predictorReason = '';
-      if (decodeParmsObj) {
-        const checkParmsDict = (pDict: any) => {
-          if (pDict instanceof PDFDict) {
-            const predictor = (pDict.get(PDFName.of('Predictor')) as any)?.asNumber?.();
-            if (predictor !== undefined && predictor > 1) {
-              hasUnsupportedPredictor = true;
-              predictorReason = `Parâmetro de predição /Predictor ${predictor} em DecodeParms exige decodificação diferencial no software de origem.`;
+        const subtype = dict.get(PDFName.of('Subtype'));
+        if (subtype?.toString() === '/Form') {
+          const formResources = dict.get(PDFName.of('Resources'));
+          if (formResources instanceof PDFDict) {
+            const innerXObj = formResources.get(PDFName.of('XObject'));
+            if (innerXObj instanceof PDFDict) {
+              const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
+              processXObjects(innerXObj, `${formPrefix}${rawName}/`);
             }
           }
-        };
-        if (decodeParmsObj instanceof PDFDict) {
-          checkParmsDict(decodeParmsObj);
-        } else if (decodeParmsObj instanceof PDFArray) {
-          for (let i = 0; i < decodeParmsObj.size(); i++) {
-            checkParmsDict(decodeParmsObj.get(i));
+          continue;
+        }
+
+        if (subtype?.toString() !== '/Image') continue;
+
+        const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
+        const imgName = `${formPrefix}${typeof rawName === 'string' ? rawName : String(rawName)}`;
+        const uniqueKey = `p${pageNum}_${imgName}_${ref.tag}`;
+
+        const widthPx = (dict.get(PDFName.of('Width')) as any)?.asNumber?.() || 0;
+        const heightPx = (dict.get(PDFName.of('Height')) as any)?.asNumber?.() || 0;
+        const bitsPerComponent = (dict.get(PDFName.of('BitsPerComponent')) as any)?.asNumber?.() || 8;
+        // Filter & DecodeParms extraction
+        const filterObj = dict.get(PDFName.of('Filter'));
+        const filterList: string[] = [];
+        if (filterObj instanceof PDFName) {
+          const name = filterObj.toString().replace(/^\//, '');
+          if (name) filterList.push(name);
+        } else if (filterObj instanceof PDFArray) {
+          for (let i = 0; i < filterObj.size(); i++) {
+            const item = filterObj.get(i);
+            const name = item?.toString()?.replace(/^\//, '');
+            if (name) filterList.push(name);
+          }
+        } else if (filterObj) {
+          const str = filterObj.toString().replace(/^\[|\]$/g, '').trim();
+          if (str) {
+            str.split(/\s+/).forEach((s: string) => {
+              const name = s.replace(/^\//, '').replace(/,$/, '');
+              if (name) filterList.push(name);
+            });
           }
         }
-      }
+        const filterVal = filterList.length === 0 ? 'None' : filterList.join('+');
 
-      const hasDecode = Boolean(dict.get(PDFName.of('Decode')));
-      const sMaskRef = dict.get(PDFName.of('SMask'));
-      const maskRef = dict.get(PDFName.of('Mask'));
-      const hasSMask = Boolean(sMaskRef);
-      const hasMask = Boolean(maskRef);
+        // DecodeParms extraction & validation
+        const decodeParmsObj = dict.get(PDFName.of('DecodeParms'));
+        let hasUnsupportedPredictor = false;
+        let predictorReason = '';
+        if (decodeParmsObj) {
+          const checkParmsDict = (pDict: any) => {
+            if (pDict instanceof PDFDict) {
+              const predictor = (pDict.get(PDFName.of('Predictor')) as any)?.asNumber?.();
+              if (predictor !== undefined && predictor > 1) {
+                hasUnsupportedPredictor = true;
+                predictorReason = `Parâmetro de predição /Predictor ${predictor} em DecodeParms exige decodificação diferencial no software de origem.`;
+              }
+            }
+          };
+          if (decodeParmsObj instanceof PDFDict) {
+            checkParmsDict(decodeParmsObj);
+          } else if (decodeParmsObj instanceof PDFArray) {
+            for (let i = 0; i < decodeParmsObj.size(); i++) {
+              checkParmsDict(decodeParmsObj.get(i));
+            }
+          }
+        }
 
-      // ColorSpace analysis
-      let colorSpaceStr = 'DeviceRGB';
-      let isRgb = false;
-      let isCmyk = false;
-      let isGray = false;
-      let embeddedIcc: Uint8Array | undefined = undefined;
+        const hasDecode = Boolean(dict.get(PDFName.of('Decode')));
+        const sMaskRef = dict.get(PDFName.of('SMask'));
+        const maskRef = dict.get(PDFName.of('Mask'));
+        const hasSMask = Boolean(sMaskRef);
+        const hasMask = Boolean(maskRef);
 
-      const csObj = dict.get(PDFName.of('ColorSpace'));
-      if (csObj instanceof PDFName) {
-        const csName = csObj.toString().replace(/^\//, '');
-        colorSpaceStr = csName;
-        if (csName === 'DeviceRGB') isRgb = true;
-        else if (csName === 'DeviceCMYK') isCmyk = true;
-        else if (csName === 'DeviceGray') isGray = true;
-      } else if (csObj instanceof PDFArray) {
-        const first = csObj.get(0)?.toString()?.replace(/^\//, '');
-        if (first === 'ICCBased') {
-          const iccRef = csObj.get(1);
-          if (iccRef instanceof PDFRef) {
-            const iccStream = pdfDoc.context.lookup(iccRef);
-            if (iccStream) {
-              const streamDict = (iccStream as any).dict || iccStream;
-              const n = streamDict.get?.(PDFName.of('N'))?.asNumber?.() || 3;
-              const rawIccBytes = (iccStream as any).contents || (iccStream as any).getContents?.();
-              if (rawIccBytes && rawIccBytes.length > 0) {
-                try {
-                  const inflated = streamDict.get?.(PDFName.of('Filter'))?.toString()?.includes('FlateDecode')
-                    ? pako.inflate(rawIccBytes)
-                    : rawIccBytes;
-                  embeddedIcc = new Uint8Array(inflated);
-                } catch {
-                  embeddedIcc = new Uint8Array(rawIccBytes);
+        // ColorSpace analysis
+        let colorSpaceStr = 'DeviceRGB';
+        let isRgb = false;
+        let isCmyk = false;
+        let isGray = false;
+        let embeddedIcc: Uint8Array | undefined = undefined;
+
+        const csObj = dict.get(PDFName.of('ColorSpace'));
+        if (csObj instanceof PDFName) {
+          const csName = csObj.toString().replace(/^\//, '');
+          colorSpaceStr = csName;
+          if (csName === 'DeviceRGB') isRgb = true;
+          else if (csName === 'DeviceCMYK') isCmyk = true;
+          else if (csName === 'DeviceGray') isGray = true;
+        } else if (csObj instanceof PDFArray) {
+          const first = csObj.get(0)?.toString()?.replace(/^\//, '');
+          if (first === 'ICCBased') {
+            const iccRef = csObj.get(1);
+            if (iccRef instanceof PDFRef) {
+              const iccStream = pdfDoc.context.lookup(iccRef);
+              if (iccStream) {
+                const streamDict = (iccStream as any).dict || iccStream;
+                const n = streamDict.get?.(PDFName.of('N'))?.asNumber?.() || 3;
+                const rawIccBytes = (iccStream as any).contents || (iccStream as any).getContents?.();
+                if (rawIccBytes && rawIccBytes.length > 0) {
+                  try {
+                    const inflated = streamDict.get?.(PDFName.of('Filter'))?.toString()?.includes('FlateDecode')
+                      ? pako.inflate(rawIccBytes)
+                      : rawIccBytes;
+                    embeddedIcc = new Uint8Array(inflated);
+                  } catch {
+                    embeddedIcc = new Uint8Array(rawIccBytes);
+                  }
+                }
+                if (n === 3) {
+                  isRgb = true;
+                  colorSpaceStr = 'ICCBased (RGB)';
+                } else if (n === 4) {
+                  isCmyk = true;
+                  colorSpaceStr = 'ICCBased (CMYK)';
+                } else if (n === 1) {
+                  isGray = true;
+                  colorSpaceStr = 'ICCBased (Gray)';
+                } else {
+                  colorSpaceStr = `ICCBased (${n} components)`;
                 }
               }
-              if (n === 3) {
-                isRgb = true;
-                colorSpaceStr = 'ICCBased (RGB)';
-              } else if (n === 4) {
-                isCmyk = true;
-                colorSpaceStr = 'ICCBased (CMYK)';
-              } else if (n === 1) {
-                isGray = true;
-                colorSpaceStr = 'ICCBased (Gray)';
-              } else {
-                colorSpaceStr = `ICCBased (${n} components)`;
-              }
             }
-          }
-        } else {
-          colorSpaceStr = csObj.toString();
-        }
-      } else if (csObj) {
-        const csName = csObj.toString().replace(/^\//, '');
-        colorSpaceStr = csName;
-        if (csName.includes('RGB')) isRgb = true;
-        else if (csName.includes('CMYK')) isCmyk = true;
-      }
-
-      // Stream extraction & validation
-      const rawStreamBytes = (xobj as any).contents || (xobj as any).getContents?.() || new Uint8Array(0);
-
-      // Safe Scope V1.2 Classification
-      let classification: 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED' = 'NOT_SUPPORTED';
-      let reasonCode = 'CONVERTIBLE';
-      let reason = '';
-
-      const isAscii85Flate = filterList.length === 2 && filterList[0] === 'ASCII85Decode' && filterList[1] === 'FlateDecode';
-      const isDct = filterList.length === 1 && filterList[0] === 'DCTDecode';
-      const isFlate = filterList.length === 1 && filterList[0] === 'FlateDecode';
-      const isNone = filterList.length === 0 || (filterList.length === 1 && (filterList[0] === 'None' || filterList[0] === ''));
-
-      if (!isRgb) {
-        classification = 'NOT_SUPPORTED';
-        reasonCode = 'NON_RGB_COLORSPACE';
-        reason = `Espaço de cores não é RGB (${colorSpaceStr}).`;
-      } else if (bitsPerComponent !== 8) {
-        classification = 'MANUAL_REQUIRED';
-        reasonCode = 'UNSUPPORTED_BITS_PER_COMPONENT';
-        reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (Safe Scope V1.2 exige 8 bits/canal).`;
-      } else if (widthPx <= 0 || heightPx <= 0) {
-        classification = 'NOT_SUPPORTED';
-        reasonCode = 'INVALID_DIMENSIONS';
-        reason = `Dimensões de imagem inválidas ou zero (${widthPx}x${heightPx}).`;
-      } else if (hasDecode) {
-        classification = 'MANUAL_REQUIRED';
-        reasonCode = 'CUSTOM_DECODE_MATRIX';
-        reason = 'Matriz de decodificação (/Decode) personalizada exige calibração manual no software de origem.';
-      } else if (hasUnsupportedPredictor) {
-        classification = 'MANUAL_REQUIRED';
-        reasonCode = 'UNSUPPORTED_DECODE_PARMS';
-        reason = predictorReason;
-      } else if (isDct) {
-        // Safe Scope V1.1: Support DCTDecode (JPEG) RGB images
-        try {
-          const decoded = decodeJpegToRgb(rawStreamBytes);
-          if (decoded.width !== widthPx || decoded.height !== heightPx) {
-            classification = 'MANUAL_REQUIRED';
-            reasonCode = 'DIMENSION_MISMATCH';
-            reason = `Dimensões no cabeçalho JPEG (${decoded.width}x${decoded.height}) divergem do dicionário PDF (${widthPx}x${heightPx}).`;
-          } else if (decoded.components !== 3) {
-            classification = 'MANUAL_REQUIRED';
-            reasonCode = 'NON_RGB_JPEG';
-            reason = `Imagem JPEG possui ${decoded.components} canal(is) (esperado 3 canais RGB).`;
           } else {
-            classification = 'CONVERTIBLE';
-            reasonCode = 'CONVERTIBLE';
-            reason = 'Imagem raster RGB 8-bit comprimida em DCTDecode/JPEG compatível para conversão CMM segura (Safe Scope V1.2).';
+            colorSpaceStr = csObj.toString();
           }
-        } catch (jpegErr: any) {
-          classification = 'MANUAL_REQUIRED';
-          reasonCode = 'CORRUPTED_JPEG';
-          reason = `Falha na decodificação do stream JPEG: ${jpegErr?.message || String(jpegErr)}`;
+        } else if (csObj) {
+          const csName = csObj.toString().replace(/^\//, '');
+          colorSpaceStr = csName;
+          if (csName.includes('RGB')) isRgb = true;
+          else if (csName.includes('CMYK')) isCmyk = true;
         }
-      } else if (isAscii85Flate) {
-        // Safe Scope V1.2: Support [/ASCII85Decode /FlateDecode] filter chain
-        try {
-          let asciiDecoded: Uint8Array;
-          try {
-            asciiDecoded = decodeAscii85(rawStreamBytes);
-          } catch (a85Err: any) {
-            classification = 'MANUAL_REQUIRED';
-            reasonCode = 'ASCII85_DECODE_FAILED';
-            reason = `Falha na decodificação ASCII85: ${a85Err?.message || String(a85Err)}`;
-          }
 
-          if (classification !== 'MANUAL_REQUIRED') {
-            let inflated: Uint8Array;
-            try {
-              inflated = pako.inflate(asciiDecoded!);
-            } catch (infErr: any) {
+        // Stream extraction & validation
+        const rawStreamBytes = (xobj as any).contents || (xobj as any).getContents?.() || new Uint8Array(0);
+
+        // Safe Scope V1.2 Classification
+        let classification: 'CONVERTIBLE' | 'MANUAL_REQUIRED' | 'NOT_SUPPORTED' = 'NOT_SUPPORTED';
+        let reasonCode = 'CONVERTIBLE';
+        let reason = '';
+
+        const isAscii85Flate = filterList.length === 2 && filterList[0] === 'ASCII85Decode' && filterList[1] === 'FlateDecode';
+        const isDct = filterList.length === 1 && filterList[0] === 'DCTDecode';
+        const isFlate = filterList.length === 1 && filterList[0] === 'FlateDecode';
+        const isNone = filterList.length === 0 || (filterList.length === 1 && (filterList[0] === 'None' || filterList[0] === ''));
+
+        if (!isRgb) {
+          classification = 'NOT_SUPPORTED';
+          reasonCode = 'NON_RGB_COLORSPACE';
+          reason = `Espaço de cores não é RGB (${colorSpaceStr}).`;
+        } else if (bitsPerComponent !== 8) {
+          classification = 'MANUAL_REQUIRED';
+          reasonCode = 'UNSUPPORTED_BITS_PER_COMPONENT';
+          reason = `Profundidade de cor de ${bitsPerComponent} bits/canal não suportada na Fase 1 (Safe Scope V1.2 exige 8 bits/canal).`;
+        } else if (widthPx <= 0 || heightPx <= 0) {
+          classification = 'NOT_SUPPORTED';
+          reasonCode = 'INVALID_DIMENSIONS';
+          reason = `Dimensões de imagem inválidas ou zero (${widthPx}x${heightPx}).`;
+        } else if (hasDecode) {
+          classification = 'MANUAL_REQUIRED';
+          reasonCode = 'CUSTOM_DECODE_MATRIX';
+          reason = 'Matriz de decodificação (/Decode) personalizada exige calibração manual no software de origem.';
+        } else if (hasUnsupportedPredictor) {
+          classification = 'MANUAL_REQUIRED';
+          reasonCode = 'UNSUPPORTED_DECODE_PARMS';
+          reason = predictorReason;
+        } else if (isDct) {
+          // Safe Scope V1.1: Support DCTDecode (JPEG) RGB images
+          try {
+            const decoded = decodeJpegToRgb(rawStreamBytes);
+            if (decoded.width !== widthPx || decoded.height !== heightPx) {
               classification = 'MANUAL_REQUIRED';
-              reasonCode = 'DECOMPRESS_FAILED';
-              reason = `Falha na descompressão FlateDecode: ${infErr?.message || String(infErr)}`;
+              reasonCode = 'DIMENSION_MISMATCH';
+              reason = `Dimensões no cabeçalho JPEG (${decoded.width}x${decoded.height}) divergem do dicionário PDF (${widthPx}x${heightPx}).`;
+            } else if (decoded.components !== 3) {
+              classification = 'MANUAL_REQUIRED';
+              reasonCode = 'NON_RGB_JPEG';
+              reason = `Imagem JPEG possui ${decoded.components} canal(is) (esperado 3 canais RGB).`;
+            } else {
+              classification = 'CONVERTIBLE';
+              reasonCode = 'CONVERTIBLE';
+              reason = 'Imagem raster RGB 8-bit comprimida em DCTDecode/JPEG compatível para conversão CMM segura (Safe Scope V1.2).';
+            }
+          } catch (jpegErr: any) {
+            classification = 'MANUAL_REQUIRED';
+            reasonCode = 'CORRUPTED_JPEG';
+            reason = `Falha na decodificação do stream JPEG: ${jpegErr?.message || String(jpegErr)}`;
+          }
+        } else if (isAscii85Flate) {
+          // Safe Scope V1.2: Support [/ASCII85Decode /FlateDecode] filter chain
+          try {
+            let asciiDecoded: Uint8Array;
+            try {
+              asciiDecoded = decodeAscii85(rawStreamBytes);
+            } catch (a85Err: any) {
+              classification = 'MANUAL_REQUIRED';
+              reasonCode = 'ASCII85_DECODE_FAILED';
+              reason = `Falha na decodificação ASCII85: ${a85Err?.message || String(a85Err)}`;
             }
 
             if (classification !== 'MANUAL_REQUIRED') {
-              const expectedBytes = widthPx * heightPx * 3;
-              if (inflated!.length !== expectedBytes) {
+              let inflated: Uint8Array;
+              try {
+                inflated = pako.inflate(asciiDecoded!);
+              } catch (infErr: any) {
                 classification = 'MANUAL_REQUIRED';
-                reasonCode = 'STREAM_LENGTH_MISMATCH';
-                reason = `Tamanho do stream decodificado (${inflated!.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB 8-bit).`;
-              } else {
-                classification = 'CONVERTIBLE';
-                reasonCode = 'CONVERTIBLE';
-                reason = 'Imagem raster RGB 8-bit com cadeia de filtros [/ASCII85Decode /FlateDecode] compatível para conversão CMM segura (Safe Scope V1.2).';
+                reasonCode = 'DECOMPRESS_FAILED';
+                reason = `Falha na descompressão FlateDecode: ${infErr?.message || String(infErr)}`;
+              }
+
+              if (classification !== 'MANUAL_REQUIRED') {
+                const expectedBytes = widthPx * heightPx * 3;
+                if (inflated!.length !== expectedBytes) {
+                  classification = 'MANUAL_REQUIRED';
+                  reasonCode = 'STREAM_LENGTH_MISMATCH';
+                  reason = `Comprimento descompactado (${inflated!.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB).`;
+                } else {
+                  classification = 'CONVERTIBLE';
+                  reasonCode = 'CONVERTIBLE';
+                  reason = 'Imagem raster RGB 8-bit com cadeia [/ASCII85Decode /FlateDecode] compatível para conversão CMM segura (Safe Scope V1.2).';
+                }
               }
             }
-          }
-        } catch (err: any) {
-          classification = 'MANUAL_REQUIRED';
-          reasonCode = 'DECOMPRESS_FAILED';
-          reason = `Falha ao processar cadeia de filtros: ${err?.message || String(err)}`;
-        }
-      } else if (!isFlate && !isNone) {
-        classification = 'MANUAL_REQUIRED';
-        reasonCode = 'UNSUPPORTED_FILTER';
-        const formattedFilter = filterList.length > 1
-          ? `[${filterList.map((f) => '/' + f).join(' ')}]`
-          : `/${filterVal}`;
-        reason = `Filtro(s) de compressão ${formattedFilter} não suportado(s) no Safe Scope V1.2 (suporta FlateDecode, DCTDecode, [/ASCII85Decode /FlateDecode] ou raster não comprimido).`;
-      } else {
-        // FlateDecode or uncompressed raster
-        try {
-          const inflated = isFlate ? pako.inflate(rawStreamBytes) : rawStreamBytes;
-          const expectedBytes = widthPx * heightPx * 3;
-          if (inflated.length !== expectedBytes) {
+          } catch (chainErr: any) {
             classification = 'MANUAL_REQUIRED';
-            reasonCode = 'STREAM_LENGTH_MISMATCH';
-            reason = `Tamanho do stream decodificado (${inflated.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB 8-bit).`;
-          } else {
-            classification = 'CONVERTIBLE';
-            reasonCode = 'CONVERTIBLE';
-            reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1.2).';
+            reasonCode = 'DECODE_CHAIN_FAILED';
+            reason = `Falha no processamento da cadeia de filtros: ${chainErr?.message || String(chainErr)}`;
           }
-        } catch (e: any) {
+        } else if (isFlate || isNone) {
+          // Safe Scope V1.0: FlateDecode or uncompressed raster
+          try {
+            const inflated = isFlate ? pako.inflate(rawStreamBytes) : rawStreamBytes;
+            const expectedBytes = widthPx * heightPx * 3;
+            if (inflated.length !== expectedBytes) {
+              classification = 'MANUAL_REQUIRED';
+              reasonCode = 'STREAM_LENGTH_MISMATCH';
+              reason = `Comprimento descompactado (${inflated.length} bytes) difere do esperado (${expectedBytes} bytes para ${widthPx}x${heightPx} RGB).`;
+            } else {
+              classification = 'CONVERTIBLE';
+              reasonCode = 'CONVERTIBLE';
+              reason = 'Imagem raster RGB 8-bit compatível para conversão CMM segura (Safe Scope V1.2).';
+            }
+          } catch (infErr: any) {
+            classification = 'MANUAL_REQUIRED';
+            reasonCode = 'DECOMPRESS_FAILED';
+            reason = `Falha na descompressão FlateDecode do stream: ${infErr?.message || String(infErr)}`;
+          }
+        } else {
           classification = 'MANUAL_REQUIRED';
-          reasonCode = 'DECOMPRESS_FAILED';
-          reason = `Falha ao descomprimir stream da imagem: ${e?.message || String(e)}`;
+          reasonCode = 'UNSUPPORTED_FILTER';
+          reason = `Filtro de compressão /${filterVal} não suportado no Safe Scope V1.2.`;
         }
+
+        const auditEntry: ImageXObjectAudit = {
+          id: uniqueKey,
+          name: imgName,
+          page: pageNum,
+          widthPx,
+          heightPx,
+          bitsPerComponent,
+          filter: filterVal,
+          colorSpace: colorSpaceStr,
+          hasSMask,
+          hasMask,
+          hasDecode,
+          hasUnsupportedPredictor,
+          classification,
+          reasonCode,
+          reason,
+          isSupported: classification === 'CONVERTIBLE',
+        };
+
+        audits.push(auditEntry);
+        imageMap.set(uniqueKey, {
+          ref,
+          page: pageNum,
+          dict,
+          rawBytes: rawStreamBytes,
+          audit: auditEntry,
+          embeddedIcc,
+        });
       }
+    };
 
-      const audit: ImageXObjectAudit = {
-        id: uniqueKey,
-        name: imgName,
-        page: pageNum,
-        widthPx,
-        heightPx,
-        bitsPerComponent,
-        colorSpace: colorSpaceStr,
-        isRgb,
-        isCmyk,
-        isGray,
-        filter: filterVal,
-        hasDecode,
-        hasSMask,
-        hasMask,
-        hasEmbeddedIcc: Boolean(embeddedIcc && embeddedIcc.length > 0),
-        classification,
-        reasonCode,
-        reason,
-      };
-
-      audits.push(audit);
-      imageMap.set(uniqueKey, {
-        ref,
-        page: pageNum,
-        dict,
-        rawBytes: rawStreamBytes,
-        audit,
-        embeddedIcc,
-      });
+    const xObjects = resources.get(PDFName.of('XObject'));
+    if (xObjects instanceof PDFDict) {
+      processXObjects(xObjects);
     }
   });
 

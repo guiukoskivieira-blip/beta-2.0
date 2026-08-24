@@ -17,6 +17,7 @@ import type {
 } from '../types/index.ts';
 import type { ProductionProfile } from '../utils/productionProfiles.ts';
 import { COMMERCIAL_PRINT_300DPI_PROFILE } from '../utils/productionProfiles.ts';
+import { analyzeRgbConversionSupport } from './imageColorFix.ts';
 
 export type PdfxEligibilityStatus = 'eligible' | 'fixable' | 'manual_required' | 'blocked';
 export type PdfxCheckStatus = 'passed' | 'fixable' | 'manual_required' | 'blocked';
@@ -439,7 +440,7 @@ export function evaluatePdfx4Eligibility(
       fixType: 'none',
     });
   } else {
-    // Check whether all RGB images fit Safe Scope V1.2
+    // Canonical Safe Scope evaluation via analyzeRgbConversionSupport
     let allRgbInSafeScope = true;
     let unsupportedCount = 0;
     const rgbImages: any[] = [];
@@ -448,16 +449,8 @@ export function evaluatePdfx4Eligibility(
       for (const img of page.imageOccurrences || []) {
         if (img.colorSpace?.includes('RGB')) {
           rgbImages.push(img);
-          const filter = img.filter || 'FlateDecode';
-          const isSafeFilter =
-            filter === 'FlateDecode' ||
-            filter === 'DCTDecode' ||
-            filter === 'ASCII85Decode+FlateDecode' ||
-            filter === 'None' ||
-            filter === '';
-          const isSafeBpc = (img.bitsPerComponent || 8) === 8;
-
-          if (!isSafeFilter || !isSafeBpc) {
+          const support = analyzeRgbConversionSupport(img);
+          if (!support.isSupported) {
             allRgbInSafeScope = false;
             unsupportedCount++;
           }
@@ -484,15 +477,16 @@ export function evaluatePdfx4Eligibility(
         description: `Converter ${rgbImages.length} imagem(ns) RGB para CMYK usando LittleCMS CMM com perfil de destino.`,
       });
     } else {
+      const nonSupportedCount = unsupportedCount > 0 ? unsupportedCount : (rgbImages.length === 0 ? 1 : rgbImages.length);
       checks.push({
         id: 'PDFX_COLOR_SPACES',
         title: 'Espaços de Cor e Objetos RGB',
         category: 'color',
         status: 'manual_required',
         reasonCode: 'PDFX_RGB_MANUAL_REQUIRED',
-        message: `Objetos RGB detectados fora do Safe Scope automático (${unsupportedCount} não suportado(s)). Requer conversão manual no software gráfico.`,
+        message: `Objetos RGB detectados fora do Safe Scope automático (${nonSupportedCount} não suportado(s)). Requer conversão manual no software gráfico.`,
         fixType: 'manual',
-        details: { rgbCount: rgbImages.length, unsupportedCount },
+        details: { rgbCount: rgbImages.length, unsupportedCount: nonSupportedCount },
       });
       blockers.push({
         code: 'PDFX_RGB_MANUAL_REQUIRED',
