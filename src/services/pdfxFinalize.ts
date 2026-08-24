@@ -394,6 +394,27 @@ export function verifyPdfx4FinalizedDocument(
     });
   }
 
+  // Check 5b: Color Spaces & Absence of uncalibrated/vector RGB
+  const hasRgbInFinal = Boolean(finalStructure.colorSummary?.hasRgb);
+  if (!hasRgbInFinal) {
+    checks.push({
+      code: 'VERIFY_COLOR_SPACES',
+      title: 'Espaços de Cor e Ausência de RGB Não Calibrado',
+      status: 'passed',
+      evidence: 'Documento contém exclusivamente espaços de cores conformes (CMYK / Gray / Spot).',
+    });
+  } else {
+    checks.push({
+      code: 'VERIFY_COLOR_SPACES',
+      title: 'Espaços de Cor e Ausência de RGB Não Calibrado',
+      status: 'failed',
+      evidence: finalStructure.colorSummary?.hasRgbVector
+        ? 'Operadores gráficos vetoriais em DeviceRGB detectados no content stream.'
+        : 'Elementos RGB não calibrados remanescentes no documento serializado.',
+      error: 'RGB_OBJECTS_PRESENT',
+    });
+  }
+
   // Check 6: Structural & XRef Integrity
   if (finalizedPdfBytes && finalizedPdfBytes.length > 0) {
     const structVal = verifySerializedPdfStructure(finalizedPdfBytes);

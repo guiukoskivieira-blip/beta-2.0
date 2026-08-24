@@ -273,6 +273,232 @@ function parseActuallyUsedFontNames(contentBytes?: Uint8Array | null): Set<strin
   return usedFonts;
 }
 
+interface GraphicColorState {
+  fillColorSpace: string;
+  strokeColorSpace: string;
+}
+
+export interface VectorColorAnalysis {
+  hasRgbVector: boolean;
+  hasCmykVector: boolean;
+  hasGrayVector: boolean;
+  hasSpotVector: boolean;
+  operators: string[];
+}
+
+export function parseContentStreamVectorColors(
+  contentBytes?: Uint8Array | null,
+  colorSpaceResources?: any,
+  context?: any
+): VectorColorAnalysis {
+  const result: VectorColorAnalysis = {
+    hasRgbVector: false,
+    hasCmykVector: false,
+    hasGrayVector: false,
+    hasSpotVector: false,
+    operators: [],
+  };
+
+  if (!contentBytes || contentBytes.length === 0) {
+    return result;
+  }
+
+  const str = Buffer.from(contentBytes).toString('latin1');
+  const tokens: string[] = [];
+  let i = 0;
+  const len = str.length;
+
+  while (i < len) {
+    const ch = str[i];
+    if (ch === '%') {
+      while (i < len && str[i] !== '\r' && str[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '(') {
+      let depth = 1;
+      i++;
+      while (i < len && depth > 0) {
+        if (str[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (str[i] === '(') depth++;
+        else if (str[i] === ')') depth--;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '<') {
+      if (i + 1 < len && str[i + 1] === '<') {
+        tokens.push('<<');
+        i += 2;
+        continue;
+      }
+      i++;
+      while (i < len && str[i] !== '>') i++;
+      if (i < len && str[i] === '>') i++;
+      continue;
+    }
+    if (ch === '>') {
+      if (i + 1 < len && str[i + 1] === '>') {
+        tokens.push('>>');
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (/\s/.test(ch) || ch === '[' || ch === ']') {
+      if (ch === '[' || ch === ']') tokens.push(ch);
+      i++;
+      continue;
+    }
+
+    let start = i;
+    while (
+      i < len &&
+      !/\s/.test(str[i]) &&
+      str[i] !== '(' &&
+      str[i] !== '<' &&
+      str[i] !== '[' &&
+      str[i] !== ']' &&
+      str[i] !== '%' &&
+      str[i] !== '/'
+    ) {
+      i++;
+    }
+    if (start === i && str[i] === '/') {
+      i++;
+      while (
+        i < len &&
+        !/\s/.test(str[i]) &&
+        str[i] !== '(' &&
+        str[i] !== '<' &&
+        str[i] !== '[' &&
+        str[i] !== ']' &&
+        str[i] !== '%' &&
+        str[i] !== '/'
+      ) {
+        i++;
+      }
+    }
+    if (start < i) {
+      tokens.push(str.slice(start, i));
+    }
+  }
+
+  let currentState: GraphicColorState = {
+    fillColorSpace: 'DeviceGray',
+    strokeColorSpace: 'DeviceGray',
+  };
+  const stateStack: GraphicColorState[] = [];
+
+  const resolveColorSpace = (name: string): string => {
+    const clean = name.replace(/^\//, '');
+    if (clean === 'DeviceRGB') return 'DeviceRGB';
+    if (clean === 'DeviceCMYK') return 'DeviceCMYK';
+    if (clean === 'DeviceGray') return 'DeviceGray';
+    if (clean.includes('RGB')) return 'DeviceRGB';
+    if (clean.includes('CMYK')) return 'DeviceCMYK';
+    if (clean.includes('Gray')) return 'DeviceGray';
+
+    if (colorSpaceResources && typeof colorSpaceResources.get === 'function') {
+      const resObj = colorSpaceResources.get(PDFName.of(clean));
+      const resolved = context ? context.lookup(resObj) : resObj;
+      if (resolved instanceof PDFName) {
+        const val = resolved.toString().replace(/^\//, '');
+        if (val.includes('RGB')) return 'DeviceRGB';
+        if (val.includes('CMYK')) return 'DeviceCMYK';
+        if (val.includes('Gray')) return 'DeviceGray';
+      } else if (resolved instanceof PDFArray) {
+        const first = resolved.get(0)?.toString()?.replace(/^\//, '');
+        if (first?.includes('RGB') || first?.includes('CalRGB')) return 'DeviceRGB';
+        if (first?.includes('CMYK')) return 'DeviceCMYK';
+        if (first?.includes('Gray') || first?.includes('CalGray')) return 'DeviceGray';
+        if (first?.includes('Separation') || first?.includes('DeviceN')) return 'Spot';
+        if (first?.includes('ICCBased')) {
+          const iccRef = resolved.get(1);
+          const iccStream = context ? context.lookup(iccRef) : null;
+          const streamDict = (iccStream as any)?.dict || iccStream;
+          const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
+          if (n === 4) return 'DeviceCMYK';
+          if (n === 1) return 'DeviceGray';
+          return 'DeviceRGB';
+        }
+      }
+    }
+    return clean;
+  };
+
+  for (let t = 0; t < tokens.length; t++) {
+    const token = tokens[t];
+
+    if (token === 'q') {
+      stateStack.push({ ...currentState });
+    } else if (token === 'Q') {
+      if (stateStack.length > 0) {
+        currentState = stateStack.pop()!;
+      }
+    } else if (token === 'rg') {
+      currentState.fillColorSpace = 'DeviceRGB';
+      result.hasRgbVector = true;
+      result.operators.push('rg');
+    } else if (token === 'RG') {
+      currentState.strokeColorSpace = 'DeviceRGB';
+      result.hasRgbVector = true;
+      result.operators.push('RG');
+    } else if (token === 'k') {
+      currentState.fillColorSpace = 'DeviceCMYK';
+      result.hasCmykVector = true;
+      result.operators.push('k');
+    } else if (token === 'K') {
+      currentState.strokeColorSpace = 'DeviceCMYK';
+      result.hasCmykVector = true;
+      result.operators.push('K');
+    } else if (token === 'g') {
+      currentState.fillColorSpace = 'DeviceGray';
+      result.hasGrayVector = true;
+      result.operators.push('g');
+    } else if (token === 'G') {
+      currentState.strokeColorSpace = 'DeviceGray';
+      result.hasGrayVector = true;
+      result.operators.push('G');
+    } else if (token === 'cs') {
+      const prev = tokens[t - 1] || '';
+      currentState.fillColorSpace = resolveColorSpace(prev);
+    } else if (token === 'CS') {
+      const prev = tokens[t - 1] || '';
+      currentState.strokeColorSpace = resolveColorSpace(prev);
+    } else if (token === 'sc' || token === 'scn') {
+      if (currentState.fillColorSpace === 'DeviceRGB') {
+        result.hasRgbVector = true;
+        result.operators.push(token);
+      } else if (currentState.fillColorSpace === 'DeviceCMYK') {
+        result.hasCmykVector = true;
+        result.operators.push(token);
+      } else if (currentState.fillColorSpace === 'DeviceGray') {
+        result.hasGrayVector = true;
+      } else if (currentState.fillColorSpace === 'Spot') {
+        result.hasSpotVector = true;
+      }
+    } else if (token === 'SC' || token === 'SCN') {
+      if (currentState.strokeColorSpace === 'DeviceRGB') {
+        result.hasRgbVector = true;
+        result.operators.push(token);
+      } else if (currentState.strokeColorSpace === 'DeviceCMYK') {
+        result.hasCmykVector = true;
+        result.operators.push(token);
+      } else if (currentState.strokeColorSpace === 'DeviceGray') {
+        result.hasGrayVector = true;
+      } else if (currentState.strokeColorSpace === 'Spot') {
+        result.hasSpotVector = true;
+      }
+    }
+  }
+
+  return result;
+}
+
 function parseBox(boxArray: any): PdfBoxInfo | undefined {
   if (!boxArray || !Array.isArray(boxArray) || boxArray.length < 4) return undefined;
   const toNum = (v: any): number => {
@@ -434,6 +660,17 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     }
 
     let hasTransparency = false;
+
+    // Track vector color operators on this page (rg, RG, k, K, g, G, cs, CS, sc, SC, scn, SCN)
+    const pageVectorAnalysis = parseContentStreamVectorColors(
+      contentBytes,
+      resources?.get?.(PDFName.of('ColorSpace')),
+      pdfDoc.context
+    );
+    let pageHasRgbVector = pageVectorAnalysis.hasRgbVector;
+    let pageHasCmykVector = pageVectorAnalysis.hasCmykVector;
+    let pageHasGrayVector = pageVectorAnalysis.hasGrayVector;
+    let pageHasSpotVector = pageVectorAnalysis.hasSpotVector;
 
     // Track font resource names actually used by text rendering operators on this page
     const usedFontNamesOnPage = parseActuallyUsedFontNames(contentBytes);
@@ -655,6 +892,18 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
                 formBytes = decodeStream(xobj);
               } catch {}
 
+              if (formBytes) {
+                const formVectorAnalysis = parseContentStreamVectorColors(
+                  formBytes,
+                  dict.get(PDFName.of('Resources')),
+                  pdfDoc.context
+                );
+                if (formVectorAnalysis.hasRgbVector) pageHasRgbVector = true;
+                if (formVectorAnalysis.hasCmykVector) pageHasCmykVector = true;
+                if (formVectorAnalysis.hasSpotVector) pageHasSpotVector = true;
+                if (formVectorAnalysis.hasGrayVector) pageHasGrayVector = true;
+              }
+
               const formRes = dict.get(PDFName.of('Resources'));
               const formResDict = formRes ? pdfDoc.context.lookup(formRes) : undefined;
               if (formResDict instanceof PDFDict) {
@@ -772,10 +1021,26 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
       }
     }
 
-    // Default color occurrence
-    if (imageOccurrences.some(i => i.colorSpace?.includes('RGB'))) {
+    // Page color occurrence resolution
+    const pageHasRgbRaster = imageOccurrences.some((i) => i.colorSpace?.includes('RGB'));
+    const pageHasRgb = pageHasRgbRaster || pageHasRgbVector;
+
+    if (pageHasRgb) {
       colorOccurrences.push({ page: pageNum, family: 'DeviceRGB', count: 1 });
-    } else {
+      hasGlobalRgb = true;
+      detectedFamilies.add('DeviceRGB');
+    }
+    if (pageHasCmykVector || imageOccurrences.some((i) => i.colorSpace?.includes('CMYK'))) {
+      colorOccurrences.push({ page: pageNum, family: 'DeviceCMYK', count: 1 });
+      hasGlobalCmyk = true;
+      detectedFamilies.add('DeviceCMYK');
+    }
+    if (pageHasSpotVector || imageOccurrences.some((i) => i.colorSpace?.includes('Spot'))) {
+      colorOccurrences.push({ page: pageNum, family: 'Spot', count: 1 });
+      hasGlobalSpot = true;
+      detectedFamilies.add('Spot');
+    }
+    if (!pageHasRgb && !pageHasCmykVector && !pageHasSpotVector && imageOccurrences.length === 0) {
       colorOccurrences.push({ page: pageNum, family: 'DeviceCMYK', count: 1 });
       hasGlobalCmyk = true;
       detectedFamilies.add('DeviceCMYK');
@@ -796,6 +1061,8 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
       bleedBox,
       cropBox,
       hasTransparency,
+      hasRgbRaster: pageHasRgbRaster,
+      hasRgbVector: pageHasRgbVector,
       imageOccurrences,
       colorOccurrences,
     });
@@ -976,7 +1243,9 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     iccProfiles,
     colorSummary: {
       hasRgb: hasGlobalRgb,
-      hasCmyk: hasGlobalCmyk || !hasGlobalRgb,
+      hasRgbRaster: pages.some((p) => Boolean(p.hasRgbRaster)),
+      hasRgbVector: pages.some((p) => Boolean(p.hasRgbVector)),
+      hasCmyk: hasGlobalCmyk || (!hasGlobalRgb && !hasGlobalSpot),
       hasSpotColors: hasGlobalSpot,
       familiesDetected: Array.from(detectedFamilies),
     },

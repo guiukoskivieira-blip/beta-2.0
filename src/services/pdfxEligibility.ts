@@ -484,6 +484,8 @@ export function evaluatePdfx4Eligibility(
   // Check G: PDFX_COLOR_SPACES
   // -------------------------------------------------------------
   const hasRgb = document.colorSummary?.hasRgb || false;
+  const hasRgbVector = Boolean(document.colorSummary?.hasRgbVector || pages.some((p) => (p as any).hasRgbVector));
+
   if (!hasRgb) {
     checks.push({
       id: 'PDFX_COLOR_SPACES',
@@ -492,6 +494,30 @@ export function evaluatePdfx4Eligibility(
       status: 'passed',
       message: 'Documento contém exclusivamente espaços de cor CMYK / Gray / Spot compativeis.',
       fixType: 'none',
+    });
+  } else if (hasRgbVector) {
+    // Vector RGB cannot be automatically converted by the raster image fix engine
+    checks.push({
+      id: 'PDFX_COLOR_SPACES',
+      title: 'Espaços de Cor e Objetos RGB',
+      category: 'color',
+      status: 'manual_required',
+      reasonCode: 'PDFX_RGB_VECTOR_MANUAL_REQUIRED',
+      message: 'Objetos vetoriais RGB foram detectados no conteúdo. A conversão automática atual cobre imagens raster, não objetos vetoriais. Converta as cores no software de origem.',
+      fixType: 'manual',
+      details: { hasRgbVector: true, hasRgbRaster: Boolean(document.colorSummary?.hasRgbRaster) },
+    });
+    blockers.push({
+      code: 'PDFX_RGB_VECTOR_MANUAL_REQUIRED',
+      title: 'Vetores em DeviceRGB Não Elegíveis para Fix Automático',
+      reason: 'O documento possui operadores gráficos vetoriais em DeviceRGB (ex: preenchimentos e contornos) que exigem conversão para CMYK no software de origem.',
+    });
+    fixPlan.push({
+      code: 'PDFX_RGB_VECTOR_MANUAL_REQUIRED',
+      title: 'Conversão de Vetores RGB',
+      status: 'manual_required',
+      fixType: 'manual',
+      description: 'Converter cores de preenchimento e traço vetoriais para CMYK ou escala de cinza no software gráfico original.',
     });
   } else {
     // Canonical Safe Scope evaluation via analyzeRgbConversionSupport
@@ -545,7 +571,7 @@ export function evaluatePdfx4Eligibility(
       blockers.push({
         code: 'PDFX_RGB_MANUAL_REQUIRED',
         title: 'Objetos RGB Não Elegíveis para Fix Automático',
-        reason: 'O documento possui imagens com filtros/profundidades não suportados ou vetores RGB que exigem conversão na ferramenta de criação.',
+        reason: 'O documento possui imagens com filtros/profundidades não suportados que exigem conversão na ferramenta de criação.',
       });
     }
   }

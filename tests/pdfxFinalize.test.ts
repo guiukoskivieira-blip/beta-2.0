@@ -407,4 +407,35 @@ test('8. QA 09: Documento com páginas heterogêneas (A4 e 90x50) é bloqueado n
   assert.ok(fin.failures.some((f) => f.includes('PDFX_HETEROGENEOUS_PAGE_SIZES')));
 });
 
+test('9. QA 13: Documento com RGB vetorial (rg/RG) bloqueia preparação e finalização direta', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([(210 * 72) / 25.4, (297 * 72) / 25.4]);
+  // Vector RGB content stream
+  const content = Buffer.from('.9 .15 .15 rg 50 50 200 200 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), doc.context.register(PDFRawStream.of(doc.context.obj({}) as any, content)));
+
+  const pdfBytes = await doc.save({ useObjectStreams: false });
+
+  // 1. Preparation must be blocked with manual_required
+  const prep = await preparePdfForPdfx4(pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(prep.success, false);
+  assert.equal(prep.verifiedPdfX, false);
+  const colorCheck = prep.eligibleAfterPreparation.checks.find((c) => c.id === 'PDFX_COLOR_SPACES');
+  assert.equal(colorCheck?.status, 'manual_required');
+  assert.equal(colorCheck?.reasonCode, 'PDFX_RGB_VECTOR_MANUAL_REQUIRED');
+
+  // 2. Direct finalization must fail
+  const fin = await finalizePdfx4Document(pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(fin.success, false);
+  assert.equal(fin.verifiedPdfX, false);
+  assert.ok(fin.failures.some((f) => f.includes('PDFX_RGB_VECTOR_MANUAL_REQUIRED') || f.includes('RGB')));
+});
+
+
 

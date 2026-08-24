@@ -153,6 +153,8 @@ export interface PdfPageStructure {
   cropBox?: PdfBoxInfo;
   artBox?: PdfBoxInfo;
   hasTransparency: boolean;
+  hasRgbRaster?: boolean;
+  hasRgbVector?: boolean;
   imageOccurrences: PdfImageOccurrence[];
   colorOccurrences: PdfColorOccurrence[];
   fonts?: any[];
@@ -200,6 +202,8 @@ export interface PdfDocumentStructure {
   iccProfiles?: PdfIccProfileInfo[];
   colorSummary: {
     hasRgb: boolean;
+    hasRgbRaster?: boolean;
+    hasRgbVector?: boolean;
     hasCmyk: boolean;
     hasSpotColors: boolean;
     familiesDetected: string[];

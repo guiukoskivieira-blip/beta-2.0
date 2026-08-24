@@ -679,6 +679,101 @@ test('QA 10 Caso C: PDF contendo string literal "/Encrypt" em stream de texto N�
 });
 
 // ============================================================================
+// QA 13: Detecção Determinística de RGB Vetorial (rg, RG, cs/sc, CS/SC, Form XObject)
+// ============================================================================
+
+test('QA 13 Caso A: Vetor com 1 0 0 rg (preenchimento RGB) -> hasRgbVector=true, hasRgbRaster=false, hasRgb=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const content = Buffer.from('1 0 0 rg 50 50 200 200 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, true);
+  assert.equal(structure.colorSummary.hasRgbVector, true);
+  assert.equal(structure.colorSummary.hasRgbRaster, false);
+});
+
+test('QA 13 Caso B: Vetor com 0 1 0 RG (traço RGB) -> hasRgbVector=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const content = Buffer.from('0 1 0 RG 10 w 50 50 m 200 200 l S', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, true);
+  assert.equal(structure.colorSummary.hasRgbVector, true);
+});
+
+test('QA 13 Caso C: DeviceRGB cs + 0.2 0.4 0.8 sc -> hasRgbVector=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const content = Buffer.from('/DeviceRGB cs 0.2 0.4 0.8 sc 50 50 100 100 re f', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, true);
+  assert.equal(structure.colorSummary.hasRgbVector, true);
+});
+
+test('QA 13 Caso D: Vetor CMYK com k e K -> hasRgbVector=false, hasCmyk=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const content = Buffer.from('0.1 0.2 0.3 0.4 k 0 0.5 0.5 0 K 50 50 100 100 re B', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, false);
+  assert.equal(structure.colorSummary.hasRgbVector, false);
+  assert.equal(structure.colorSummary.hasCmyk, true);
+});
+
+test('QA 13 Caso E: Vetor Grayscale com g e G -> hasRgbVector=false', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const content = Buffer.from('0.5 g 0 G 50 50 100 100 re B', 'utf-8');
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, content)));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, false);
+  assert.equal(structure.colorSummary.hasRgbVector, false);
+});
+
+test('QA 13 Caso F: RGB vetorial dentro de Form XObject -> hasRgbVector=true', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+
+  const formDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 100, 100],
+    Resources: {},
+  });
+  const formContent = Buffer.from('.9 .15 .15 rg 0 0 100 100 re f', 'utf-8');
+  const formStream = PDFRawStream.of(formDict as any, formContent);
+  const formRef = pdfDoc.context.register(formStream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { FormVector: formRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/FormVector Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(structure.colorSummary.hasRgb, true);
+  assert.equal(structure.colorSummary.hasRgbVector, true);
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
