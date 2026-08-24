@@ -244,17 +244,24 @@ function parseImagePlacements(contentBytes: Uint8Array): Map<string, ImagePlacem
 }
 
 function parseBox(boxArray: any): PdfBoxInfo | undefined {
-
   if (!boxArray || !Array.isArray(boxArray) || boxArray.length < 4) return undefined;
-  const x1 = typeof boxArray[0] === 'number' ? boxArray[0] : 0;
-  const y1 = typeof boxArray[1] === 'number' ? boxArray[1] : 0;
-  const x2 = typeof boxArray[2] === 'number' ? boxArray[2] : 0;
-  const y2 = typeof boxArray[3] === 'number' ? boxArray[3] : 0;
+  const toNum = (v: any): number => {
+    if (typeof v?.asNumber === 'function') return v.asNumber();
+    if (typeof v === 'number') return v;
+    const n = Number(v);
+    return isNaN(n) ? 0 : n;
+  };
+  const x1 = toNum(boxArray[0]);
+  const y1 = toNum(boxArray[1]);
+  const x2 = toNum(boxArray[2]);
+  const y2 = toNum(boxArray[3]);
 
   const xPt = Math.min(x1, x2);
   const yPt = Math.min(y1, y2);
   const widthPt = Math.abs(x2 - x1);
   const heightPt = Math.abs(y2 - y1);
+
+  if (widthPt === 0 && heightPt === 0) return undefined;
 
   return {
     status: 'explicit',

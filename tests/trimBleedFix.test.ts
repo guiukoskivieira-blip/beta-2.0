@@ -786,6 +786,38 @@ testAsync('REGRESSÃO XREF: /Length do stream corresponde ao tamanho real dos da
 });
 
 // ============================================================================
+// QA 04: Regressão MediaBox Real e Elegibilidade Trim/Bleed
+// ============================================================================
+
+testAsync('QA 04: MediaBox 210x297 mm é extraído como 210x297 mm (NÃO 0x0 mm) e bloqueia com mensagem correta', async () => {
+  const pdfBytes = await makePdfWithMediaBox(210, 297);
+  const doc = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(doc.pages[0].mediaBox.widthMm, 210, 'MediaBox widthMm deve ser 210 mm (não 0 mm)');
+  assert.equal(doc.pages[0].mediaBox.heightMm, 297, 'MediaBox heightMm deve ser 297 mm (não 0 mm)');
+
+  const eligibility = checkTrimBleedEligibility(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  assert.equal(eligibility.eligible, false, 'MediaBox 210x297 não possui 3mm de sangria além de 210x297');
+  assert.equal(eligibility.pages[0].eligible, false);
+  assert.ok(eligibility.pages[0].reason.includes('MediaBox (210.0 × 297.0 mm) insuficiente para formato 210 × 297 mm com sangria de 3 mm (mínimo: 216.0 × 303.0 mm)'), 'Mensagem de bloqueio deve conter dimensões reais 210.0 × 297.0 mm');
+  assert.ok(!eligibility.pages[0].reason.includes('0.0 × 0.0 mm'), 'Mensagem NÃO deve conter 0.0 × 0.0 mm');
+});
+
+testAsync('QA 04: MediaBox 216x303 mm é elegível e gera TrimBox 210x297 mm e BleedBox 216x303 mm', async () => {
+  const pdfBytes = await makePdfWithMediaBox(216, 303);
+  const doc = await extractPdfStructure(Buffer.from(pdfBytes));
+
+  assert.equal(doc.pages[0].mediaBox.widthMm, 216);
+  assert.equal(doc.pages[0].mediaBox.heightMm, 303);
+
+  const eligibility = checkTrimBleedEligibility(doc, A4_COMMERCIAL_FLYER_PROFILE);
+  assert.equal(eligibility.eligible, true);
+  assert.equal(eligibility.pages[0].expectedWidthMm, 210);
+  assert.equal(eligibility.pages[0].expectedHeightMm, 297);
+  assert.equal(eligibility.pages[0].requiredBleedMm, 3);
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 
