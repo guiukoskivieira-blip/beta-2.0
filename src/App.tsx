@@ -7,6 +7,7 @@ import { ProcessingState } from './components/ProcessingState';
 import { OperationalVerdictBanner } from './components/OperationalVerdictBanner';
 import { MainInspectionCard } from './components/MainInspectionCard';
 import { AvailableFixesSection } from './components/AvailableFixesSection';
+import { AppliedCorrectionsSummary, type AppliedCorrectionItem } from './components/AppliedCorrectionsSummary';
 import { RecommendedProfileBanner } from './components/RecommendedProfileBanner';
 import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordion';
 import { FilesManagementView } from './components/FilesManagementView';
@@ -43,7 +44,7 @@ export const App: React.FC = () => {
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [workingFile, setWorkingFile] = useState<File | null>(null);
   const [workingPdfBlob, setWorkingPdfBlob] = useState<Blob | null>(null);
-  const [appliedCorrections, setAppliedCorrections] = useState<Array<{ id: string; label: string; appliedAt: number }>>([]);
+  const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionItem[]>([]);
   const [isFixingInProgress, setIsFixingInProgress] = useState<boolean>(false);
   const [pdfxVerifiedState, setPdfxVerifiedState] = useState<'not_verified' | 'verified' | 'needs_revalidation'>('not_verified');
 
@@ -299,7 +300,8 @@ export const App: React.FC = () => {
     newBlob: Blob,
     fixId: string,
     fixLabel: string,
-    isPdfxVerified?: boolean
+    isPdfxVerified?: boolean,
+    details?: { before?: string; after?: string; summary?: string }
   ) => {
     if (isFixingInProgress || !originalFile) return;
 
@@ -312,10 +314,22 @@ export const App: React.FC = () => {
       setWorkingPdfBlob(newBlob);
       setWorkingFile(updatedWorkingFile);
 
-      const newCorrections = [
-        ...appliedCorrections,
-        { id: fixId, label: fixLabel, appliedAt: Date.now() },
-      ];
+      const existingIdx = appliedCorrections.findIndex((c) => c.id === fixId);
+      let newCorrections: AppliedCorrectionItem[];
+      if (existingIdx >= 0) {
+        newCorrections = [...appliedCorrections];
+        newCorrections[existingIdx] = {
+          id: fixId,
+          label: fixLabel,
+          appliedAt: Date.now(),
+          details: details || newCorrections[existingIdx].details,
+        };
+      } else {
+        newCorrections = [
+          ...appliedCorrections,
+          { id: fixId, label: fixLabel, appliedAt: Date.now(), details },
+        ];
+      }
       setAppliedCorrections(newCorrections);
 
       // Re-extract and re-analyze deterministic rules over the updated working PDF
@@ -587,45 +601,12 @@ export const App: React.FC = () => {
                 />
               )}
 
-              {/* Global Cumulative Session Download Bar (Top Highlight) */}
-              {appliedCorrections.length > 0 && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#2563EB] text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 select-none">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-white/20 text-white shrink-0">
-                      <Sparkles className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-black tracking-tight">
-                          Sessão de Trabalho: {appliedCorrections.length} correção(ões) acumulada(s)
-                        </span>
-                      </div>
-                      <p className="text-xs text-white/90 font-medium">
-                        O PDF de trabalho está pronto com todas as alterações aplicadas e revalidadas.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleRestoreOriginal}
-                      className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-all cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 inline mr-1" />
-                      Restaurar Original
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadWorkingPdf}
-                      className="px-4 py-2 rounded-xl bg-white text-emerald-800 hover:bg-emerald-50 text-xs font-black shadow-xs transition-all cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 inline mr-1.5" />
-                      Baixar Arquivo Corrigido
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* Persistent Applied Corrections Summary & Global Download */}
+              <AppliedCorrectionsSummary
+                appliedCorrections={appliedCorrections}
+                onRestoreOriginal={handleRestoreOriginal}
+                onDownloadWorkingPdf={handleDownloadWorkingPdf}
+              />
 
               {/* Operational Decision Banner */}
               <OperationalVerdictBanner

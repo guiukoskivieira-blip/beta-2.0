@@ -9,7 +9,7 @@ import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnica
 
 interface TrimBleedFixPanelProps {
   onOpenProfiles?: () => void;
-  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string) => void;
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
@@ -102,7 +102,24 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
       // Only mark as 'applied' if both structural and Motor 1 validation passed
       if (structureOk && response.revalidation?.validated) {
         setPhase('applied');
-        onFixApplied?.(blob, 'trim_bleed', 'Calibração de Caixas Técnicas (TrimBox/BleedBox)');
+        const currentTrim = analysis.document.pages[0]?.trimBox?.status === 'explicit'
+          ? `${analysis.document.pages[0].trimBox.widthMm} × ${analysis.document.pages[0].trimBox.heightMm} mm`
+          : 'ausente';
+        const currentBleed = analysis.document.pages[0]?.bleedBox?.status === 'explicit'
+          ? 'configurado'
+          : 'ausente';
+
+        onFixApplied?.(
+          blob,
+          'trim_bleed',
+          'Caixas técnicas ajustadas',
+          false,
+          {
+            before: `TrimBox: ${currentTrim} • BleedBox: ${currentBleed}`,
+            after: `TrimBox: ${previewData?.trimWidthMm || profile.expectedWidthMm || 0} × ${previewData?.trimHeightMm || profile.expectedHeightMm || 0} mm • Sangria: ${previewData?.bleedMm || profile.expectedBleedMm || 3} mm`,
+            summary: 'TrimBox e BleedBox calibrados geometricamente sem alterar a arte gráfica.',
+          }
+        );
       } else if (!structureOk) {
         setErrorMessage('Falha na validação estrutural do PDF corrigido.');
         setPhase('structural_error');
@@ -318,6 +335,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
             <div>
               <h4 className="text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-2">Antes</h4>
               <BoxPreview
+                file={originalFile}
                 mediaBox={previewData.before.mediaBox}
                 trimBox={previewData.before.trimBox}
                 bleedBox={previewData.before.bleedBox}
@@ -328,6 +346,7 @@ export const TrimBleedFixPanel: React.FC<TrimBleedFixPanelProps> = ({ analysis, 
             <div>
               <h4 className="text-xs font-semibold text-[#00D18F] uppercase tracking-wider mb-2">Depois</h4>
               <BoxPreview
+                file={originalFile}
                 mediaBox={previewData.after.mediaBox}
                 trimBox={previewData.after.trimBox}
                 bleedBox={previewData.after.bleedBox}
@@ -560,9 +579,62 @@ interface BoxPreviewProps {
   bleedBox?: { x: number; y: number; width: number; height: number };
   label: string;
   highlightChanges?: boolean;
+  file?: File | Blob | null;
 }
 
-const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, label, highlightChanges }) => {
+const RealPdfPageCanvas: React.FC<{ file: File | Blob | null }> = ({ file }) => {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let renderTask: any = null;
+
+    async function renderPdfPage() {
+      if (!file || !canvasRef.current || typeof window === 'undefined') return;
+      try {
+        const pdfjsLib = await import('pdfjs-dist');
+        const buffer = await file.arrayBuffer();
+        if (cancelled) return;
+        const pdfDoc = await pdfjsLib.getDocument({
+          data: new Uint8Array(buffer),
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/',
+          cMapPacked: true,
+          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/standard_fonts/',
+        }).promise;
+
+        if (cancelled) return;
+        const page = await pdfDoc.getPage(1);
+        if (cancelled || !canvasRef.current) return;
+
+        const viewport = page.getViewport({ scale: 1 });
+        const scale = Math.min(320 / viewport.width, 320 / viewport.height, 1.2);
+        const scaledViewport = page.getViewport({ scale });
+
+        const canvas = canvasRef.current;
+        canvas.width = scaledViewport.width;
+        canvas.height = scaledViewport.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const renderContext: any = { canvasContext: ctx, viewport: scaledViewport, canvas };
+        renderTask = page.render(renderContext);
+        await renderTask.promise;
+      } catch (e) {
+        // Silently fallback to placeholder background
+      }
+    }
+
+    renderPdfPage();
+    return () => {
+      cancelled = true;
+      if (renderTask) renderTask.cancel?.();
+    };
+  }, [file]);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />;
+};
+
+const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, label, highlightChanges, file }) => {
   const mbX = mediaBox.x;
   const mbY = mediaBox.y;
   const mbW = mediaBox.width;
@@ -583,49 +655,55 @@ const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, la
   return (
     <div className="flex flex-col items-center">
       <div
-        className="relative bg-slate-50/80 border border-slate-200 rounded-lg shadow-2xl overflow-hidden"
+        className="relative bg-slate-100 border border-slate-300 rounded-xl shadow-lg overflow-hidden"
         style={{
           width: '100%',
           maxWidth: aspect > 1 ? '280px' : '200px',
           aspectRatio: `${mbW} / ${mbH}`,
         }}
       >
-        {/* MediaBox area */}
-        <div className="absolute inset-0 bg-[#16202E]" />
+        {/* Real PDF Page Art Layer */}
+        <div className="absolute inset-0 flex items-center justify-center bg-white">
+          {file ? (
+            <RealPdfPageCanvas file={file} />
+          ) : (
+            <div className="absolute inset-0 bg-slate-200" />
+          )}
+        </div>
 
-        {/* BleedBox */}
+        {/* BleedBox Overlay */}
         {bleedPct && (
           <div
-            className="absolute border-2 border-dashed"
+            className="absolute border-2 border-dashed pointer-events-none"
             style={{
               left: `${bleedPct.left}%`,
               top: `${bleedPct.top}%`,
               width: `${bleedPct.width}%`,
               height: `${bleedPct.height}%`,
-              borderColor: highlightChanges ? '#00D18F' : '#FFB800',
-              backgroundColor: highlightChanges ? 'rgba(0, 209, 143, 0.08)' : 'rgba(255, 184, 0, 0.05)',
+              borderColor: highlightChanges ? '#00D18F' : '#D97706',
+              backgroundColor: highlightChanges ? 'rgba(0, 209, 143, 0.08)' : 'rgba(217, 119, 6, 0.05)',
             }}
           >
-            <span className="absolute -top-4 left-0 text-[8px] font-medium text-[#FFB800] whitespace-nowrap">
+            <span className="absolute -top-4 left-0 text-[8px] font-bold text-amber-700 bg-amber-50 px-1 rounded-xs border border-amber-200 whitespace-nowrap shadow-2xs">
               BleedBox
             </span>
           </div>
         )}
 
-        {/* TrimBox */}
+        {/* TrimBox Overlay */}
         {trimPct && (
           <div
-            className="absolute border-2"
+            className="absolute border-2 pointer-events-none"
             style={{
               left: `${trimPct.left}%`,
               top: `${trimPct.top}%`,
               width: `${trimPct.width}%`,
               height: `${trimPct.height}%`,
-              borderColor: highlightChanges ? '#00D18F' : '#007BFF',
-              backgroundColor: highlightChanges ? 'rgba(0, 209, 143, 0.05)' : 'rgba(0, 123, 255, 0.03)',
+              borderColor: highlightChanges ? '#00D18F' : '#2563EB',
+              backgroundColor: highlightChanges ? 'rgba(0, 209, 143, 0.05)' : 'rgba(37, 99, 235, 0.03)',
             }}
           >
-            <span className="absolute -top-4 right-0 text-[8px] font-medium text-[#007BFF] whitespace-nowrap">
+            <span className="absolute -top-4 right-0 text-[8px] font-bold text-blue-700 bg-blue-50 px-1 rounded-xs border border-blue-200 whitespace-nowrap shadow-2xs">
               TrimBox
             </span>
           </div>
@@ -633,12 +711,32 @@ const BoxPreview: React.FC<BoxPreviewProps> = ({ mediaBox, trimBox, bleedBox, la
 
         {/* Fallback if no trim/bleed */}
         {!trimPct && !bleedPct && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[10px] text-slate-400">Sem caixas técnicas</span>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="text-[10px] text-slate-500 font-semibold bg-white/80 px-2 py-0.5 rounded-md shadow-2xs">
+              Sem caixas técnicas
+            </span>
           </div>
         )}
       </div>
-      <span className="text-xs text-slate-400 mt-2">{label}</span>
+
+      <span className="text-xs font-bold text-[#0F172A] mt-2">{label}</span>
+
+      {/* Technical Legend */}
+      <div className="flex items-center gap-2 mt-1 text-[10px] text-[#64748B] flex-wrap justify-center select-none">
+        <span className="inline-flex items-center gap-1">
+          <span className="w-2 h-2 rounded-xs border border-slate-400 bg-slate-200"></span> MediaBox
+        </span>
+        {bleedBox && (
+          <span className="inline-flex items-center gap-1 text-amber-700 font-medium">
+            <span className="w-2 h-2 rounded-xs border border-dashed border-amber-600 bg-amber-100"></span> BleedBox
+          </span>
+        )}
+        {trimBox && (
+          <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+            <span className="w-2 h-2 rounded-xs border border-emerald-600 bg-emerald-100"></span> TrimBox
+          </span>
+        )}
+      </div>
     </div>
   );
 };

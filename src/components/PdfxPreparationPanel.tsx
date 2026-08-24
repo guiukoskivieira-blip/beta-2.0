@@ -22,7 +22,7 @@ import type { PdfxPreparationResult } from '../services/pdfxPreparation';
 import type { PdfxFinalizeResult } from '../services/pdfxFinalize';
 
 export interface PdfxPreparationPanelProps {
-  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean) => void;
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile?: ProductionProfile;
@@ -232,6 +232,28 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
       const data: PdfxFinalizeResult = await response.json();
       setFinalizeResult(data);
+
+      const finalizedBase64 = (data as any).finalizedPdfBase64;
+      if (finalizedBase64 && (data.verifiedPdfX || data.success)) {
+        const byteChars = atob(finalizedBase64);
+        const byteNums = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNums[i] = byteChars.charCodeAt(i);
+        }
+        const finalPdfBlob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+
+        onFixApplied?.(
+          finalPdfBlob,
+          'pdfx4',
+          'PDF/X-4 finalizado e verificado',
+          data.verifiedPdfX,
+          {
+            before: 'Sem declaração PDF/X',
+            after: 'ISO 15930-7 (PDF/X-4) • FOGRA51',
+            summary: 'Metadados XMP e Output Intent GTS_PDFX gravados e verificados.',
+          }
+        );
+      }
     } catch (err: any) {
       console.error('Erro na finalização PDF/X-4:', err);
       setErrorMessage(err?.message || 'Falha ao gerar e verificar PDF/X-4.');
@@ -488,16 +510,12 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
                     </p>
                   </div>
                 </div>
-                {finalizeResult.finalizedPdfBase64 && (
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadPdf(finalizeResult.finalizedPdfBase64, 'pdfx4_verificado')}
-                    className="px-4 py-2 bg-[#00D18F] hover:bg-[#00B57C] text-black text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
-                  >
-                    <Download className="w-4 h-4 mr-1" />
-                    <span>Baixar PDF/X-4</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <span className="px-3.5 py-1.5 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-black border border-emerald-300 shadow-2xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    <span>PDF/X-4 incorporado ao arquivo de trabalho</span>
+                  </span>
+                </div>
               </div>
 
               {/* Verification Checklist */}

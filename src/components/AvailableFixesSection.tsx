@@ -11,8 +11,8 @@ interface AvailableFixesSectionProps {
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
   originalFile?: File | Blob | Uint8Array | ArrayBuffer | null;
-  appliedCorrections?: Array<{ id: string; label: string; appliedAt: number }>;
-  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean) => void;
+  appliedCorrections?: Array<{ id: string; label: string; appliedAt: number; details?: { before?: string; after?: string; summary?: string } }>;
+  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   isFixingInProgress?: boolean;
   pdfxVerifiedState?: 'not_verified' | 'verified' | 'needs_revalidation';
   onAnalysisUpdated?: (updated: PreflightAnalysis) => void;
