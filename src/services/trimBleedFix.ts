@@ -86,10 +86,28 @@ export function checkTrimBleedEligibility(
     };
   }
 
+  const pages = doc.pages || [];
+  if (pages.length > 1) {
+    const firstPage = pages[0];
+    const differingPages = pages.filter(
+      (p) =>
+        Math.abs(p.widthMm - firstPage.widthMm) > 0.8 ||
+        Math.abs(p.heightMm - firstPage.heightMm) > 0.8
+    );
+    if (differingPages.length > 0) {
+      const pageDetails = pages.map((p) => `Pág. ${p.page} = ${p.widthMm.toFixed(1)}×${p.heightMm.toFixed(1)} mm`).join(', ');
+      return {
+        eligible: false,
+        pages: [],
+        globalReason: `Documento contém páginas com dimensões heterogêneas (${pageDetails}). O perfil "${profile.name}" requer páginas uniformes.`,
+      };
+    }
+  }
+
   const pageEligibilities: TrimBleedPageEligibility[] = [];
   let allEligible = true;
 
-  for (const page of doc.pages || []) {
+  for (const page of pages) {
     const mb = page.mediaBox;
     const mediaWidthMm = mb?.widthMm || 0;
     const mediaHeightMm = mb?.heightMm || 0;

@@ -276,9 +276,63 @@ export function evaluatePdfx4Eligibility(
   }
 
   // -------------------------------------------------------------
-  // Check E: PDFX_TRIMBOX
+  // Check E0: PDFX_PAGE_SIZE_UNIFORMITY
   // -------------------------------------------------------------
   const pages = document.pages || [];
+  let isUniform = true;
+  if (pages.length > 1) {
+    const firstP = pages[0];
+    const diff = pages.filter(
+      (p) =>
+        Math.abs(p.widthMm - firstP.widthMm) > 0.8 ||
+        Math.abs(p.heightMm - firstP.heightMm) > 0.8
+    );
+    if (diff.length > 0) {
+      isUniform = false;
+    }
+  }
+
+  if (pages.length > 1 && !isUniform) {
+    const pageDetails = pages.map((p) => `Pág. ${p.page} = ${p.widthMm.toFixed(1)}×${p.heightMm.toFixed(1)} mm`).join(', ');
+    checks.push({
+      id: 'PDFX_PAGE_SIZE_UNIFORMITY',
+      title: 'Uniformidade Dimensional das Páginas',
+      category: 'geometry',
+      status: 'manual_required',
+      reasonCode: 'PDFX_HETEROGENEOUS_PAGE_SIZES',
+      message: `O documento contém páginas com dimensões diferentes (${pageDetails}). Separe as peças ou utilize um perfil que permita explicitamente páginas heterogêneas.`,
+      fixType: 'manual',
+      details: { pageDetails },
+    });
+    blockers.push({
+      code: 'PDFX_HETEROGENEOUS_PAGE_SIZES',
+      title: 'Dimensões Heterogêneas entre Páginas',
+      reason: `O perfil de produção "${profile.name}" requer dimensões consistentes em todas as páginas do lote. Páginas detectadas: ${pageDetails}.`,
+      affectedObjects: pages.map((p) => `Página ${p.page} (${p.widthMm.toFixed(1)}×${p.heightMm.toFixed(1)} mm)`),
+    });
+    fixPlan.push({
+      code: 'PDFX_HETEROGENEOUS_PAGE_SIZES',
+      title: 'Separação de Peças Heterogêneas',
+      status: 'manual_required',
+      fixType: 'manual',
+      description: `Separar as páginas (${pageDetails}) em arquivos PDF individuais para cada formato no software de origem.`,
+    });
+  } else {
+    checks.push({
+      id: 'PDFX_PAGE_SIZE_UNIFORMITY',
+      title: 'Uniformidade Dimensional das Páginas',
+      category: 'geometry',
+      status: 'passed',
+      message: pages.length > 1
+        ? `Todas as ${pages.length} páginas possuem dimensões uniformes (${pages[0]?.widthMm.toFixed(1)} × ${pages[0]?.heightMm.toFixed(1)} mm).`
+        : 'Documento de página única.',
+      fixType: 'none',
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Check E: PDFX_TRIMBOX
+  // -------------------------------------------------------------
   const pagesWithoutTrim = pages.filter((p) => !p.trimBox || p.trimBox.status !== 'explicit' || p.trimBox.widthPt <= 0);
 
   if (pagesWithoutTrim.length > 0) {

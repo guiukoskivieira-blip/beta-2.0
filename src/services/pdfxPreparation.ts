@@ -151,6 +151,19 @@ export async function preparePdfForPdfx4(
     };
   }
 
+  const geomCheck = currentEligibility.checks.find((c) => c.id === 'PDFX_PAGE_SIZE_UNIFORMITY');
+  if (geomCheck?.status === 'manual_required' || geomCheck?.status === 'blocked') {
+    return {
+      success: false,
+      status: 'manual_required',
+      steps: [],
+      originalSha256,
+      eligibleAfterPreparation: currentEligibility,
+      verifiedPdfX: false,
+      summaryMessage: `Documento bloqueado para preparação PDF/X-4: ${geomCheck.message}`,
+    };
+  }
+
   // -------------------------------------------------------------
   // Step 1: RGB -> CMYK Conversion
   // -------------------------------------------------------------

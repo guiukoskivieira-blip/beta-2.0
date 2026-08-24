@@ -376,3 +376,35 @@ test('7. QA 08: Transparência viva preservada, estrutura xref íntegra e sem ne
   }
 });
 
+test('8. QA 09: Documento com páginas heterogêneas (A4 e 90x50) é bloqueado na preparação e na finalização direta', async () => {
+  const doc = await PDFDocument.create();
+  // Page 1: A4
+  doc.addPage([(210 * 72) / 25.4, (297 * 72) / 25.4]);
+  // Page 2: 90x50 mm
+  doc.addPage([(90 * 72) / 25.4, (50 * 72) / 25.4]);
+
+  const pdfBytes = await doc.save({ useObjectStreams: false });
+
+  // 1. Preparation must be blocked with manual_required
+  const prep = await preparePdfForPdfx4(pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(prep.success, false);
+  assert.equal(prep.status, 'manual_required');
+  assert.equal(prep.verifiedPdfX, false);
+  const geomStep = prep.eligibleAfterPreparation.checks.find((c) => c.id === 'PDFX_PAGE_SIZE_UNIFORMITY');
+  assert.equal(geomStep?.status, 'manual_required');
+  assert.equal(geomStep?.reasonCode, 'PDFX_HETEROGENEOUS_PAGE_SIZES');
+
+  // 2. Direct finalization must also be blocked
+  const fin = await finalizePdfx4Document(pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(fin.success, false);
+  assert.equal(fin.verifiedPdfX, false);
+  assert.ok(fin.failures.some((f) => f.includes('PDFX_HETEROGENEOUS_PAGE_SIZES')));
+});
+
+

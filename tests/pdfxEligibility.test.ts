@@ -518,4 +518,93 @@ test('15. QA 06 Regression: Fontes Base14 não incorporadas usadas no conteúdo 
   assert.ok(blocker);
 });
 
+test('16. QA 09: Multipage com páginas heterogêneas (A4 + 90x50) bloqueia elegibilidade PDF/X-4 com manual_required', () => {
+  const doc = createMockDoc();
+  doc.pageCount = 2;
+  doc.pages = [
+    {
+      page: 1,
+      mediaBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      trimBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      bleedBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      cropBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      widthPt: 595.28,
+      heightPt: 841.89,
+      widthMm: 210.0,
+      heightMm: 297.0,
+      hasTransparency: false,
+    },
+    {
+      page: 2,
+      mediaBox: { xPt: 0, yPt: 0, widthPt: 255.12, heightPt: 141.73, widthMm: 90.0, heightMm: 50.0, status: 'explicit' },
+      trimBox: { xPt: 0, yPt: 0, widthPt: 255.12, heightPt: 141.73, widthMm: 90.0, heightMm: 50.0, status: 'explicit' },
+      bleedBox: { xPt: 0, yPt: 0, widthPt: 255.12, heightPt: 141.73, widthMm: 90.0, heightMm: 50.0, status: 'explicit' },
+      cropBox: { xPt: 0, yPt: 0, widthPt: 255.12, heightPt: 141.73, widthMm: 90.0, heightMm: 50.0, status: 'explicit' },
+      widthPt: 255.12,
+      heightPt: 141.73,
+      widthMm: 90.0,
+      heightMm: 50.0,
+      hasTransparency: false,
+    },
+  ];
+
+  const res = evaluatePdfx4Eligibility(doc, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    ruleResults: mockApprovedRules,
+  });
+
+  assert.equal(res.status, 'manual_required');
+  assert.equal(res.eligible, false);
+  assert.equal(res.verifiedPdfX, false);
+
+  const geomCheck = res.checks.find((c) => c.id === 'PDFX_PAGE_SIZE_UNIFORMITY');
+  assert.equal(geomCheck?.status, 'manual_required');
+  assert.equal(geomCheck?.reasonCode, 'PDFX_HETEROGENEOUS_PAGE_SIZES');
+  assert.ok(geomCheck?.message.includes('210.0×297.0'));
+  assert.ok(geomCheck?.message.includes('90.0×50.0'));
+
+  const blocker = res.blockers.find((b) => b.code === 'PDFX_HETEROGENEOUS_PAGE_SIZES');
+  assert.ok(blocker);
+});
+
+test('17. QA 09: Multipage com páginas uniformes (ambas A4) aprova PDFX_PAGE_SIZE_UNIFORMITY', () => {
+  const doc = createMockDoc();
+  doc.pageCount = 2;
+  doc.pages = [
+    {
+      page: 1,
+      mediaBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      trimBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      bleedBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      cropBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      widthPt: 595.28,
+      heightPt: 841.89,
+      widthMm: 210.0,
+      heightMm: 297.0,
+      hasTransparency: false,
+    },
+    {
+      page: 2,
+      mediaBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      trimBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      bleedBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      cropBox: { xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, widthMm: 210.0, heightMm: 297.0, status: 'explicit' },
+      widthPt: 595.28,
+      heightPt: 841.89,
+      widthMm: 210.0,
+      heightMm: 297.0,
+      hasTransparency: false,
+    },
+  ];
+
+  const res = evaluatePdfx4Eligibility(doc, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    ruleResults: mockApprovedRules,
+  });
+
+  const geomCheck = res.checks.find((c) => c.id === 'PDFX_PAGE_SIZE_UNIFORMITY');
+  assert.equal(geomCheck?.status, 'passed');
+});
+
+
 
