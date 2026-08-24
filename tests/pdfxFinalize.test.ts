@@ -190,3 +190,31 @@ test('6. Negativo: Documento criptografado com declaração PDF/X -> verifiedPdf
   assert.equal(verification.verified, false, 'verifiedPdfX deve ser false com criptografia');
   assert.ok(verification.failures.some((f) => f.includes('VERIFY_SECURITY')));
 });
+
+test('7. Regressão: Documento com perfil comercial genérico (sem expectedWidthMm) -> caixas inferidas dinamicamente -> verifiedPdfX = true', async () => {
+  const originalBytes = await createFixableTestPdf();
+
+  // Preparation using generic commercial profile
+  const prep = await preparePdfForPdfx4(originalBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    allowFallbackSrgb: true,
+  });
+
+  assert.equal(prep.success, true);
+  assert.ok(prep.pdfBytes);
+
+  // Re-extracted prepared document must have explicit TrimBox and BleedBox
+  const prepStruct = await extractPdfStructure(prep.pdfBytes);
+  assert.equal(prepStruct.pages[0].trimBox?.status, 'explicit');
+  assert.equal(prepStruct.pages[0].bleedBox?.status, 'explicit');
+
+  // Finalize & verify
+  const fin = await finalizePdfx4Document(prep.pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(fin.success, true);
+  assert.equal(fin.declaredPdfX, 'PDF/X-4');
+  assert.equal(fin.verifiedPdfX, true, 'verifiedPdfX deve ser true com caixas dinâmicas inferidas');
+  assert.equal(fin.failures.length, 0);
+});

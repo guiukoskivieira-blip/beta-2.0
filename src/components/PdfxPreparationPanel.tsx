@@ -473,6 +473,34 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
             </div>
           )}
 
+          {/* Phase 3 Finalization Failure Card (when verifiedPdfX === false) */}
+          {finalizeResult && !finalizeResult.verifiedPdfX && (
+            <div className="p-4 rounded-xl bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 space-y-3 shadow-lg">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#FF4D4D]/20 flex items-center justify-center text-[#FF4D4D] shrink-0">
+                  <XCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">PDF/X-4 não pôde ser verificado</h4>
+                  <p className="text-xs text-[#FF4D4D]">
+                    A declaração foi gravada, porém a reanálise da estrutura serializada identificou inconformidades:
+                  </p>
+                </div>
+              </div>
+
+              {finalizeResult.failures && finalizeResult.failures.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-[#FF4D4D]/20">
+                  {finalizeResult.failures.map((fail, idx) => (
+                    <div key={idx} className="flex items-start space-x-2 p-2.5 rounded-lg bg-[#0B1018]/80 text-xs border border-[#FF4D4D]/20">
+                      <AlertTriangle className="w-4 h-4 text-[#FF4D4D] shrink-0 mt-0.5" />
+                      <span className="text-white leading-relaxed">{fail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {errorMessage && (
             <div className="p-3 rounded-xl bg-[#FF4D4D]/10 border border-[#FF4D4D]/30 flex items-center space-x-2 text-xs text-[#FF4D4D]">
               <XCircle className="w-4 h-4 shrink-0" />

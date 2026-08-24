@@ -86,23 +86,16 @@ export function checkTrimBleedEligibility(
     };
   }
 
-  if (!profile.expectedWidthMm || !profile.expectedHeightMm) {
-    return {
-      eligible: false,
-      pages: [],
-      globalReason: 'As dimensões finais esperadas (formato) não estão definidas no perfil. Não é possível definir TrimBox deterministicamente.',
-    };
-  }
-
-  const expectedW = profile.expectedWidthMm;
-  const expectedH = profile.expectedHeightMm;
   const pageEligibilities: TrimBleedPageEligibility[] = [];
   let allEligible = true;
 
   for (const page of doc.pages || []) {
     const mb = page.mediaBox;
-    const mediaWidthMm = mb.widthMm;
-    const mediaHeightMm = mb.heightMm;
+    const mediaWidthMm = mb?.widthMm || 0;
+    const mediaHeightMm = mb?.heightMm || 0;
+
+    const expectedW = profile.expectedWidthMm || (page.trimBox?.status === 'explicit' && page.trimBox.widthMm > 0 ? page.trimBox.widthMm : (mediaWidthMm > requiredBleedMm * 2 ? mediaWidthMm - requiredBleedMm * 2 : mediaWidthMm));
+    const expectedH = profile.expectedHeightMm || (page.trimBox?.status === 'explicit' && page.trimBox.heightMm > 0 ? page.trimBox.heightMm : (mediaHeightMm > requiredBleedMm * 2 ? mediaHeightMm - requiredBleedMm * 2 : mediaHeightMm));
 
     // The MediaBox must contain enough area beyond the trim size for bleed on all sides
     const minMediaWidthMm = expectedW + 2 * requiredBleedMm;
