@@ -757,265 +757,210 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     };
 
     if (resources instanceof PDFDict) {
-      // Check XObjects (Images and Forms)
-      const xObjects = resources.get(PDFName.of('XObject'));
-      if (xObjects instanceof PDFDict) {
-        const entries = xObjects.entries();
+      // Check XObjects (Images and Forms recursively)
+      const rawXObjects = resources.get(PDFName.of('XObject'));
+      const xObjects = rawXObjects ? pdfDoc.context.lookup(rawXObjects) : undefined;
+
+      const processXObjectsTree = (
+        xObjectsRefOrDict: any,
+        parentCtm: [number, number, number, number, number, number] | undefined,
+        pathPrefix = '',
+        visitedRefs = new Set<string>(),
+        depth = 0,
+        parentPlacements?: Map<string, ImagePlacement>
+      ) => {
+        if (depth > 20) return;
+        const xObjectsDict = pdfDoc.context.lookup(xObjectsRefOrDict);
+        if (!(xObjectsDict instanceof PDFDict)) return;
+
+        const entries = xObjectsDict.entries();
         for (const [nameKey, ref] of entries) {
+          const refTag = ref instanceof PDFRef ? ref.tag : undefined;
+          if (refTag && visitedRefs.has(refTag)) continue;
+          const currentVisited = new Set(visitedRefs);
+          if (refTag) currentVisited.add(refTag);
+
           const xobj = pdfDoc.context.lookup(ref);
-          if (xobj instanceof PDFStream || xobj instanceof PDFRawStream || (xobj as any)?.dict) {
-            const dict = (xobj as any).dict || xobj;
-            const subtype = dict.get(PDFName.of('Subtype'));
-            const subtypeStr = subtype?.toString();
+          if (!xobj) continue;
+          const dict: PDFDict = (xobj as any).dict || (xobj instanceof PDFDict ? xobj : null);
+          if (!dict) continue;
 
-            if (subtypeStr === '/Image') {
-              const widthPx = dict.get(PDFName.of('Width'))?.asNumber?.() || 100;
-              const heightPx = dict.get(PDFName.of('Height'))?.asNumber?.() || 100;
-              const bitsPerComponent = dict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+          const rawName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
+          const currentPath = pathPrefix ? `${pathPrefix}/${rawName}` : rawName;
+          const subtype = dict.get(PDFName.of('Subtype'))?.toString();
 
-              let filterVal = 'None';
-              const filterObj = dict.get(PDFName.of('Filter'));
-              if (filterObj instanceof PDFName) {
-                filterVal = filterObj.toString().replace(/^\//, '');
-              } else if (filterObj instanceof PDFArray) {
-                const fList: string[] = [];
-                for (let fi = 0; fi < filterObj.size(); fi++) {
-                  const fn = filterObj.get(fi)?.toString()?.replace(/^\//, '');
-                  if (fn) fList.push(fn);
+          if (subtype === '/Image') {
+            const widthPx = dict.get(PDFName.of('Width'))?.asNumber?.() || 100;
+            const heightPx = dict.get(PDFName.of('Height'))?.asNumber?.() || 100;
+            const bitsPerComponent = dict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
+
+            let filterVal = 'None';
+            const filterObj = dict.get(PDFName.of('Filter'));
+            if (filterObj instanceof PDFName) {
+              filterVal = filterObj.toString().replace(/^\//, '');
+            } else if (filterObj instanceof PDFArray) {
+              const fList: string[] = [];
+              for (let fi = 0; fi < filterObj.size(); fi++) {
+                const fn = filterObj.get(fi)?.toString()?.replace(/^\//, '');
+                if (fn) fList.push(fn);
+              }
+              filterVal = fList.join('+') || 'None';
+            } else if (filterObj) {
+              filterVal = filterObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
+            }
+
+            let colorSpace = 'DeviceRGB';
+            const csObj = dict.get(PDFName.of('ColorSpace'));
+            if (csObj instanceof PDFName) {
+              colorSpace = csObj.toString().replace(/^\//, '');
+            } else if (csObj instanceof PDFArray) {
+              const first = csObj.get(0)?.toString();
+              if (first?.includes('ICCBased')) {
+                const iccRef = csObj.get(1);
+                const iccStream = iccRef ? pdfDoc.context.lookup(iccRef) : null;
+                const streamDict: any = (iccStream as any)?.dict || iccStream;
+                const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
+                const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
+                if (n === 4 || alt?.includes('CMYK')) {
+                  colorSpace = 'ICCBased CMYK';
+                } else if (n === 1 || alt?.includes('Gray')) {
+                  colorSpace = 'ICCBased Gray';
+                } else {
+                  colorSpace = 'ICCBased RGB';
                 }
-                filterVal = fList.join('+') || 'None';
-              } else if (filterObj) {
-                filterVal = filterObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
+              } else if (first?.includes('DeviceCMYK')) {
+                colorSpace = 'DeviceCMYK';
+              } else if (first?.includes('DeviceGray')) {
+                colorSpace = 'DeviceGray';
+              } else if (first?.includes('Separation') || first?.includes('DeviceN')) {
+                colorSpace = 'Spot';
+              }
+            }
+
+            // Placement resolution
+            const placement = parentPlacements?.get(rawName) || (depth === 0 ? imagePlacements.get(rawName) : undefined);
+            let imgCtm: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+            let appliedWidthPt = 0;
+            let appliedHeightPt = 0;
+
+            if (parentCtm) {
+              if (placement) {
+                imgCtm = multiplyAffine(parentCtm, placement.ctm);
+                appliedWidthPt = Math.sqrt(imgCtm[0] * imgCtm[0] + imgCtm[1] * imgCtm[1]);
+                appliedHeightPt = Math.sqrt(imgCtm[2] * imgCtm[2] + imgCtm[3] * imgCtm[3]);
+              } else {
+                imgCtm = parentCtm;
+                appliedWidthPt = Math.sqrt(imgCtm[0] * imgCtm[0] + imgCtm[1] * imgCtm[1]);
+                appliedHeightPt = Math.sqrt(imgCtm[2] * imgCtm[2] + imgCtm[3] * imgCtm[3]);
+              }
+            } else if (placement) {
+              imgCtm = placement.ctm;
+              appliedWidthPt = placement.appliedWidthPt;
+              appliedHeightPt = placement.appliedHeightPt;
+            }
+
+            const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
+            const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
+            const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
+            const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
+            const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
+            const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
+
+            imageOccurrences.push({
+              id: currentPath || `img_${pageNum}_${imageOccurrences.length + 1}`,
+              page: pageNum,
+              name: currentPath,
+              widthPx,
+              heightPx,
+              bitsPerComponent,
+              filter: filterVal,
+              displayWidthMm,
+              displayHeightMm,
+              effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
+              effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
+              colorSpace,
+              appliedWidthPt,
+              appliedHeightPt,
+              xPt: imgCtm[4],
+              yPt: imgCtm[5],
+              ctm: imgCtm,
+            });
+
+            if (colorSpace.includes('RGB')) {
+              hasGlobalRgb = true;
+              detectedFamilies.add('DeviceRGB');
+            } else if (colorSpace.includes('CMYK')) {
+              hasGlobalCmyk = true;
+              detectedFamilies.add('DeviceCMYK');
+            } else if (colorSpace.includes('Spot')) {
+              hasGlobalSpot = true;
+              detectedFamilies.add('Spot');
+            }
+          } else if (subtype === '/Form') {
+            const placement = parentPlacements?.get(rawName) || (depth === 0 ? imagePlacements.get(rawName) : undefined);
+            const formMatrixObj = dict.get(PDFName.of('Matrix'));
+            let formMatrix: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+            if (formMatrixObj instanceof PDFArray && formMatrixObj.size() >= 6) {
+              formMatrix = [
+                formMatrixObj.get(0)?.asNumber?.() ?? 1,
+                formMatrixObj.get(1)?.asNumber?.() ?? 0,
+                formMatrixObj.get(2)?.asNumber?.() ?? 0,
+                formMatrixObj.get(3)?.asNumber?.() ?? 1,
+                formMatrixObj.get(4)?.asNumber?.() ?? 0,
+                formMatrixObj.get(5)?.asNumber?.() ?? 0,
+              ];
+            }
+
+            let formBytes: Uint8Array | undefined;
+            try {
+              formBytes = decodeStream(xobj);
+            } catch {}
+
+            if (formBytes) {
+              const formVectorAnalysis = parseContentStreamVectorColors(
+                formBytes,
+                dict.get(PDFName.of('Resources')),
+                pdfDoc.context
+              );
+              if (formVectorAnalysis.hasRgbVector) pageHasRgbVector = true;
+              if (formVectorAnalysis.hasCmykVector) pageHasCmykVector = true;
+              if (formVectorAnalysis.hasSpotVector) pageHasSpotVector = true;
+              if (formVectorAnalysis.hasGrayVector) pageHasGrayVector = true;
+            }
+
+            let formInnerPlacements = new Map<string, ImagePlacement>();
+            if (formBytes) {
+              formInnerPlacements = parseImagePlacements(formBytes);
+            }
+
+            const baseCtm = parentCtm || [1, 0, 0, 1, 0, 0];
+            const placedCtm = placement ? multiplyAffine(baseCtm, placement.ctm) : baseCtm;
+            const effectiveFormCtm = multiplyAffine(placedCtm, formMatrix);
+
+            const rawFormRes = dict.get(PDFName.of('Resources'));
+            const formResDict = rawFormRes ? pdfDoc.context.lookup(rawFormRes) : undefined;
+            if (formResDict instanceof PDFDict) {
+              const formFonts = formResDict.get(PDFName.of('Font'));
+              if (formFonts) {
+                processFontsDict(formFonts, formBytes);
               }
 
-              let colorSpace = 'DeviceRGB';
-              const csObj = dict.get(PDFName.of('ColorSpace'));
-              if (csObj instanceof PDFName) {
-                colorSpace = csObj.toString().replace(/^\//, '');
-              } else if (csObj instanceof PDFArray) {
-                const first = csObj.get(0)?.toString();
-                if (first?.includes('ICCBased')) {
-                  const iccRef = csObj.get(1);
-                  const iccStream = iccRef ? pdfDoc.context.lookup(iccRef) : null;
-                  const streamDict: any = (iccStream as any)?.dict || iccStream;
-                  const n = streamDict?.get?.(PDFName.of('N'))?.asNumber?.() || 3;
-                  const alt = streamDict?.get?.(PDFName.of('Alternate'))?.toString()?.replace(/^\//, '');
-                  if (n === 4 || alt?.includes('CMYK')) {
-                    colorSpace = 'ICCBased CMYK';
-                  } else if (n === 1 || alt?.includes('Gray')) {
-                    colorSpace = 'ICCBased Gray';
-                  } else {
-                    colorSpace = 'ICCBased RGB';
-                  }
-                } else if (first?.includes('DeviceCMYK')) {
-                  colorSpace = 'DeviceCMYK';
-                } else if (first?.includes('DeviceGray')) {
-                  colorSpace = 'DeviceGray';
-                } else if (first?.includes('Separation') || first?.includes('DeviceN')) {
-                  colorSpace = 'Spot';
-                }
-              }
-
-              const rawImgName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
-              const placement = imagePlacements.get(rawImgName);
-
-              const appliedWidthPt = placement?.appliedWidthPt;
-              const appliedHeightPt = placement?.appliedHeightPt;
-              const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
-              const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
-
-              const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
-              const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
-              const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
-              const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
-
-              imageOccurrences.push({
-                id: `img_${pageNum}_${imageOccurrences.length + 1}`,
-                page: pageNum,
-                name: rawImgName,
-                widthPx,
-                heightPx,
-                bitsPerComponent,
-                filter: filterVal,
-                displayWidthMm,
-                displayHeightMm,
-                effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
-                effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
-                colorSpace,
-                appliedWidthPt,
-                appliedHeightPt,
-                xPt: placement?.xPt,
-                yPt: placement?.yPt,
-                ctm: placement?.ctm,
-              });
-
-              if (colorSpace.includes('RGB')) {
-                hasGlobalRgb = true;
-                detectedFamilies.add('DeviceRGB');
-              } else if (colorSpace.includes('CMYK')) {
-                hasGlobalCmyk = true;
-                detectedFamilies.add('DeviceCMYK');
-              } else if (colorSpace.includes('Spot')) {
-                hasGlobalSpot = true;
-                detectedFamilies.add('Spot');
-              }
-            } else if (subtypeStr === '/Form') {
-              const formName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
-              const formPlacement = imagePlacements.get(formName);
-              const formMatrixObj = dict.get(PDFName.of('Matrix'));
-              let formMatrix = [1, 0, 0, 1, 0, 0];
-              if (formMatrixObj instanceof PDFArray && formMatrixObj.size() >= 6) {
-                formMatrix = [
-                  formMatrixObj.get(0)?.asNumber?.() ?? 1,
-                  formMatrixObj.get(1)?.asNumber?.() ?? 0,
-                  formMatrixObj.get(2)?.asNumber?.() ?? 0,
-                  formMatrixObj.get(3)?.asNumber?.() ?? 1,
-                  formMatrixObj.get(4)?.asNumber?.() ?? 0,
-                  formMatrixObj.get(5)?.asNumber?.() ?? 0,
-                ];
-              }
-
-              const formBboxObj = dict.get(PDFName.of('BBox'));
-              let formBboxW = 0;
-              let formBboxH = 0;
-              if (formBboxObj instanceof PDFArray && formBboxObj.size() >= 4) {
-                const bx0 = formBboxObj.get(0)?.asNumber?.() ?? 0;
-                const by0 = formBboxObj.get(1)?.asNumber?.() ?? 0;
-                const bx1 = formBboxObj.get(2)?.asNumber?.() ?? 0;
-                const by1 = formBboxObj.get(3)?.asNumber?.() ?? 0;
-                formBboxW = Math.abs(bx1 - bx0);
-                formBboxH = Math.abs(by1 - by0);
-              }
-
-              let formBytes: Uint8Array | undefined;
-              try {
-                formBytes = decodeStream(xobj);
-              } catch {}
-
-              if (formBytes) {
-                const formVectorAnalysis = parseContentStreamVectorColors(
-                  formBytes,
-                  dict.get(PDFName.of('Resources')),
-                  pdfDoc.context
-                );
-                if (formVectorAnalysis.hasRgbVector) pageHasRgbVector = true;
-                if (formVectorAnalysis.hasCmykVector) pageHasCmykVector = true;
-                if (formVectorAnalysis.hasSpotVector) pageHasSpotVector = true;
-                if (formVectorAnalysis.hasGrayVector) pageHasGrayVector = true;
-              }
-
-              const formRes = dict.get(PDFName.of('Resources'));
-              const formResDict = formRes ? pdfDoc.context.lookup(formRes) : undefined;
-              if (formResDict instanceof PDFDict) {
-                // Check fonts inside Form XObject
-                const formFonts = formResDict.get(PDFName.of('Font'));
-                if (formFonts) {
-                  processFontsDict(formFonts, formBytes);
-                }
-
-                const formXObjs = formResDict.get(PDFName.of('XObject'));
-                const formXObjsDict = formXObjs ? pdfDoc.context.lookup(formXObjs) : undefined;
-                if (formXObjsDict instanceof PDFDict) {
-                  let innerPlacements = new Map<string, ImagePlacement>();
-                  if (formBytes) {
-                    innerPlacements = parseImagePlacements(formBytes);
-                  }
-
-                  const innerEntries = formXObjsDict.entries();
-                  for (const [innerNameKey, innerRef] of innerEntries) {
-                    const innerXobj = pdfDoc.context.lookup(innerRef);
-                    const innerDict = (innerXobj as any)?.dict || innerXobj;
-                    const innerSubtype = innerDict?.get?.(PDFName.of('Subtype'))?.toString();
-
-                    if (innerSubtype === '/Image') {
-                      const innerName = (typeof innerNameKey.asString === 'function' ? innerNameKey.asString() : (innerNameKey.value || String(innerNameKey))).replace(/^\//, '');
-                      const compositeName = `${formName}/${innerName}`;
-                      const widthPx = innerDict.get(PDFName.of('Width'))?.asNumber?.() || 100;
-                      const heightPx = innerDict.get(PDFName.of('Height'))?.asNumber?.() || 100;
-                      const bitsPerComponent = innerDict.get(PDFName.of('BitsPerComponent'))?.asNumber?.() || 8;
-
-                      let filterVal = 'None';
-                      const filterObj = innerDict.get(PDFName.of('Filter'));
-                      if (filterObj instanceof PDFName) {
-                        filterVal = filterObj.toString().replace(/^\//, '');
-                      } else if (filterObj instanceof PDFArray) {
-                        const fList: string[] = [];
-                        for (let fi = 0; fi < filterObj.size(); fi++) {
-                          const fn = filterObj.get(fi)?.toString()?.replace(/^\//, '');
-                          if (fn) fList.push(fn);
-                        }
-                        filterVal = fList.join('+') || 'None';
-                      } else if (filterObj) {
-                        filterVal = filterObj.toString().replace(/^\[|\]$/g, '').replace(/\//g, '').trim().replace(/\s+/g, '+');
-                      }
-
-                      let colorSpace = 'DeviceRGB';
-                      const csObj = innerDict.get(PDFName.of('ColorSpace'));
-                      if (csObj instanceof PDFName) {
-                        colorSpace = csObj.toString().replace(/^\//, '');
-                      } else if (csObj instanceof PDFArray) {
-                        const first = csObj.get(0)?.toString();
-                        if (first?.includes('DeviceCMYK')) colorSpace = 'DeviceCMYK';
-                        else if (first?.includes('DeviceGray')) colorSpace = 'DeviceGray';
-                        else if (first?.includes('Separation') || first?.includes('DeviceN')) colorSpace = 'Spot';
-                        else colorSpace = 'DeviceRGB';
-                      }
-
-                      const innerPlacement = innerPlacements.get(innerName);
-                      let appliedWidthPt = innerPlacement?.appliedWidthPt;
-                      let appliedHeightPt = innerPlacement?.appliedHeightPt;
-                      let imgCtm = innerPlacement?.ctm || [1, 0, 0, 1, 0, 0];
-
-                      const pageFormCtm = formPlacement?.ctm || [1, 0, 0, 1, 0, 0];
-                      const effectiveFormCtm = multiplyAffine(pageFormCtm, formMatrix);
-
-                      if (innerPlacement) {
-                        imgCtm = multiplyAffine(effectiveFormCtm, innerPlacement.ctm);
-                        appliedWidthPt = Math.sqrt(imgCtm[0] * imgCtm[0] + imgCtm[1] * imgCtm[1]);
-                        appliedHeightPt = Math.sqrt(imgCtm[2] * imgCtm[2] + imgCtm[3] * imgCtm[3]);
-                      } else {
-                        appliedWidthPt = formPlacement?.appliedWidthPt || (formBboxW > 0 ? formBboxW : widthPt);
-                        appliedHeightPt = formPlacement?.appliedHeightPt || (formBboxH > 0 ? formBboxH : heightPt);
-                        imgCtm = effectiveFormCtm;
-                      }
-
-                      const dispWidthPt = appliedWidthPt && appliedWidthPt > 0 ? appliedWidthPt : widthPt;
-                      const dispHeightPt = appliedHeightPt && appliedHeightPt > 0 ? appliedHeightPt : heightPt;
-                      const displayWidthMm = Number((dispWidthPt * PT_TO_MM).toFixed(2));
-                      const displayHeightMm = Number((dispHeightPt * PT_TO_MM).toFixed(2));
-                      const effectiveDpiX = Number(((widthPx / (dispWidthPt / 72.0))).toFixed(1));
-                      const effectiveDpiY = Number(((heightPx / (dispHeightPt / 72.0))).toFixed(1));
-
-                      imageOccurrences.push({
-                        id: compositeName || `img_${pageNum}_${imageOccurrences.length + 1}`,
-                        page: pageNum,
-                        name: compositeName,
-                        widthPx,
-                        heightPx,
-                        bitsPerComponent,
-                        filter: filterVal,
-                        displayWidthMm,
-                        displayHeightMm,
-                        effectiveDpiX: effectiveDpiX > 0 ? effectiveDpiX : 300,
-                        effectiveDpiY: effectiveDpiY > 0 ? effectiveDpiY : 300,
-                        colorSpace,
-                        appliedWidthPt,
-                        appliedHeightPt,
-                        xPt: imgCtm[4],
-                        yPt: imgCtm[5],
-                        ctm: imgCtm,
-                      });
-                    }
-                  }
-                }
+              const rawInnerXObjs = formResDict.get(PDFName.of('XObject'));
+              if (rawInnerXObjs) {
+                processXObjectsTree(rawInnerXObjs, effectiveFormCtm, currentPath, currentVisited, depth + 1, formInnerPlacements);
               }
             }
           }
         }
+      };
+
+      if (xObjects) {
+        processXObjectsTree(xObjects, undefined, '', new Set<string>(), 0, imagePlacements);
       }
 
       // Check Fonts
-      const fontsDict = resources.get(PDFName.of('Font'));
+      const rawFonts = resources.get(PDFName.of('Font'));
+      const fontsDict = rawFonts ? pdfDoc.context.lookup(rawFonts) : undefined;
       if (fontsDict) {
         processFontsDict(fontsDict);
       }

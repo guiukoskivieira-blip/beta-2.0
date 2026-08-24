@@ -774,6 +774,109 @@ test('QA 13 Caso F: RGB vetorial dentro de Form XObject -> hasRgbVector=true', a
 });
 
 // ============================================================================
+// QA 19: Form XObjects Aninhados em Múltiplos Níveis (Recursão Profunda & Ciclos)
+// ============================================================================
+
+test('QA 19 Caso A: Page -> Image (depth 0) detecta normalmente', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const imgStream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Image', Width: 100, Height: 100, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+  }) as any, new Uint8Array(100 * 100 * 3));
+  const imgRef = pdfDoc.context.register(imgStream);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Im0: imgRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('q 100 0 0 100 0 0 cm /Im0 Do Q', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pages[0].imageOccurrences.length, 1);
+  assert.equal(structure.pages[0].imageOccurrences[0].name, 'Im0');
+  assert.equal(structure.colorSummary.hasRgbRaster, true);
+});
+
+test('QA 19 Caso B: Page -> Form -> Image (depth 1) detecta com prefixo', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const imgStream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Image', Width: 100, Height: 100, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+  }) as any, new Uint8Array(100 * 100 * 3));
+  const imgRef = pdfDoc.context.register(imgStream);
+
+  const formStream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Resources: { XObject: { Im0: imgRef } },
+  }) as any, Buffer.from('q 100 0 0 100 0 0 cm /Im0 Do Q', 'utf-8'));
+  const formRef = pdfDoc.context.register(formStream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Fm1: formRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/Fm1 Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pages[0].imageOccurrences.length, 1);
+  assert.equal(structure.pages[0].imageOccurrences[0].name, 'Fm1/Im0');
+  assert.equal(structure.colorSummary.hasRgbRaster, true);
+});
+
+test('QA 19 Caso C & D: Page -> Form -> Form -> Form -> Image (depth 3) detecta recursivamente', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const imgStream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Image', Width: 200, Height: 200, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+  }) as any, new Uint8Array(200 * 200 * 3));
+  const imgRef = pdfDoc.context.register(imgStream);
+
+  // Fm1 contains Im0
+  const form1Stream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Resources: { XObject: { Im0: imgRef } },
+  }) as any, Buffer.from('/Im0 Do', 'utf-8'));
+  const form1Ref = pdfDoc.context.register(form1Stream);
+
+  // Fm2 contains Fm1
+  const form2Stream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Resources: { XObject: { Fm1: form1Ref } },
+  }) as any, Buffer.from('/Fm1 Do', 'utf-8'));
+  const form2Ref = pdfDoc.context.register(form2Stream);
+
+  // Fm3 contains Fm2
+  const form3Stream = PDFRawStream.of(pdfDoc.context.obj({
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100], Resources: { XObject: { Fm2: form2Ref } },
+  }) as any, Buffer.from('/Fm2 Do', 'utf-8'));
+  const form3Ref = pdfDoc.context.register(form3Stream);
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Fm3: form3Ref } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/Fm3 Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pages[0].imageOccurrences.length, 1);
+  assert.equal(structure.pages[0].imageOccurrences[0].name, 'Fm3/Fm2/Fm1/Im0');
+  assert.equal(structure.colorSummary.hasRgbRaster, true);
+});
+
+test('QA 19 Caso E: Form XObject com referência circular controlada não trava nem entra em loop infinito', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+
+  const formDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 100, 100],
+    Resources: {},
+  });
+  const formStream = PDFRawStream.of(formDict as any, Buffer.from('/Loop Do', 'utf-8'));
+  const formRef = pdfDoc.context.register(formStream);
+  (formDict as any).get(PDFName.of('Resources')).set(PDFName.of('XObject'), pdfDoc.context.obj({ Loop: formRef }));
+
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Loop: formRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('/Loop Do', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  // Must finish promptly without infinite recursion or stack overflow
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pageCount, 1);
+});
+
+// ============================================================================
 // RELATÓRIO
 // ============================================================================
 

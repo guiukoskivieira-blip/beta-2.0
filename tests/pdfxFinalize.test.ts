@@ -437,5 +437,72 @@ test('9. QA 13: Documento com RGB vetorial (rg/RG) bloqueia preparação e final
   assert.ok(fin.failures.some((f) => f.includes('PDFX_RGB_VECTOR_MANUAL_REQUIRED') || f.includes('RGB')));
 });
 
+test('10. QA 19: Form XObject aninhado em 2 níveis (Page -> Fm2 -> Fm1 -> Im0) é convertido na preparação e finaliza com verifiedPdfX=true', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([(210 * 72) / 25.4, (297 * 72) / 25.4]);
+
+  const rawRgb = new Uint8Array(600 * 400 * 3);
+  for (let i = 0; i < rawRgb.length; i += 3) {
+    rawRgb[i] = 200; rawRgb[i + 1] = 50; rawRgb[i + 2] = 50;
+  }
+  const deflated = pako.deflate(rawRgb);
+
+  const imgDict = doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 600,
+    Height: 400,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'FlateDecode',
+  });
+  const imgStream = PDFRawStream.of(imgDict as any, deflated);
+  const imgRef = doc.context.register(imgStream);
+
+  const form1Dict = doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: { XObject: { Im0: imgRef } },
+  });
+  const form1Stream = PDFRawStream.of(form1Dict as any, Buffer.from('q 144 0 0 96 0 0 cm /Im0 Do Q', 'utf-8'));
+  const form1Ref = doc.context.register(form1Stream);
+
+  const form2Dict = doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: { XObject: { Fm1: form1Ref } },
+  });
+  const form2Stream = PDFRawStream.of(form2Dict as any, Buffer.from('q 1 0 0 1 0 0 cm /Fm1 Do Q', 'utf-8'));
+  const form2Ref = doc.context.register(form2Stream);
+
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ XObject: { Fm2: form2Ref } }));
+  page.node.set(PDFName.of('Contents'), doc.context.register(PDFRawStream.of(doc.context.obj({}) as any, Buffer.from('q 1 0 0 1 50 50 cm /Fm2 Do Q', 'utf-8'))));
+
+  const origPdfBytes = await doc.save({ useObjectStreams: false });
+
+  // 1. Direct finalization without conversion must fail with RGB_OBJECTS_PRESENT
+  const forcedFin = await finalizePdfx4Document(origPdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+  assert.equal(forcedFin.success, false);
+  assert.equal(forcedFin.verifiedPdfX, false);
+
+  // 2. Preparation must succeed and convert depth 2 nested image
+  const prep = await preparePdfForPdfx4(origPdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+  assert.equal(prep.success, true);
+  assert.equal(prep.verifiedPdfX, true);
+
+  // 3. Inspect final prepared bytes
+  const reExtracted = await extractPdfStructure(prep.preparedPdfBytes!);
+  assert.equal(reExtracted.pages[0].imageOccurrences.length, 1);
+  assert.equal(reExtracted.pages[0].imageOccurrences[0].colorSpace, 'DeviceCMYK');
+  assert.equal(reExtracted.colorSummary.hasRgb, false);
+  assert.equal(reExtracted.colorSummary.hasRgbRaster, false);
+});
+
 
 

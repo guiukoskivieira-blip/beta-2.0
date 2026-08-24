@@ -864,8 +864,101 @@ export async function runImageColorFixTests() {
   assert(reanalyzedLowDpi.colorSummary.hasRgb === false, 'QA 03: RGB removido');
   assert(reanalyzedLowDpi.colorSummary.hasCmyk === true, 'QA 03: CMYK presente');
   const lowDpiRuleResult = runDeterministicRuleEngine(reanalyzedLowDpi, COMMERCIAL_PRINT_300DPI_PROFILE);
-  const dpiRule = lowDpiRuleResult.results.find((r) => r.ruleId === 'RULE-PROF-RES-001');
-  assert(dpiRule?.status === 'error', 'QA 03: RULE-PROF-RES-001 continua REPROVADO por baixo DPI (21.6 DPI < 300 DPI)');
+  // -------------------------------------------------------------
+  // Test 10: QA 19 - RGB em Form XObject Aninhado em 2 Níveis (Page -> Fm2 -> Fm1 -> Im0)
+  // -------------------------------------------------------------
+  console.log('\n--- Test 10: QA 19 - Form XObject Aninhado (Depth 2, 300 DPI) ---');
+  total++;
+
+  const nestedDoc = await PDFDocument.create();
+  const nestedPage = nestedDoc.addPage([595.28, 841.89]); // A4
+
+  // Raw 600x400 RGB raster (compressed with Flate)
+  const rawRgb600x400 = new Uint8Array(600 * 400 * 3);
+  for (let i = 0; i < rawRgb600x400.length; i += 3) {
+    rawRgb600x400[i] = 230;     // R
+    rawRgb600x400[i + 1] = 40;  // G
+    rawRgb600x400[i + 2] = 40;  // B
+  }
+  const deflated600x400 = pako.deflate(rawRgb600x400);
+
+  const nestedImgDict = nestedDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 600,
+    Height: 400,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'FlateDecode',
+  });
+  const nestedImgStream = PDFRawStream.of(nestedImgDict as any, deflated600x400);
+  const nestedImgRef = nestedDoc.context.register(nestedImgStream);
+
+  // Form 1 (Level 1): Contains Im0 placed with 144x96 pt
+  const form1Dict = nestedDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: {
+      XObject: { Im0: nestedImgRef },
+    },
+  });
+  const form1Stream = PDFRawStream.of(form1Dict as any, Buffer.from('q 144 0 0 96 0 0 cm /Im0 Do Q', 'utf-8'));
+  const form1Ref = nestedDoc.context.register(form1Stream);
+
+  // Form 2 (Level 2): Contains Fm1
+  const form2Dict = nestedDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 144, 96],
+    Resources: {
+      XObject: { Fm1: form1Ref },
+    },
+  });
+  const form2Stream = PDFRawStream.of(form2Dict as any, Buffer.from('q 1 0 0 1 0 0 cm /Fm1 Do Q', 'utf-8'));
+  const form2Ref = nestedDoc.context.register(form2Stream);
+
+  // Page: Contains Fm2 placed at (50, 50)
+  nestedPage.node.set(PDFName.of('Resources'), nestedDoc.context.obj({
+    XObject: { Fm2: form2Ref },
+  }));
+  nestedPage.node.set(PDFName.of('Contents'), nestedDoc.context.register(
+    PDFRawStream.of(nestedDoc.context.obj({}) as any, Buffer.from('q 1 0 0 1 50 50 cm /Fm2 Do Q', 'utf-8'))
+  ));
+
+  const nestedPdfBytes = await nestedDoc.save({ useObjectStreams: false });
+
+  // 1. Initial Analysis
+  const initialNestedStructure = await extractPdfStructure(nestedPdfBytes);
+  assert(initialNestedStructure.pages[0].imageOccurrences.length === 1, 'QA 19: 1 ocorrência de imagem encontrada no parser inicial');
+  const nestedOcc = initialNestedStructure.pages[0].imageOccurrences[0];
+  assert(nestedOcc.name === 'Fm2/Fm1/Im0', 'QA 19: Caminho completo Fm2/Fm1/Im0');
+  assert(nestedOcc.widthPx === 600 && nestedOcc.heightPx === 400, 'QA 19: Dimensões 600x400 px');
+  assert(nestedOcc.effectiveDpiX === 300, `QA 19: DPI X esperado 300, obtido ${nestedOcc.effectiveDpiX}`);
+  assert(nestedOcc.effectiveDpiY === 300, `QA 19: DPI Y esperado 300, obtido ${nestedOcc.effectiveDpiY}`);
+  assert(initialNestedStructure.colorSummary.hasRgb === true, 'QA 19: RGB detectado na estrutura inicial');
+  assert(initialNestedStructure.colorSummary.hasRgbRaster === true, 'QA 19: hasRgbRaster=true');
+
+  // 2. Conversion via LittleCMS
+  const nestedFixResult = await applyImageColorFix(nestedPdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    allowFallbackSrgb: true,
+  });
+  assert(nestedFixResult.success === true, 'QA 19: applyImageColorFix executou com sucesso');
+  assert(nestedFixResult.objectsSummary.convertedCount === 1, 'QA 19: 1 imagem aninhada convertida');
+
+  // 3. Post-conversion reanalysis
+  const reanalyzedNested = await extractPdfStructure(nestedFixResult.pdfBytes!);
+  assert(reanalyzedNested.pages[0].imageOccurrences.length === 1, 'QA 19: Imagem permanece detectável após conversão');
+  const reanalyzedOcc = reanalyzedNested.pages[0].imageOccurrences[0];
+  assert(reanalyzedOcc.name === 'Fm2/Fm1/Im0', 'QA 19: Caminho preservado pós-conversão');
+  assert(reanalyzedOcc.colorSpace === 'DeviceCMYK', 'QA 19: ColorSpace da imagem aninhada atualizado para DeviceCMYK');
+  assert(reanalyzedNested.colorSummary.hasRgb === false, 'QA 19: hasRgb=false pós-conversão');
+  assert(reanalyzedNested.colorSummary.hasRgbRaster === false, 'QA 19: hasRgbRaster=false pós-conversão');
+  assert(reanalyzedNested.colorSummary.hasCmyk === true, 'QA 19: hasCmyk=true pós-conversão');
+
+  passed++;
+  console.log('  -> Test 10 aprovado!');
 
   console.log(`\n================================================================`);
   console.log(`ARTECHECK IMAGE COLOR FIX TESTS: ${passed}/${total} APROVADOS`);

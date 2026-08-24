@@ -237,13 +237,29 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
   const pages = pdfDoc.getPages();
   pages.forEach((page, pageIdx) => {
     const pageNum = pageIdx + 1;
-    const resources = page.node.Resources();
+    let rawRes = page.node.get(PDFName.of('Resources'));
+    let resources = rawRes ? pdfDoc.context.lookup(rawRes) : undefined;
+    if (!(resources instanceof PDFDict)) {
+      let parent = page.node.Parent ? page.node.Parent() : undefined;
+      while (parent && !(resources instanceof PDFDict)) {
+        const parentRes = parent.get(PDFName.of('Resources'));
+        if (parentRes) {
+          resources = pdfDoc.context.lookup(parentRes);
+        }
+        parent = parent.Parent ? parent.Parent() : undefined;
+      }
+    }
     if (!(resources instanceof PDFDict)) return;
 
-    const processXObjects = (xObjectsDict: PDFDict, formPrefix = '') => {
+    const processXObjects = (xObjectsDict: PDFDict, formPrefix = '', visited = new Set<string>(), depth = 0) => {
+      if (depth > 20) return;
       const entries = xObjectsDict.entries();
       for (const [nameKey, ref] of entries) {
         if (!(ref instanceof PDFRef)) continue;
+        if (visited.has(ref.tag)) continue;
+        const currentVisited = new Set(visited);
+        currentVisited.add(ref.tag);
+
         const xobj = pdfDoc.context.lookup(ref);
         if (!xobj) continue;
 
@@ -252,12 +268,14 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
 
         const subtype = dict.get(PDFName.of('Subtype'));
         if (subtype?.toString() === '/Form') {
-          const formResources = dict.get(PDFName.of('Resources'));
+          const rawFormRes = dict.get(PDFName.of('Resources'));
+          const formResources = rawFormRes ? pdfDoc.context.lookup(rawFormRes) : undefined;
           if (formResources instanceof PDFDict) {
-            const innerXObj = formResources.get(PDFName.of('XObject'));
+            const rawInnerXObj = formResources.get(PDFName.of('XObject'));
+            const innerXObj = rawInnerXObj ? pdfDoc.context.lookup(rawInnerXObj) : undefined;
             if (innerXObj instanceof PDFDict) {
-              const rawName = typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey));
-              processXObjects(innerXObj, `${formPrefix}${rawName}/`);
+              const rawName = (typeof nameKey.asString === 'function' ? nameKey.asString() : (nameKey.value || String(nameKey))).replace(/^\//, '');
+              processXObjects(innerXObj, `${formPrefix}${rawName}/`, currentVisited, depth + 1);
             }
           }
           continue;
