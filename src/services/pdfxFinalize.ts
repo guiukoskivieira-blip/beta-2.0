@@ -12,7 +12,8 @@
  */
 
 import crypto from 'crypto';
-import { PDFDocument, PDFName, PDFString, PDFNumber, PDFRawStream, PDFDict } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFString, PDFNumber, PDFRawStream, PDFDict, PDFArray, PDFStream } from 'pdf-lib';
+import * as pako from 'pako';
 import type {
   PdfDocumentStructure,
   RuleEngineSummary,
@@ -72,6 +73,31 @@ function formatPdfDate(date: Date): string {
   return `D:${y}${m}${d}${h}${min}${s}Z`;
 }
 
+function decodeStream(stream: any): Uint8Array | null {
+  if (stream instanceof PDFRawStream) {
+    const dict = stream.dict;
+    const filter = dict.get(PDFName.of('Filter'));
+    const filterStr = filter?.toString() || '';
+    const rawBytes = stream.contents;
+    if (!rawBytes || rawBytes.length === 0) return null;
+    if (filterStr.includes('FlateDecode') || filterStr === '/FlateDecode') {
+      try { return pako.inflate(rawBytes); } catch { return null; }
+    }
+    return rawBytes;
+  }
+  if (stream instanceof PDFStream) {
+    const filter = stream.dict.get(PDFName.of('Filter'));
+    const filterStr = filter?.toString() || '';
+    const rawBytes = stream.getContents();
+    if (!rawBytes || rawBytes.length === 0) return null;
+    if (filterStr.includes('FlateDecode') || filterStr === '/FlateDecode') {
+      try { return pako.inflate(rawBytes); } catch { return null; }
+    }
+    return rawBytes;
+  }
+  return null;
+}
+
 function buildXmpMetadataPacket(meta: {
   title?: string;
   author?: string;
@@ -114,13 +140,140 @@ function buildXmpMetadataPacket(meta: {
 }
 
 /**
+ * Validates the serialized binary PDF structure and XRef table integrity without relying on tolerant recovery.
+ */
+export function verifySerializedPdfStructure(pdfBytes: Uint8Array): {
+  valid: boolean;
+  evidence: string;
+  error?: string;
+} {
+  const buf = Buffer.from(pdfBytes);
+  const fullStr = buf.toString('latin1');
+
+  // 1. Header check
+  if (!fullStr.startsWith('%PDF-')) {
+    return {
+      valid: false,
+      evidence: 'Cabeçalho %PDF- ausente no início do arquivo.',
+      error: 'INVALID_HEADER',
+    };
+  }
+
+  // 2. EOF check
+  const last1024 = fullStr.slice(-1024);
+  if (!/%%EOF\s*$/.test(last1024.trimEnd())) {
+    return {
+      valid: false,
+      evidence: 'Marcador %%EOF ausente ou corrompido no final do arquivo.',
+      error: 'INVALID_EOF',
+    };
+  }
+
+  // 3. startxref check
+  const startxrefMatch = /startxref\s+(\d+)\s+%%EOF/g.exec(last1024);
+  if (!startxrefMatch) {
+    return {
+      valid: false,
+      evidence: 'Ponteiro startxref ausente ou inválido.',
+      error: 'STARTXREF_MISSING',
+    };
+  }
+
+  const startxrefOffset = parseInt(startxrefMatch[1], 10);
+  if (isNaN(startxrefOffset) || startxrefOffset <= 0 || startxrefOffset >= buf.length) {
+    return {
+      valid: false,
+      evidence: `Ponteiro startxref (${startxrefOffset}) aponta para offset fora dos limites do arquivo (${buf.length} bytes).`,
+      error: 'STARTXREF_OUT_OF_BOUNDS',
+    };
+  }
+
+  // 4. Validate xref table and byte offsets of all objects
+  const xrefChunk = fullStr.slice(startxrefOffset);
+  if (!xrefChunk.startsWith('xref')) {
+    const isXrefStream = /^\d+\s+\d+\s+obj\s*<<\s*\/Type\s*\/XRef/.test(xrefChunk);
+    if (!isXrefStream) {
+      return {
+        valid: false,
+        evidence: `Offset ${startxrefOffset} não aponta para tabela xref nem stream de xref válido.`,
+        error: 'XREF_TABLE_MISSING',
+      };
+    }
+  } else {
+    // Parse traditional xref table subsections
+    const lines = xrefChunk.split(/\r?\n/);
+    let lineIdx = 1;
+    while (lineIdx < lines.length && lines[lineIdx].trim().length > 0 && lines[lineIdx].trim() !== 'trailer') {
+      const headerLine = lines[lineIdx].trim();
+      const subMatch = /^(\d+)\s+(\d+)$/.exec(headerLine);
+      if (!subMatch) {
+        break;
+      }
+      const firstObj = parseInt(subMatch[1], 10);
+      const count = parseInt(subMatch[2], 10);
+      lineIdx++;
+
+      for (let i = 0; i < count && lineIdx < lines.length; i++, lineIdx++) {
+        const entryLine = lines[lineIdx];
+        const entryMatch = /^(\d{10})\s+(\d{5})\s+([nf])/.exec(entryLine);
+        if (!entryMatch) continue;
+
+        const offset = parseInt(entryMatch[1], 10);
+        const gen = parseInt(entryMatch[2], 10);
+        const type = entryMatch[3];
+        const currentObjNum = firstObj + i;
+
+        if (type === 'n' && currentObjNum > 0) {
+          if (offset >= buf.length) {
+            return {
+              valid: false,
+              evidence: `Objeto ${currentObjNum} (${gen}) aponta para offset ${offset} além do tamanho do arquivo (${buf.length}).`,
+              error: 'XREF_ENTRY_OUT_OF_BOUNDS',
+            };
+          }
+          const objAtOffset = fullStr.slice(offset, offset + 32);
+          const objHeaderRegex = new RegExp(`^${currentObjNum}\\s+${gen}\\s+obj`);
+          if (!objHeaderRegex.test(objAtOffset.trimStart())) {
+            return {
+              valid: false,
+              evidence: `Offset ${offset} da tabela xref não contém a declaração "${currentObjNum} ${gen} obj" (encontrado: "${objAtOffset.slice(0, 16)}..."). Exige reparo de xref.`,
+              error: 'XREF_OFFSET_CORRUPTED',
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Verify Trailer dictionary
+  const trailerMatch = /trailer\s*<<([\s\S]*?)>>/g.exec(xrefChunk);
+  if (trailerMatch) {
+    const trailerStr = trailerMatch[1];
+    const rootMatch = /\/Root\s+(\d+)\s+(\d+)\s+R/.exec(trailerStr);
+    if (!rootMatch) {
+      return {
+        valid: false,
+        evidence: 'Dicionário trailer não define referência indireta /Root.',
+        error: 'TRAILER_ROOT_MISSING',
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    evidence: 'Tabela xref, offsets de objetos e referências indiretas 100% íntegras e sem necessidade de reparo.',
+  };
+}
+
+/**
  * Dedicated verification function that evaluates the independently re-opened,
  * post-serialization PDF document for genuine PDF/X-4 standard compliance.
  */
 export function verifyPdfx4FinalizedDocument(
   finalStructure: PdfDocumentStructure,
   finalRules: RuleEngineSummary,
-  finalEligibility: PdfxEligibilityResult
+  finalEligibility: PdfxEligibilityResult,
+  finalizedPdfBytes?: Uint8Array
 ): {
   verified: boolean;
   checks: PdfxVerificationCheck[];
@@ -204,7 +357,9 @@ export function verifyPdfx4FinalizedDocument(
       code: 'VERIFY_FONTS',
       title: 'Incorporação de Tipografia',
       status: 'passed',
-      evidence: `100% das fontes utilizadas (${usedFonts.length}) estão devidamente incorporadas ou em subset.`,
+      evidence: usedFonts.length > 0
+        ? `100% das fontes utilizadas (${usedFonts.length}) estão devidamente incorporadas ou em subset.`
+        : 'Nenhuma fonte externa utilizada no documento (ou texto já em curvas).',
     });
   } else {
     checks.push({
@@ -239,26 +394,46 @@ export function verifyPdfx4FinalizedDocument(
     });
   }
 
-  // Check 6: Structural & Deterministic Data (Motor 1)
-  const structRule = finalRules.universalRules.find((r) => r.ruleId === 'RULE-STRUCT-001') || finalRules.results.find((r) => r.ruleId === 'RULE-STRUCT-001');
-  const dataRule = finalRules.universalRules.find((r) => r.ruleId === 'RULE-DATA-001') || finalRules.results.find((r) => r.ruleId === 'RULE-DATA-001');
-  const structPassed = (structRule ? structRule.status === 'approved' : true) && (dataRule ? dataRule.status === 'approved' : true);
-
-  if (structPassed) {
-    checks.push({
-      code: 'VERIFY_STRUCTURE_AND_DATA',
-      title: 'Integridade Estrutural e Determinabilidade',
-      status: 'passed',
-      evidence: 'Estrutura PDF e fluxos de dados íntegros e validados pelo Motor 1.',
-    });
+  // Check 6: Structural & XRef Integrity
+  if (finalizedPdfBytes && finalizedPdfBytes.length > 0) {
+    const structVal = verifySerializedPdfStructure(finalizedPdfBytes);
+    if (structVal.valid) {
+      checks.push({
+        code: 'VERIFY_SERIALIZED_STRUCTURE',
+        title: 'Integridade de Serialização e Tabela XRef',
+        status: 'passed',
+        evidence: structVal.evidence,
+      });
+    } else {
+      checks.push({
+        code: 'VERIFY_SERIALIZED_STRUCTURE',
+        title: 'Integridade de Serialização e Tabela XRef',
+        status: 'failed',
+        evidence: structVal.evidence,
+        error: structVal.error || 'SERIALIZATION_INTEGRITY_FAILED',
+      });
+    }
   } else {
-    checks.push({
-      code: 'VERIFY_STRUCTURE_AND_DATA',
-      title: 'Integridade Estrutural e Determinabilidade',
-      status: 'failed',
-      evidence: 'Falha na validação estrutural básica do PDF serializado.',
-      error: 'STRUCTURE_OR_DATA_FAILED',
-    });
+    const structRule = finalRules.universalRules.find((r) => r.ruleId === 'RULE-STRUCT-001') || finalRules.results.find((r) => r.ruleId === 'RULE-STRUCT-001');
+    const dataRule = finalRules.universalRules.find((r) => r.ruleId === 'RULE-DATA-001') || finalRules.results.find((r) => r.ruleId === 'RULE-DATA-001');
+    const structPassed = (structRule ? structRule.status === 'approved' : true) && (dataRule ? dataRule.status === 'approved' : true);
+
+    if (structPassed) {
+      checks.push({
+        code: 'VERIFY_STRUCTURE_AND_DATA',
+        title: 'Integridade Estrutural e Determinabilidade',
+        status: 'passed',
+        evidence: 'Estrutura PDF e fluxos de dados íntegros e validados pelo Motor 1.',
+      });
+    } else {
+      checks.push({
+        code: 'VERIFY_STRUCTURE_AND_DATA',
+        title: 'Integridade Estrutural e Determinabilidade',
+        status: 'failed',
+        evidence: 'Falha na validação estrutural básica do PDF serializado.',
+        error: 'STRUCTURE_OR_DATA_FAILED',
+      });
+    }
   }
 
   // Check 7: No Encryption
@@ -362,10 +537,10 @@ export async function finalizePdfx4Document(
     };
   }
 
-  // 2. Load PDF into pdf-lib to write authentic PDF/X-4 metadata and XMP
-  let pdfDoc: PDFDocument;
+  // 2. Load PDF into clean PDFDocument to write authentic PDF/X-4 metadata and XMP
+  let loadedDoc: PDFDocument;
   try {
-    pdfDoc = await PDFDocument.load(preparedBytes);
+    loadedDoc = await PDFDocument.load(preparedBytes, { ignoreEncryption: true });
   } catch (loadErr: any) {
     return {
       success: false,
@@ -381,38 +556,77 @@ export async function finalizePdfx4Document(
     };
   }
 
+  // Create a clean, normalized PDFDocument to eliminate any previous generation numbers,
+  // fragmented xref tables, or orphaned object references.
+  const pdfDoc = await PDFDocument.create();
+  const copiedPages = await pdfDoc.copyPages(loadedDoc, loadedDoc.getPageIndices());
+  for (const page of copiedPages) {
+    pdfDoc.addPage(page);
+  }
+
+  // Copy /OutputIntents from loadedDoc catalog if present
+  const loadedCatalog = loadedDoc.catalog;
+  const loadedOi = loadedCatalog.get(PDFName.of('OutputIntents'));
+  if (loadedOi) {
+    const oiLookedUp = loadedDoc.context.lookup(loadedOi);
+    if (oiLookedUp instanceof PDFArray) {
+      const newOiArray = pdfDoc.context.obj([]);
+      for (let i = 0; i < oiLookedUp.size(); i++) {
+        const itemRef = oiLookedUp.get(i);
+        const itemObj = loadedDoc.context.lookup(itemRef);
+        if (itemObj instanceof PDFDict) {
+          const destProfileRef = itemObj.get(PDFName.of('DestOutputProfile'));
+          let newProfileRef: any = undefined;
+          if (destProfileRef) {
+            const profileStream = loadedDoc.context.lookup(destProfileRef);
+            if (profileStream instanceof PDFRawStream || profileStream instanceof PDFStream || (profileStream as any)?.dict) {
+              const streamDict = (profileStream as any).dict || profileStream;
+              const nVal = streamDict.get(PDFName.of('N')) || PDFNumber.of(4);
+              const altVal = streamDict.get(PDFName.of('Alternate')) || PDFName.of('DeviceCMYK');
+              const rawData = decodeStream(profileStream) || (profileStream as any).contents;
+              if (rawData) {
+                const newStream = pdfDoc.context.flateStream(rawData, {
+                  N: nVal,
+                  Alternate: altVal,
+                });
+                newProfileRef = pdfDoc.context.register(newStream);
+              }
+            }
+          }
+
+          const newOiDict = pdfDoc.context.obj({
+            Type: PDFName.of('OutputIntent'),
+            S: PDFName.of('GTS_PDFX'),
+            OutputConditionIdentifier: itemObj.get(PDFName.of('OutputConditionIdentifier')) || PDFString.of('CGATS TR 001'),
+            OutputCondition: itemObj.get(PDFName.of('OutputCondition')) || PDFString.of('CGATS TR 001 (SWOP)'),
+            RegistryName: itemObj.get(PDFName.of('RegistryName')) || PDFString.of('http://www.color.org'),
+            Info: itemObj.get(PDFName.of('Info')) || PDFString.of('CGATS TR 001 (SWOP)'),
+            ...(newProfileRef ? { DestOutputProfile: newProfileRef } : {}),
+          });
+          newOiArray.push(pdfDoc.context.register(newOiDict));
+        }
+      }
+      pdfDoc.catalog.set(PDFName.of('OutputIntents'), newOiArray);
+    }
+  }
+
+  // 3. Write PDF/X-4 entries to Info dictionary
   const now = new Date();
   const pdfDateStr = formatPdfDate(now);
   const isoDateStr = now.toISOString();
 
-  // 3. Write PDF/X-4 entries to Info dictionary
-  let infoRef = pdfDoc.context.trailerInfo.Info;
-  let infoDict: PDFDict;
-
-  if (infoRef) {
-    const lookedUp = pdfDoc.context.lookup(infoRef);
-    if (lookedUp instanceof PDFDict) {
-      infoDict = lookedUp;
-    } else {
-      infoDict = pdfDoc.context.obj({}) as PDFDict;
-      infoRef = pdfDoc.context.register(infoDict);
-      pdfDoc.context.trailerInfo.Info = infoRef;
-    }
-  } else {
-    infoDict = pdfDoc.context.obj({}) as PDFDict;
-    infoRef = pdfDoc.context.register(infoDict);
-    pdfDoc.context.trailerInfo.Info = infoRef;
-  }
-
-  infoDict.set(PDFName.of('GTS_PDFXVersion'), PDFString.of('PDF/X-4'));
-  infoDict.set(PDFName.of('GTS_PDFXConformance'), PDFString.of('PDF/X-4'));
-  infoDict.set(PDFName.of('Trapped'), PDFName.of('False'));
-  infoDict.set(PDFName.of('Producer'), PDFString.of(options.producer || 'ArteCheck PDF/X Engine (ISO 15930-7)'));
-  infoDict.set(PDFName.of('ModDate'), PDFString.of(pdfDateStr));
-
-  if (options.title) infoDict.set(PDFName.of('Title'), PDFString.of(options.title));
-  if (options.author) infoDict.set(PDFName.of('Author'), PDFString.of(options.author));
-  if (options.creator) infoDict.set(PDFName.of('Creator'), PDFString.of(options.creator));
+  const infoDict = pdfDoc.context.obj({
+    GTS_PDFXVersion: PDFString.of('PDF/X-4'),
+    GTS_PDFXConformance: PDFString.of('PDF/X-4'),
+    Trapped: PDFName.of('False'),
+    Producer: PDFString.of(options.producer || 'ArteCheck PDF/X Engine (ISO 15930-7)'),
+    ModDate: PDFString.of(pdfDateStr),
+    ...(options.title ? { Title: PDFString.of(options.title) } : {}),
+    ...(options.author ? { Author: PDFString.of(options.author) } : {}),
+    ...(options.creator ? { Creator: PDFString.of(options.creator) } : {}),
+  });
+  const infoRef = pdfDoc.context.register(infoDict);
+  pdfDoc.context.trailerInfo.Info = infoRef;
 
   // 4. Construct and embed compliant XMP Metadata packet
   const xmpXml = buildXmpMetadataPacket({
@@ -432,7 +646,7 @@ export async function finalizePdfx4Document(
   const metaRef = pdfDoc.context.register(metaStream);
   pdfDoc.catalog.set(PDFName.of('Metadata'), metaRef);
 
-  // 5. Serialize into NEW immutable finalized PDF buffer
+  // 5. Serialize into NEW immutable finalized PDF buffer with clean traditional xref
   let finalizedPdfBytes: Uint8Array;
   try {
     finalizedPdfBytes = await pdfDoc.save({ useObjectStreams: false });
@@ -484,7 +698,8 @@ export async function finalizePdfx4Document(
   const verification = verifyPdfx4FinalizedDocument(
     reExtractedStructure,
     reExtractedRules,
-    reExtractedEligibility
+    reExtractedEligibility,
+    finalizedPdfBytes
   );
 
   return {
@@ -503,3 +718,4 @@ export async function finalizePdfx4Document(
       : 'Declaração PDF/X-4 gravada, porém a verificação pós-serialização identificou inconformidades normativas.',
   };
 }
+

@@ -289,8 +289,90 @@ test('8. End-to-End Real: MediaBox 96x56 mm + bleed 3mm -> TrimBox 90x50 mm, Ble
   assert.equal(finStruct.pdfxInfo?.xmpPdfxVersion, 'PDF/X-4');
   assert.equal(finStruct.pdfxInfo?.isDeclaredPdfX, true);
 
-  // Verify all 8 checks passed in finalizer
+  // Verify all checks passed in finalizer
   for (const c of fin.checks) {
     assert.equal(c.status, 'passed', `Check ${c.code} deve ser passed`);
   }
 });
+
+test('7. QA 08: Transparência viva preservada, estrutura xref íntegra e sem necessidade de reparo', async () => {
+  // Create original PDF with ReportLab-like structure:
+  // - A4 page (216x303 mm MediaBox for 210x297 mm Trim + 3mm Bleed)
+  // - ExtGState with ca = 0.45
+  // - Content stream with /gRLs0 gs
+  // - Declared but unrendered Helvetica font
+  const doc = await PDFDocument.create();
+  const pageW = (216 * 72) / 25.4;
+  const pageH = (303 * 72) / 25.4;
+  const page = doc.addPage([pageW, pageH]);
+
+  const extGStateDict = doc.context.obj({
+    Type: 'ExtGState',
+    ca: 0.45,
+  });
+  const extGStateRef = doc.context.register(extGStateDict);
+
+  const fontDict = doc.context.obj({
+    Type: 'Font',
+    Subtype: 'Type1',
+    BaseFont: 'Helvetica',
+    Encoding: 'WinAnsiEncoding',
+  });
+  const fontRef = doc.context.register(fontDict);
+
+  page.node.set(
+    PDFName.of('Resources'),
+    doc.context.obj({
+      ExtGState: { gRLs0: extGStateRef },
+      Font: { F1: fontRef },
+    })
+  );
+
+  // Content stream with live transparency and vector graphics (no text showing operators)
+  const contentBytes = Buffer.from('1 0 0 1 0 0 cm /gRLs0 gs 0.5 g 50 50 200 200 re f', 'utf-8');
+  page.node.set(
+    PDFName.of('Contents'),
+    doc.context.register(PDFRawStream.of(doc.context.obj({}), contentBytes))
+  );
+
+  const originalBytes = await doc.save({ useObjectStreams: false });
+
+  // Phase 2: Prepare
+  const prep = await preparePdfForPdfx4(originalBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(prep.success, true);
+  assert.equal(prep.status, 'prepared');
+  assert.ok(prep.pdfBytes);
+
+  // Phase 3: Finalize
+  const fin = await finalizePdfx4Document(prep.pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(fin.success, true);
+  assert.equal(fin.declaredPdfX, 'PDF/X-4');
+  assert.equal(fin.verifiedPdfX, true);
+  assert.equal(fin.failures.length, 0);
+
+  // Assert VERIFY_SERIALIZED_STRUCTURE is passed
+  const structCheck = fin.checks.find((c) => c.code === 'VERIFY_SERIALIZED_STRUCTURE');
+  assert.equal(structCheck?.status, 'passed');
+
+  // Re-extract finalized structure and assert live transparency is preserved
+  const finStruct = await extractPdfStructure(fin.finalizedPdfBytes!);
+  assert.equal(finStruct.pages[0].hasTransparency, true, 'Transparência viva DEVE ser preservada');
+
+  // Inspect raw finalized PDF to ensure /ExtGState and /ca 0.45 are physically intact
+  const rawFinal = Buffer.from(fin.finalizedPdfBytes!).toString('latin1');
+  assert.ok(rawFinal.includes('/ExtGState'), 'ExtGState deve estar presente no PDF serializado');
+  assert.ok(rawFinal.includes('0.45'), 'ca 0.45 deve estar presente no PDF serializado');
+  assert.ok(rawFinal.includes('/gRLs0 gs'), 'operador /gRLs0 gs deve estar preservado no content stream');
+
+  // Verify all checks in finalizer
+  for (const c of fin.checks) {
+    assert.equal(c.status, 'passed', `Check ${c.code} deve ser passed`);
+  }
+});
+
