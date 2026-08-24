@@ -876,6 +876,32 @@ test('QA 19 Caso E: Form XObject com referência circular controlada não trava 
   assert.equal(structure.pageCount, 1);
 });
 
+test('QA PDFRef: Runtime de extração executa instanceof PDFRef sem ReferenceError em XObjects', async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]);
+
+  // Add dummy image XObject registered in context
+  const rawRgb = new Uint8Array(10 * 10 * 3);
+  const imgDict = pdfDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'FlateDecode',
+  });
+  const imgStream = PDFRawStream.of(imgDict as any, pako.deflate(rawRgb));
+  const imgRef = pdfDoc.context.register(imgStream);
+  page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({ XObject: { Im0: imgRef } }));
+  page.node.set(PDFName.of('Contents'), pdfDoc.context.register(PDFRawStream.of(pdfDoc.context.obj({}) as any, Buffer.from('q 10 0 0 10 0 0 cm /Im0 Do Q', 'utf-8'))));
+
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  const structure = await extractPdfStructure(Buffer.from(pdfBytes));
+  assert.equal(structure.pages[0].imageOccurrences.length, 1);
+  assert.equal(structure.pages[0].imageOccurrences[0].name, 'Im0');
+});
+
 // ============================================================================
 // RELATÓRIO
 // ============================================================================
@@ -887,6 +913,7 @@ if (bugs.length > 0) {
 }
 
 export { bugs as pdfBugs, passed as pdfPassed, failed as pdfFailed };
+
 
 
 

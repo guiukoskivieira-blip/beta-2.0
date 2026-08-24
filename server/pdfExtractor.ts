@@ -1,4 +1,4 @@
-import { PDFDocument, PDFName, PDFDict, PDFArray, PDFNumber, PDFStream, PDFRawStream } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFDict, PDFArray, PDFNumber, PDFStream, PDFRawStream, PDFRef } from 'pdf-lib';
 import * as pako from 'pako';
 import type {
   PdfDocumentStructure,
