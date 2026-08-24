@@ -218,3 +218,79 @@ test('7. Regressão: Documento com perfil comercial genérico (sem expectedWidth
   assert.equal(fin.verifiedPdfX, true, 'verifiedPdfX deve ser true com caixas dinâmicas inferidas');
   assert.equal(fin.failures.length, 0);
 });
+
+test('8. End-to-End Real: MediaBox 96x56 mm + bleed 3mm -> TrimBox 90x50 mm, BleedBox 96x56 mm, declaredVersion "PDF/X-4" -> verifiedPdfX = true', async () => {
+  // Create original PDF with MediaBox 96x56 mm (272.126 x 158.740 pt)
+  const doc = await PDFDocument.create();
+  const widthPt = (96 * 72) / 25.4;
+  const heightPt = (56 * 72) / 25.4;
+  const page = doc.addPage([widthPt, heightPt]);
+
+  const rawRgb = new Uint8Array(10 * 10 * 3);
+  for (let i = 0; i < rawRgb.length; i += 3) {
+    rawRgb[i] = 200;
+    rawRgb[i + 1] = 80;
+    rawRgb[i + 2] = 40;
+  }
+  const flateBytes = pako.deflate(rawRgb);
+  const imgDict = doc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 10,
+    Height: 10,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'FlateDecode',
+  });
+  const imgStream = PDFRawStream.of(imgDict as any, flateBytes);
+  const imgRef = doc.context.register(imgStream);
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ XObject: { Im1: imgRef } }));
+  const originalBytes = await doc.save({ useObjectStreams: false });
+
+  // Phase 2: Prepare
+  const prep = await preparePdfForPdfx4(originalBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    allowFallbackSrgb: true,
+  });
+
+  assert.equal(prep.success, true);
+  assert.equal(prep.status, 'prepared');
+  assert.ok(prep.pdfBytes);
+
+  // Validate step statuses
+  const boxesStep = prep.steps.find((s) => s.code === 'PDFX_PREP_BOXES');
+  assert.equal(boxesStep?.status, 'applied');
+
+  // Re-extract prepared structure
+  const prepStruct = await extractPdfStructure(prep.pdfBytes);
+  const prepPage = prepStruct.pages[0];
+  assert.equal(prepPage.mediaBox.widthMm, 96);
+  assert.equal(prepPage.mediaBox.heightMm, 56);
+  assert.equal(prepPage.trimBox?.status, 'explicit');
+  assert.equal(prepPage.trimBox?.widthMm, 90);
+  assert.equal(prepPage.trimBox?.heightMm, 50);
+  assert.equal(prepPage.bleedBox?.status, 'explicit');
+  assert.equal(prepPage.bleedBox?.widthMm, 96);
+  assert.equal(prepPage.bleedBox?.heightMm, 56);
+
+  // Phase 3: Finalize
+  const fin = await finalizePdfx4Document(prep.pdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+  });
+
+  assert.equal(fin.success, true);
+  assert.equal(fin.declaredPdfX, 'PDF/X-4');
+  assert.equal(fin.verifiedPdfX, true);
+  assert.equal(fin.failures.length, 0);
+
+  // Re-extract finalized structure and assert PDF/X-4 declaredVersion has the slash
+  const finStruct = await extractPdfStructure(fin.finalizedPdfBytes!);
+  assert.equal(finStruct.pdfxInfo?.declaredVersion, 'PDF/X-4', 'declaredVersion DEVE conter a barra normativa PDF/X-4');
+  assert.equal(finStruct.pdfxInfo?.xmpPdfxVersion, 'PDF/X-4');
+  assert.equal(finStruct.pdfxInfo?.isDeclaredPdfX, true);
+
+  // Verify all 8 checks passed in finalizer
+  for (const c of fin.checks) {
+    assert.equal(c.status, 'passed', `Check ${c.code} deve ser passed`);
+  }
+});

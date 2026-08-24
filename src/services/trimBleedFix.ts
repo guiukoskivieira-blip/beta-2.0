@@ -186,9 +186,11 @@ export function checkTrimBleedEligibility(
 
 export async function applyTrimBleedFix(
   originalPdfBytes: Uint8Array,
-  doc: PdfDocumentStructure,
-  profile: ProductionProfile
+  docOrProfile: PdfDocumentStructure | ProductionProfile,
+  profileOrDoc?: ProductionProfile | PdfDocumentStructure
 ): Promise<TrimBleedFixResult> {
+  const doc: PdfDocumentStructure = (docOrProfile && 'pages' in docOrProfile ? docOrProfile : profileOrDoc) as PdfDocumentStructure;
+  const profile: ProductionProfile = (docOrProfile && 'id' in docOrProfile && 'minEffectiveDpi' in docOrProfile ? docOrProfile : profileOrDoc) as ProductionProfile;
   const eligibility = checkTrimBleedEligibility(doc, profile);
 
   if (!eligibility.eligible) {

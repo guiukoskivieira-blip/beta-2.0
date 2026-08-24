@@ -108,13 +108,22 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
     eligibility.fixPlan.some((fp) => fp.fixType === 'auto');
 
   // Condition 1: Can finalize from prepared PDF
-  // Releases Phase 3 whenever preparation succeeded with a valid buffer and eligibleAfterPreparation.eligible is true
-  const canExecuteFinalizeAfterPrep = Boolean(
+  // STRICT: only allow finalization if prepared PDF exists, status is prepared, eligibleAfterPreparation.eligible is true, AND no mandatory step failed
+  const noFailedPrepSteps = preparationResult?.steps
+    ? preparationResult.steps.every((s) => s.status === 'applied' || s.status === 'not_needed' || s.status === 'already_compliant')
+    : true;
+
+  const isPrepFullyReady = Boolean(
     preparationResult &&
-      Boolean(preparationResult.preparedPdfBase64) &&
-      (preparationResult.eligibleAfterPreparation?.eligible === true ||
-        preparationResult.status === 'prepared' ||
-        preparationResult.success === true) &&
+      preparationResult.status === 'prepared' &&
+      preparationResult.success === true &&
+      preparationResult.eligibleAfterPreparation?.eligible === true &&
+      noFailedPrepSteps
+  );
+
+  const canExecuteFinalizeAfterPrep = Boolean(
+    isPrepFullyReady &&
+      Boolean(preparationResult?.preparedPdfBase64) &&
       !finalizeResult?.verifiedPdfX
   );
 
@@ -131,11 +140,12 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
       console.log('[PDFX-FINALIZE-UI] preparationResult-exists:', Boolean(preparationResult));
       console.log('[PDFX-FINALIZE-UI] preparedPdfBase64-present:', Boolean(preparationResult.preparedPdfBase64));
       console.log('[PDFX-FINALIZE-UI] status:', preparationResult.status);
+      console.log('[PDFX-FINALIZE-UI] isPrepFullyReady:', isPrepFullyReady);
       console.log('[PDFX-FINALIZE-UI] eligibleAfterPreparation-eligible:', preparationResult.eligibleAfterPreparation?.eligible);
       console.log('[PDFX-FINALIZE-UI] eligibleAfterPreparation-status:', preparationResult.eligibleAfterPreparation?.status);
       console.log('[PDFX-FINALIZE-UI] canExecuteFinalizeAfterPrep:', canExecuteFinalizeAfterPrep);
     }
-  }, [preparationResult, canExecuteFinalizeAfterPrep]);
+  }, [preparationResult, isPrepFullyReady, canExecuteFinalizeAfterPrep]);
 
   const handleExecutePreparation = async () => {
     if (!originalFile) {
@@ -364,16 +374,28 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
           {/* Phase 2 Prepared Banner with "Baixar PDF preparado" AND "Gerar PDF/X-4" (When prepared and not finalized) */}
           {preparationResult && !finalizeResult && (
-            <div className="p-4 rounded-xl bg-[#00D18F]/10 border border-[#00D18F]/30 space-y-3">
+            <div
+              className={`p-4 rounded-xl ${
+                isPrepFullyReady ? 'bg-[#00D18F]/10 border-[#00D18F]/30' : 'bg-[#FFA500]/10 border-[#FFA500]/30'
+              } border space-y-3`}
+            >
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#00D18F]/20 flex items-center justify-center text-[#00D18F] shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
+                  <div
+                    className={`w-8 h-8 rounded-lg ${
+                      isPrepFullyReady ? 'bg-[#00D18F]/20 text-[#00D18F]' : 'bg-[#FFA500]/20 text-[#FFA500]'
+                    } flex items-center justify-center shrink-0`}
+                  >
+                    {isPrepFullyReady ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white">Arquivo tecnicamente preparado</h4>
+                    <h4 className="text-sm font-bold text-white">
+                      {isPrepFullyReady ? 'Arquivo tecnicamente preparado' : 'Preparação parcial com pendências'}
+                    </h4>
                     <p className="text-xs text-[#8E98A7]">
-                      Pronto para geração PDF/X-4 • Cores, Output Intent e caixas ajustados
+                      {isPrepFullyReady
+                        ? 'Pronto para geração PDF/X-4 • Cores, Output Intent e caixas ajustados'
+                        : 'Algumas etapas de preparação falharam ou requerem intervenção manual antes da finalização PDF/X-4.'}
                     </p>
                   </div>
                 </div>
@@ -416,16 +438,32 @@ export const PdfxPreparationPanel: React.FC<PdfxPreparationPanelProps> = ({
 
               {/* Step Checklist */}
               {preparationResult.steps && preparationResult.steps.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-[#00D18F]/20">
-                  {preparationResult.steps.map((step, idx) => (
-                    <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
-                      <div className="flex items-center space-x-1.5 font-semibold text-white">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
-                        <span>{step.title}</span>
+                <div
+                  className={`grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t ${
+                    isPrepFullyReady ? 'border-[#00D18F]/20' : 'border-[#FFA500]/20'
+                  }`}
+                >
+                  {preparationResult.steps.map((step, idx) => {
+                    const isStepApplied =
+                      step.status === 'applied' ||
+                      step.status === 'not_needed' ||
+                      step.status === 'already_compliant';
+                    return (
+                      <div key={idx} className="p-2 rounded-lg bg-[#0B1018]/60 text-xs">
+                        <div className="flex items-center space-x-1.5 font-semibold text-white">
+                          {isStepApplied ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#00D18F]" />
+                          ) : (
+                            <XCircle className="w-3.5 h-3.5 text-[#FF4D4D]" />
+                          )}
+                          <span>{step.title}</span>
+                        </div>
+                        <p className={`text-[11px] mt-1 ${isStepApplied ? 'text-[#8E98A7]' : 'text-[#FF4D4D]'}`}>
+                          {step.evidence || step.error || 'Etapa não concluída'}
+                        </p>
                       </div>
-                      <p className="text-[11px] text-[#8E98A7] mt-1">{step.evidence}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

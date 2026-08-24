@@ -655,11 +655,25 @@ export async function extractPdfStructure(pdfBuffer: Buffer | Uint8Array): Promi
 
   const infoDict = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Info);
   if (infoDict instanceof PDFDict) {
-    const gtsVersion = infoDict.get(PDFName.of('GTS_PDFXVersion'))?.toString();
-    const gtsConformance = infoDict.get(PDFName.of('GTS_PDFXConformance'))?.toString();
-    if (gtsVersion || gtsConformance) {
+    const gtsVersionObj = infoDict.get(PDFName.of('GTS_PDFXVersion'));
+    const gtsConformanceObj = infoDict.get(PDFName.of('GTS_PDFXConformance'));
+    if (gtsVersionObj || gtsConformanceObj) {
       isDeclaredPdfX = true;
-      declaredVersion = (gtsVersion || gtsConformance || '').replace(/[\/()]/g, '');
+      const parsePdfValue = (valObj: any): string => {
+        if (!valObj) return '';
+        if (typeof valObj.asString === 'function') return valObj.asString();
+        const raw = String(valObj);
+        // Remove enclosing parentheses from PDF string literals: (PDF/X-4) -> PDF/X-4
+        if (raw.startsWith('(') && raw.endsWith(')')) {
+          return raw.slice(1, -1);
+        }
+        // Remove leading slash from PDF name objects: /PDF/X-4 -> PDF/X-4
+        if (raw.startsWith('/')) {
+          return raw.slice(1);
+        }
+        return raw;
+      };
+      declaredVersion = parsePdfValue(gtsVersionObj) || parsePdfValue(gtsConformanceObj);
     }
   }
 

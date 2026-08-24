@@ -416,7 +416,7 @@ export async function preparePdfForPdfx4(
 
   if (needsBoxesFix) {
     try {
-      const boxResult = await applyTrimBleedFix(workingBytes, profile, currentStructure);
+      const boxResult = await applyTrimBleedFix(workingBytes, currentStructure, profile);
 
       if (boxResult.success && boxResult.pdfBytes) {
         // Re-analyze with Motor 1
@@ -514,7 +514,8 @@ export async function preparePdfForPdfx4(
   });
 
   const preparedSha256 = calculateSha256(workingBytes);
-  const isFullyPrepared = finalEligibility.status === 'eligible';
+  const hasFailedMandatoryStep = steps.some((s) => s.status === 'failed' || s.status === 'manual_required');
+  const isFullyPrepared = finalEligibility.status === 'eligible' && !hasFailedMandatoryStep;
 
   return {
     success: isFullyPrepared,

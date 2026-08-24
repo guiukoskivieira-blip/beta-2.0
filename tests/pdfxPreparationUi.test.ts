@@ -169,3 +169,59 @@ test('2. UI Test Negativo: Resposta real com eligibleAfterPreparation.eligible =
   // Assert "Gerar PDF/X-4" is NOT rendered
   assert.ok(!html.includes('Gerar PDF/X-4'), 'NÃO deve exibir botão "Gerar PDF/X-4" quando eligibleAfterPreparation.eligible for false');
 });
+
+test('3. UI Test: Quando etapa obrigatória falha -> Exibe "Preparação parcial com pendências" e NÃO libera "Gerar PDF/X-4"', () => {
+  const analysis = createDummyAnalysis();
+  const failedStepResponse = {
+    success: false,
+    status: 'partially_prepared' as const,
+    steps: [
+      {
+        code: 'PDFX_PREP_COLOR' as const,
+        title: 'Conversão RGB → CMYK',
+        status: 'applied' as const,
+        before: 'DeviceRGB',
+        after: 'DeviceCMYK',
+        evidence: 'OK',
+      },
+      {
+        code: 'PDFX_PREP_BOXES' as const,
+        title: 'Ajuste de TrimBox / BleedBox',
+        status: 'failed' as const,
+        before: 'Caixas ausentes',
+        after: 'Não alterado',
+        evidence: 'Falha ao aplicar caixas técnicas',
+        error: 'Falha ao aplicar caixas técnicas',
+      },
+    ],
+    eligibleAfterPreparation: {
+      targetStandard: 'PDF/X-4' as const,
+      eligible: false,
+      status: 'fixable' as const,
+      checks: [],
+      blockers: [],
+      warnings: [],
+      fixPlan: [],
+      verifiedPdfX: false,
+      summaryMessage: 'Preparação parcial.',
+    },
+    preparedPdfBase64: 'JVBERi0xLjQKJcTl8uXr...',
+    preparedPdfSize: 1000,
+    originalSha256: 'abc123',
+    preparedSha256: 'def456',
+    verifiedPdfX: false as const,
+    summaryMessage: 'Preparação parcial.',
+  };
+
+  const html = renderToString(
+    React.createElement(PdfxPreparationPanel, {
+      analysis,
+      profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+      initialPreparationResult: failedStepResponse,
+    })
+  );
+
+  assert.ok(html.includes('Preparação parcial com pendências'), 'Deve exibir título de preparação parcial');
+  assert.ok(html.includes('Baixar PDF preparado'), 'Deve permitir baixar PDF preparado de diagnóstico');
+  assert.ok(!html.includes('Gerar PDF/X-4'), 'NÃO deve exibir botão "Gerar PDF/X-4" quando uma etapa falhou');
+});
