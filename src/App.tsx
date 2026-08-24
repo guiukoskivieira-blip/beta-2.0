@@ -569,6 +569,9 @@ export const App: React.FC = () => {
                 <RecommendedProfileBanner
                   detectedWidthMm={matchingProfileData.detectedWidthMm}
                   detectedHeightMm={matchingProfileData.detectedHeightMm}
+                  pageOrientation={matchingProfileData.pageOrientation}
+                  exactOrientationMatches={matchingProfileData.exactOrientationMatches}
+                  inverseOrientationMatches={matchingProfileData.inverseOrientationMatches}
                   matchingProfiles={matchingProfileData.matches}
                   currentProfile={selectedProfile}
                   onSelectProfile={handleSelectProfile}

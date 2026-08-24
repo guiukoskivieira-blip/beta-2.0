@@ -205,73 +205,148 @@ export const STANDARD_PROFILES: ProductionProfile[] = [
  * Finds all standard and custom production profiles matching the given dimensions
  * with a slight tolerance (default 0.5 mm) in either portrait or landscape orientation.
  */
+/**
+ * Finds all standard and custom production profiles matching the given dimensions
+ * with a slight tolerance (default 0.5 mm), categorized by exact or inverted orientation.
+ */
+export function findMatchingProfilesWithOrientation(
+  widthMm: number,
+  heightMm: number,
+  customProfiles: ProductionProfile[] = [],
+  toleranceMm: number = 0.5
+): {
+  exactOrientationMatches: ProductionProfile[];
+  inverseOrientationMatches: ProductionProfile[];
+  allMatches: ProductionProfile[];
+} {
+  if (!widthMm || !heightMm || widthMm <= 0 || heightMm <= 0) {
+    return { exactOrientationMatches: [], inverseOrientationMatches: [], allMatches: [] };
+  }
+
+  const allProfiles = [...STANDARD_PROFILES, ...customProfiles].filter(
+    (p) => !p.isGeneric && Boolean(p.expectedWidthMm) && Boolean(p.expectedHeightMm)
+  );
+
+  const exactOrientationMatches: ProductionProfile[] = [];
+  const inverseOrientationMatches: ProductionProfile[] = [];
+
+  for (const p of allProfiles) {
+    const expW = p.expectedWidthMm!;
+    const expH = p.expectedHeightMm!;
+
+    // Direct match (Width == expW && Height == expH) -> Exact orientation
+    const directMatch =
+      Math.abs(widthMm - expW) <= toleranceMm &&
+      Math.abs(heightMm - expH) <= toleranceMm;
+
+    if (directMatch) {
+      exactOrientationMatches.push(p);
+      continue;
+    }
+
+    // Rotated match (Width == expH && Height == expW) -> Inverse orientation
+    const rotatedMatch =
+      Math.abs(widthMm - expH) <= toleranceMm &&
+      Math.abs(heightMm - expW) <= toleranceMm;
+
+    if (rotatedMatch) {
+      inverseOrientationMatches.push(p);
+    }
+  }
+
+  return {
+    exactOrientationMatches,
+    inverseOrientationMatches,
+    allMatches: [...exactOrientationMatches, ...inverseOrientationMatches],
+  };
+}
+
+/**
+ * Legacy compatibility wrapper returning all matching profiles.
+ */
 export function findMatchingProfiles(
   widthMm: number,
   heightMm: number,
   customProfiles: ProductionProfile[] = [],
   toleranceMm: number = 0.5
 ): ProductionProfile[] {
-  if (!widthMm || !heightMm || widthMm <= 0 || heightMm <= 0) return [];
-
-  const allProfiles = [...STANDARD_PROFILES, ...customProfiles].filter(
-    (p) => !p.isGeneric && Boolean(p.expectedWidthMm) && Boolean(p.expectedHeightMm)
-  );
-
-  return allProfiles.filter((p) => {
-    const expW = p.expectedWidthMm!;
-    const expH = p.expectedHeightMm!;
-
-    // Direct match (Width == expW && Height == expH)
-    const directMatch =
-      Math.abs(widthMm - expW) <= toleranceMm &&
-      Math.abs(heightMm - expH) <= toleranceMm;
-
-    // Rotated/Landscape match (Width == expH && Height == expW)
-    const rotatedMatch =
-      Math.abs(widthMm - expH) <= toleranceMm &&
-      Math.abs(heightMm - expW) <= toleranceMm;
-
-    return directMatch || rotatedMatch;
-  });
+  return findMatchingProfilesWithOrientation(widthMm, heightMm, customProfiles, toleranceMm).allMatches;
 }
 
 /**
  * Detects matching profiles from a PDF page structure, testing both
- * visual page dimensions, explicit TrimBox, and potential 3mm bleed deduction.
+ * visual page dimensions, explicit TrimBox, and potential 3mm bleed deduction,
+ * categorizing matches by orientation.
  */
 export function detectMatchingProfilesFromPage(
   page: { widthMm: number; heightMm: number; visualWidthMm?: number; visualHeightMm?: number; trimBox?: { widthMm: number; heightMm: number } | null },
   customProfiles: ProductionProfile[] = [],
   toleranceMm: number = 0.5
-): { detectedWidthMm: number; detectedHeightMm: number; matches: ProductionProfile[] } {
+): {
+  detectedWidthMm: number;
+  detectedHeightMm: number;
+  pageOrientation: 'portrait' | 'landscape';
+  exactOrientationMatches: ProductionProfile[];
+  inverseOrientationMatches: ProductionProfile[];
+  matches: ProductionProfile[];
+} {
   const pageW = page.visualWidthMm || page.widthMm;
   const pageH = page.visualHeightMm || page.heightMm;
+  const pageOrientation: 'portrait' | 'landscape' = pageW <= pageH ? 'portrait' : 'landscape';
 
   // 1. If explicit TrimBox exists, prioritize its dimensions
   if (page.trimBox && page.trimBox.widthMm > 0 && page.trimBox.heightMm > 0) {
     const trimW = page.trimBox.widthMm;
     const trimH = page.trimBox.heightMm;
-    const matches = findMatchingProfiles(trimW, trimH, customProfiles, toleranceMm);
-    if (matches.length > 0) {
-      return { detectedWidthMm: trimW, detectedHeightMm: trimH, matches };
+    const { exactOrientationMatches, inverseOrientationMatches, allMatches } = findMatchingProfilesWithOrientation(trimW, trimH, customProfiles, toleranceMm);
+    if (allMatches.length > 0) {
+      return {
+        detectedWidthMm: trimW,
+        detectedHeightMm: trimH,
+        pageOrientation: trimW <= trimH ? 'portrait' : 'landscape',
+        exactOrientationMatches,
+        inverseOrientationMatches,
+        matches: allMatches,
+      };
     }
   }
 
   // 2. Direct visual page dimensions match
-  const directMatches = findMatchingProfiles(pageW, pageH, customProfiles, toleranceMm);
-  if (directMatches.length > 0) {
-    return { detectedWidthMm: pageW, detectedHeightMm: pageH, matches: directMatches };
+  const directMatchObj = findMatchingProfilesWithOrientation(pageW, pageH, customProfiles, toleranceMm);
+  if (directMatchObj.allMatches.length > 0) {
+    return {
+      detectedWidthMm: pageW,
+      detectedHeightMm: pageH,
+      pageOrientation,
+      exactOrientationMatches: directMatchObj.exactOrientationMatches,
+      inverseOrientationMatches: directMatchObj.inverseOrientationMatches,
+      matches: directMatchObj.allMatches,
+    };
   }
 
   // 3. Test if visual dimensions represent page with 3mm bleed (e.g. 96x56 -> 90x50, 216x303 -> 210x297)
   const trimmedW = pageW - 6.0;
   const trimmedH = pageH - 6.0;
   if (trimmedW > 0 && trimmedH > 0) {
-    const bleedMatches = findMatchingProfiles(trimmedW, trimmedH, customProfiles, toleranceMm);
-    if (bleedMatches.length > 0) {
-      return { detectedWidthMm: trimmedW, detectedHeightMm: trimmedH, matches: bleedMatches };
+    const bleedMatchObj = findMatchingProfilesWithOrientation(trimmedW, trimmedH, customProfiles, toleranceMm);
+    if (bleedMatchObj.allMatches.length > 0) {
+      return {
+        detectedWidthMm: trimmedW,
+        detectedHeightMm: trimmedH,
+        pageOrientation: trimmedW <= trimmedH ? 'portrait' : 'landscape',
+        exactOrientationMatches: bleedMatchObj.exactOrientationMatches,
+        inverseOrientationMatches: bleedMatchObj.inverseOrientationMatches,
+        matches: bleedMatchObj.allMatches,
+      };
     }
   }
 
-  return { detectedWidthMm: pageW, detectedHeightMm: pageH, matches: [] };
+  return {
+    detectedWidthMm: pageW,
+    detectedHeightMm: pageH,
+    pageOrientation,
+    exactOrientationMatches: [],
+    inverseOrientationMatches: [],
+    matches: [],
+  };
 }
