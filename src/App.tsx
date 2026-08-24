@@ -4,30 +4,26 @@ import { Sidebar } from './components/Sidebar';
 import { UploadZone } from './components/UploadZone';
 import { FileSelected } from './components/FileSelected';
 import { ProcessingState } from './components/ProcessingState';
-import { OperationalSummary } from './components/OperationalSummary';
-import { DiagnosticPanel } from './components/DiagnosticPanel';
-import { AiAssistant } from './components/AiAssistant';
+import { OperationalVerdictBanner } from './components/OperationalVerdictBanner';
+import { MainInspectionCard } from './components/MainInspectionCard';
+import { AvailableFixesSection } from './components/AvailableFixesSection';
+import { TechnicalDetailsAccordion } from './components/TechnicalDetailsAccordion';
+import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
+import { JobCheckResults } from './components/JobCheckResults';
 import { AuthModal } from './components/AuthModal';
 import { CustomProfilesModal } from './components/CustomProfilesModal';
 import { HistoryModal } from './components/HistoryModal';
 import { AboutBetaModal } from './components/AboutBetaModal';
 import { PlansModal } from './components/PlansModal';
 import { Footer } from './components/Footer';
-import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
-import { JobCheckResults } from './components/JobCheckResults';
-import { VisualPreview } from './components/VisualPreview';
-import { FixEnginePanel } from './components/FixEnginePanel';
-import { TrimBleedFixPanel } from './components/TrimBleedFixPanel';
-import { ImageColorFixPanel } from './components/ImageColorFixPanel';
-import { PdfxPreparationPanel } from './components/PdfxPreparationPanel';
 
-import { STANDARD_PROFILES, COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
+import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile } from './utils/productionProfiles';
 import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
 import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
-import type { BetaUser, StoredProductionProfile } from './domain/beta';
-import type { PreflightAnalysis, PdfDocumentStructure } from './types';
+import type { BetaUser } from './domain/beta';
+import type { PreflightAnalysis } from './types';
 import { uploadPdfForExtraction } from './services/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
@@ -40,6 +36,9 @@ export const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
+
+  // View mode: 'operational' (concise, decision-first) vs 'technical' (expanded details)
+  const [viewMode, setViewMode] = useState<'operational' | 'technical'>('operational');
 
   // Job Check state
   const [jobCheckEnabled, setJobCheckEnabled] = useState(false);
@@ -182,119 +181,138 @@ export const App: React.FC = () => {
     setLimitReached(false);
   };
 
+  const scrollToFixes = () => {
+    const el = window.document.getElementById('correcoes-disponiveis');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#0B1018] text-[#F3F4F6]">
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
+      {/* Top Header */}
       <Header
         onReset={handleReset}
         canReset={Boolean(selectedFile || currentAnalysis)}
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenAbout={() => setIsAboutOpen(true)}
-        currentUser={currentUser}
-        onOpenAuth={() => setIsAuthOpen(true)}
-        onSignOut={async () => {
-          await auth.signOut();
-          setCurrentUser(null);
-          setBillingStatus(null);
-        }}
+        viewMode={viewMode}
+        onToggleViewMode={(mode) => setViewMode(mode)}
+        selectedProfile={selectedProfile}
         onOpenProfiles={() => setIsProfilesOpen(true)}
-        onOpenPlans={() => setIsPlansOpen(true)}
+        notificationCount={
+          currentAnalysis
+            ? currentAnalysis.ruleResults.errorCount + currentAnalysis.ruleResults.warningCount
+            : 3
+        }
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Billing status bar */}
-        {currentUser && billingStatus && billingStatus.limitAnalyses > 0 && (
-          <div className="mb-4 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-[#243244] bg-[#101722] text-sm">
-            <span className="text-[#8E98A7] text-xs">Plano <strong className="text-white">{billingStatus.plan}</strong></span>
-            <span className="text-[#8E98A7] text-xs">
-              Análises: <strong className="text-white">{billingStatus.usedAnalyses}/{billingStatus.limitAnalyses}</strong>
-              <span className="text-[#8E98A7] ml-1">({Math.max(0, billingStatus.limitAnalyses - billingStatus.usedAnalyses)} restantes)</span>
-            </span>
-            <div className="flex-1 h-1.5 bg-[#182231] rounded-full overflow-hidden max-w-[120px]">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  billingStatus.usedAnalyses >= billingStatus.limitAnalyses
-                    ? 'bg-[#FF4D4D]'
-                    : billingStatus.usedAnalyses / billingStatus.limitAnalyses > 0.8
-                    ? 'bg-[#FFB800]'
-                    : 'bg-[#00D18F]'
-                }`}
-                style={{ width: `${Math.min(100, Math.round((billingStatus.usedAnalyses / billingStatus.limitAnalyses) * 100))}%` }}
+      {/* Main Layout Area */}
+      <div className="flex flex-1 min-w-0">
+        {/* Left Narrow Sidebar */}
+        <Sidebar
+          activeTab="dashboard"
+          onSelectTab={(tab) => {
+            if (tab === 'history') setIsHistoryOpen(true);
+            if (tab === 'settings') setIsProfilesOpen(true);
+          }}
+          billingStatus={{
+            planCode: billingStatus?.plan || 'free',
+            used: billingStatus?.usedAnalyses || 0,
+            limit: billingStatus?.limitAnalyses || 15,
+            remaining: Math.max(0, (billingStatus?.limitAnalyses || 15) - (billingStatus?.usedAnalyses || 0)),
+          }}
+          currentUser={currentUser}
+          onOpenUpgradeModal={() => setIsPlansOpen(true)}
+          onLogout={async () => {
+            await auth.signOut();
+            setCurrentUser(null);
+            setBillingStatus(null);
+          }}
+        />
+
+        {/* Center Main Stage */}
+        <main className="flex-1 min-w-0 px-4 sm:px-8 py-6 max-w-6xl mx-auto w-full">
+          {processingStatus !== 'idle' ? (
+            <ProcessingState
+              status={processingStatus}
+              errorMessage={errorMessage || undefined}
+              onRetry={handleStartAnalysis}
+              onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
+            />
+          ) : currentAnalysis ? (
+            <div className="space-y-6">
+              {/* Operational Decision Banner */}
+              <OperationalVerdictBanner
+                ruleResults={currentAnalysis.ruleResults}
+                availableFixesCount={
+                  (currentAnalysis.document.colorSummary.hasRgb ? 1 : 0) +
+                  (!currentAnalysis.document.pdfxInfo?.isDeclaredPdfX ? 1 : 0)
+                }
+                onScrollToFixes={scrollToFixes}
+              />
+
+              {/* Main 3-Column Inspection Card */}
+              <MainInspectionCard
+                analysis={currentAnalysis}
+                profile={selectedProfile}
+                file={selectedFile}
+                onOpenProfiles={() => setIsProfilesOpen(true)}
+                userName={currentUser?.name}
+              />
+
+              {/* Job Check Results if enabled */}
+              {jobCheckResult && (
+                <JobCheckResults
+                  result={jobCheckResult}
+                  spec={jobCheckSpec}
+                  analysis={currentAnalysis}
+                />
+              )}
+
+              {/* Available Fixes Section */}
+              <AvailableFixesSection
+                analysis={currentAnalysis}
+                profile={selectedProfile}
+                originalFile={selectedFile}
+              />
+
+              {/* Technical Details Accordion */}
+              <TechnicalDetailsAccordion
+                analysis={currentAnalysis}
+                profile={selectedProfile}
+                isOpenDefault={viewMode === 'technical'}
               />
             </div>
-            {billingStatus.usedAnalyses >= billingStatus.limitAnalyses && (
-              <button
-                type="button"
-                onClick={() => setIsPlansOpen(true)}
-                className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#007BFF] text-white hover:bg-[#0066D6] transition-colors"
-              >
-                Fazer upgrade
-              </button>
-            )}
-          </div>
-        )}
-        <div className="flex flex-col lg:flex-row gap-8">
-          <Sidebar
-            selectedProfile={selectedProfile}
-            onSelectProfile={(p) => {
-              setSelectedProfile(p);
-              if (currentAnalysis && currentAnalysis.document) {
-                const updatedRules = runDeterministicRuleEngine(currentAnalysis.document, p);
-                setCurrentAnalysis({
-                  ...currentAnalysis,
-                  profileId: p.id,
-                  ruleResults: updatedRules,
-                });
-              }
-            }}
-          />
-
-          <div className="flex-1 min-w-0">
-            {processingStatus !== 'idle' ? (
-              <ProcessingState
-                status={processingStatus}
-                errorMessage={errorMessage || undefined}
-                onRetry={handleStartAnalysis}
-                onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
+          ) : selectedFile ? (
+            <div className="space-y-6">
+              <JobCheckForm
+                enabled={jobCheckEnabled}
+                onToggle={setJobCheckEnabled}
+                spec={jobCheckSpec}
+                onSpecChange={setJobCheckSpec}
               />
-            ) : currentAnalysis ? (
-              <div>
-                <OperationalSummary analysis={currentAnalysis} profile={selectedProfile} />
-                <VisualPreview analysis={currentAnalysis} profile={selectedProfile} file={selectedFile} />
-                {jobCheckResult && (
-                  <JobCheckResults
-                    result={jobCheckResult}
-                    spec={jobCheckSpec}
-                    analysis={currentAnalysis}
-                  />
-                )}
-                <FixEnginePanel analysis={currentAnalysis} />
-                <TrimBleedFixPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <ImageColorFixPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <PdfxPreparationPanel analysis={currentAnalysis} profile={selectedProfile} originalFile={selectedFile} />
-                <DiagnosticPanel ruleResults={currentAnalysis.ruleResults} />
-                <AiAssistant analysis={currentAnalysis} />
+              <FileSelected
+                file={selectedFile}
+                onClear={handleReset}
+                onAnalyze={handleStartAnalysis}
+              />
+            </div>
+          ) : (
+            <div className="py-8">
+              <div className="text-center max-w-xl mx-auto mb-6">
+                <h1 className="text-2xl sm:text-3xl font-black text-[#0F172A] tracking-tight">
+                  Inspeção e Pré-impressão de Arquivos PDF
+                </h1>
+                <p className="text-xs sm:text-sm text-[#64748B] mt-2 font-medium">
+                  Envie seu arquivo gráfico para validação automática de dimensões, sangrias, DPI, espaços de cores e normas PDF/X.
+                </p>
               </div>
-            ) : selectedFile ? (
-              <div>
-                <JobCheckForm
-                  enabled={jobCheckEnabled}
-                  onToggle={setJobCheckEnabled}
-                  spec={jobCheckSpec}
-                  onSpecChange={setJobCheckSpec}
-                />
-                <FileSelected
-                  file={selectedFile}
-                  onClear={handleReset}
-                  onAnalyze={handleStartAnalysis}
-                />
-              </div>
-            ) : (
               <UploadZone onFileSelected={handleFileSelected} />
-            )}
-          </div>
-        </div>
-      </main>
+            </div>
+          )}
+        </main>
+      </div>
 
+      {/* Minimalist Light Footer */}
       <Footer />
 
       {/* Modals */}
@@ -337,4 +355,5 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
 export default App;
