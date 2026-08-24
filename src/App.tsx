@@ -284,7 +284,7 @@ export const App: React.FC = () => {
 
       // Show small informative feedback
       setProfileChangeFeedback({
-        profileName: newProfile.name,
+        profileName: newProfile.name.split('—')[0].trim(),
         dimensionsText: newProfile.expectedWidthMm && newProfile.expectedHeightMm
           ? `${newProfile.expectedWidthMm} × ${newProfile.expectedHeightMm} mm`
           : 'Formato Livre',
@@ -548,12 +548,9 @@ export const App: React.FC = () => {
                     <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xs shrink-0">
                       ✓
                     </div>
-                    <div className="text-xs">
-                      <span className="font-bold block">
-                        Perfil alterado para {profileChangeFeedback.profileName}
-                      </span>
-                      <span className="text-emerald-700">
-                        As verificações foram recalculadas para: <strong>{profileChangeFeedback.dimensionsText}</strong> • Sangria: <strong>{profileChangeFeedback.bleedText}</strong> • <strong>{profileChangeFeedback.dpiText}</strong>.
+                    <div className="text-xs font-semibold">
+                      <span>
+                        ✓ Perfil atualizado para <strong>{profileChangeFeedback.profileName}</strong> — {profileChangeFeedback.dimensionsText}
                       </span>
                     </div>
                   </div>

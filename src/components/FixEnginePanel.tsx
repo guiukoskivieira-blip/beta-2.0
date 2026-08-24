@@ -55,7 +55,7 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
           <div>
             <h3 className="text-lg font-bold text-[#0F172A]">Correções disponíveis</h3>
             <p className="text-xs text-[#64748B] mt-0.5">
-              Análise de viabilidade de correção — nenhuma alteração é aplicada automaticamente
+              O ArteCheck avalia cada correção antes da aplicação. As correções compatíveis são aplicadas ao arquivo de trabalho e revalidadas pelo Motor 1.
             </p>
           </div>
         </div>
@@ -81,12 +81,16 @@ export const FixEnginePanel: React.FC<FixEnginePanelProps> = ({ analysis }) => {
       </div>
 
       {/* Warning banner */}
-      <div className="mt-4 flex items-start space-x-2.5 p-3 rounded-xl bg-[#FFB800]/5 border border-[#FFB800]/20">
-        <ShieldCheck className="w-4 h-4 text-[#FFB800] shrink-0 mt-0.5" />
-        <p className="text-xs text-[#A6B4C9]">
-          O Fix Engine é um motor de decisão. Ele classifica correções por segurança, mas
-          <span className="text-[#FFB800] font-medium"> não altera o PDF</span>. O Motor 1 permanece a autoridade final.
-        </p>
+      <div className="mt-4 flex items-start space-x-2.5 p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80">
+        <ShieldCheck className="w-4 h-4 text-[#2563EB] shrink-0 mt-0.5" />
+        <div className="text-xs text-[#334155] space-y-0.5">
+          <p className="font-semibold text-[#0F172A]">
+            O ArteCheck avalia cada correção antes da aplicação. As correções compatíveis são aplicadas ao arquivo de trabalho e revalidadas pelo Motor 1.
+          </p>
+          <p className="text-[#64748B]">
+            Algumas correções exigem intervenção manual e não são aplicadas automaticamente.
+          </p>
+        </div>
       </div>
 
       {/* Proposals list */}
