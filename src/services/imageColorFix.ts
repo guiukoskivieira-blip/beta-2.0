@@ -509,16 +509,18 @@ export function auditImageXObjects(pdfDoc: PDFDocument): {
           widthPx,
           heightPx,
           bitsPerComponent,
-          filter: filterVal,
           colorSpace: colorSpaceStr,
+          isRgb,
+          isCmyk,
+          isGray,
+          filter: filterVal,
+          hasDecode,
           hasSMask,
           hasMask,
-          hasDecode,
-          hasUnsupportedPredictor,
+          hasEmbeddedIcc: Boolean(embeddedIcc && embeddedIcc.length > 0),
           classification,
           reasonCode,
           reason,
-          isSupported: classification === 'CONVERTIBLE',
         };
 
         audits.push(auditEntry);

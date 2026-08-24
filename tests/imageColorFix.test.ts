@@ -800,6 +800,73 @@ export async function runImageColorFixTests() {
   assert(fixedImgOcc.effectiveDpiX === 300, 'Reanálise: DPI X 300 preservado');
   assert(fixedImgOcc.effectiveDpiY === 300, 'Reanálise: DPI Y 300 preservado');
 
+  // Test 22: QA 03 Case — 03_A4_RGB_BAIXO_DPI_72.pdf: 432x240 px, 21 DPI em Form XObject
+  const lowDpiDoc = await PDFDocument.create();
+  const lowDpiPage = lowDpiDoc.addPage([595.28, 841.89]); // A4
+  const jpegBytes432 = generateTestJpeg(432, 240, 3);
+  const lowDpiImgDict = lowDpiDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Image',
+    Width: 432,
+    Height: 240,
+    BitsPerComponent: 8,
+    ColorSpace: 'DeviceRGB',
+    Filter: 'DCTDecode',
+  });
+  const lowDpiImgStream = PDFRawStream.of(lowDpiImgDict as any, jpegBytes432);
+  const lowDpiImgRef = lowDpiDoc.context.register(lowDpiImgStream);
+
+  const lowDpiFormDict = lowDpiDoc.context.obj({
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: [0, 0, 1440, 800],
+    Resources: {
+      XObject: {
+        Im0: lowDpiImgRef,
+      },
+    },
+  });
+  const lowDpiFormContent = Buffer.from('q 1440 0 0 800 0 0 cm /Im0 Do Q', 'utf-8');
+  const lowDpiFormStream = PDFRawStream.of(lowDpiFormDict as any, lowDpiFormContent);
+  const lowDpiFormRef = lowDpiDoc.context.register(lowDpiFormStream);
+
+  lowDpiPage.node.set(
+    PDFName.of('Resources'),
+    lowDpiDoc.context.obj({
+      XObject: {
+        'FormXob.1': lowDpiFormRef,
+      },
+    })
+  );
+  const lowDpiPageStream = Buffer.from('q 1 0 0 1 0 0 cm /FormXob.1 Do Q', 'utf-8');
+  lowDpiPage.node.set(PDFName.of('Contents'), lowDpiDoc.context.register(PDFRawStream.of(lowDpiDoc.context.obj({}) as any, lowDpiPageStream)));
+
+  const lowDpiPdfBytes = await lowDpiDoc.save({ useObjectStreams: false });
+  const lowDpiStruct = await extractPdfStructure(lowDpiPdfBytes);
+
+  assert(lowDpiStruct.pages[0].imageOccurrences.length >= 1, 'QA 03: Parser detecta imagem no Form XObject');
+  const lowDpiOcc = lowDpiStruct.pages[0].imageOccurrences[0];
+  assert(lowDpiOcc.widthPx === 432, 'QA 03: Width 432 px');
+  assert(lowDpiOcc.heightPx === 240, 'QA 03: Height 240 px');
+  assert(lowDpiOcc.effectiveDpiX === 21.6, 'QA 03: effectiveDpiX 21.6 DPI');
+  assert(lowDpiOcc.effectiveDpiY === 21.6, 'QA 03: effectiveDpiY 21.6 DPI');
+
+  // Convert via LittleCMS
+  const lowDpiFixResult = await applyImageColorFix(lowDpiPdfBytes, {
+    profile: COMMERCIAL_PRINT_300DPI_PROFILE,
+    allowFallbackSrgb: true,
+  });
+  assert(lowDpiFixResult.success === true, 'QA 03: applyImageColorFix sucesso');
+  assert(lowDpiFixResult.objectsSummary.convertedCount === 1, 'QA 03: 1 imagem convertida');
+
+  // Reanalysis and Motor 1 DPI Rule Check
+  const reanalyzedLowDpi = await extractPdfStructure(lowDpiFixResult.pdfBytes!);
+  assert(reanalyzedLowDpi.colorSummary.hasRgb === false, 'QA 03: RGB removido');
+  assert(reanalyzedLowDpi.colorSummary.hasCmyk === true, 'QA 03: CMYK presente');
+  const lowDpiRuleResult = runDeterministicRuleEngine(reanalyzedLowDpi, COMMERCIAL_PRINT_300DPI_PROFILE);
+  const dpiRule = lowDpiRuleResult.results.find((r) => r.ruleId === 'RULE-PROF-RES-001');
+  assert(dpiRule?.status === 'error', 'QA 03: RULE-PROF-RES-001 continua REPROVADO por baixo DPI (21.6 DPI < 300 DPI)');
+
   console.log(`\n================================================================`);
   console.log(`ARTECHECK IMAGE COLOR FIX TESTS: ${passed}/${total} APROVADOS`);
   console.log(`================================================================\n`);
