@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
 import type { PreflightAnalysis } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
 import { ImageColorFixPanel } from './ImageColorFixPanel';
@@ -13,6 +13,7 @@ interface AvailableFixesSectionProps {
   originalFile?: File | Blob | Uint8Array | ArrayBuffer | null;
   appliedCorrections?: Array<{ id: string; label: string; appliedAt: number; details?: { before?: string; after?: string; summary?: string } }>;
   onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
+  onOpenApplyAllModal?: () => void;
   isFixingInProgress?: boolean;
   pdfxVerifiedState?: 'not_verified' | 'verified' | 'needs_revalidation';
   onAnalysisUpdated?: (updated: PreflightAnalysis) => void;
@@ -24,6 +25,7 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   originalFile,
   appliedCorrections = [],
   onFixApplied,
+  onOpenApplyAllModal,
   isFixingInProgress = false,
   pdfxVerifiedState = 'not_verified',
 }) => {
@@ -40,7 +42,20 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   const hasBoxesApplied = appliedCorrections.some(c => c.id === 'trim_bleed');
   const hasPdfxApplied = appliedCorrections.some(c => c.id.startsWith('pdfx'));
 
+  const canFixRgb = Boolean(hasRgb && !hasRgbApplied);
+  const profileHasDimensions = Boolean(profile.expectedBleedMm && profile.expectedBleedMm > 0 && profile.expectedWidthMm && profile.expectedHeightMm);
+  const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied && profileHasDimensions);
+  const canFixPdfx = Boolean(!isDeclaredPdfX || !analysis.document.pdfxInfo?.hasOutputIntent || pdfxVerifiedState === 'needs_revalidation');
+
+  const autoFixesCount = (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
   const hasAnyFixes = hasRgb || !isDeclaredPdfX || needsTrimBleed || appliedCorrections.length > 0;
+
+  // Detect manual issues that cannot be auto-fixed
+  const dpiRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning'));
+  const fontRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') && (r.status === 'error' || r.status === 'warning'));
+  const manualIssues: string[] = [];
+  if (dpiRule) manualIssues.push('Resolução de imagem baixa — Requer imagens originais em 300 DPI no software de criação.');
+  if (fontRule) manualIssues.push('Fontes não incorporadas — Requer converter textos em curvas ou incorporar as fontes.');
 
   return (
     <div id="correcoes-disponiveis" className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-5 sm:p-6 mb-6 select-none">
@@ -89,6 +104,36 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               ✓ {c.label}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Prominent CTA: Ajustar Tudo Automaticamente */}
+      {autoFixesCount > 0 && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-violet-700 via-indigo-600 to-blue-600 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 select-none animate-in fade-in">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-white/20 text-white shrink-0">
+              <Zap className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-black tracking-tight">
+                  Ajustar tudo automaticamente ({autoFixesCount} {autoFixesCount === 1 ? 'correção disponível' : 'correções disponíveis'})
+                </h4>
+              </div>
+              <p className="text-xs text-white/90 mt-0.5">
+                Executa em sequência CMYK, caixas técnicas e conformidade PDF/X-4 de forma determinística no arquivo de trabalho.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isFixingInProgress}
+            onClick={onOpenApplyAllModal}
+            className="px-5 py-2.5 rounded-xl bg-white text-indigo-900 hover:bg-indigo-50 active:scale-[0.98] text-xs font-black shadow-md transition-all cursor-pointer shrink-0 disabled:opacity-50 flex items-center gap-2"
+          >
+            <Sparkles className="w-4 h-4 text-indigo-600" />
+            <span>Ajustar tudo automaticamente</span>
+          </button>
         </div>
       )}
 
@@ -222,8 +267,25 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
           </div>
         ) : null}
 
+        {/* Manual Items Alert (Non-blocking) */}
+        {manualIssues.length > 0 && (
+          <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-start gap-3 text-xs">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-amber-900">
+                Itens que requerem intervenção manual (não bloqueiam correções automáticas):
+              </span>
+              <ul className="list-disc list-inside space-y-0.5 text-amber-800 text-[11px]">
+                {manualIssues.map((issue, idx) => (
+                  <li key={idx}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* If no fixes required */}
-        {!hasAnyFixes && (
+        {!hasAnyFixes && manualIssues.length === 0 && (
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-center py-6">
             <ShieldCheck className="w-8 h-8 text-[#10B981] mx-auto mb-2" />
             <div className="text-xs font-bold text-[#0F172A]">Nenhuma correção automática necessária</div>

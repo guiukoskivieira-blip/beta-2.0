@@ -8,7 +8,13 @@ import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnica
 import { PRESET_ICC_PROFILES, type RenderingIntent } from '../domain/colorManagement';
 
 interface ImageColorFixPanelProps {
-  onFixApplied?: (blob: Blob, fixId: string, fixLabel: string) => void;
+  onFixApplied?: (
+    blob: Blob,
+    fixId: string,
+    fixLabel: string,
+    isPdfxVerified?: boolean,
+    details?: { before?: string; after?: string; summary?: string }
+  ) => void;
   isFixingInProgress?: boolean;
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
@@ -139,6 +145,18 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
         setPhase('structural_error');
         return;
       }
+
+      onFixApplied?.(
+        blob,
+        'rgb_cmyk',
+        'Imagens convertidas para CMYK',
+        false,
+        {
+          before: `${rgbImagesList.length || 'Imagens'} em espaço de cor RGB`,
+          after: `Espaço de cor DeviceCMYK (${PRESET_ICC_PROFILES[destinationIccPresetId]?.name || 'Padrão'})`,
+          summary: 'Conversão de cores realizada via LittleCMS CMM e validada pelo Motor 1.',
+        }
+      );
 
       setPhase('applied');
     } catch (err: any) {
@@ -425,14 +443,10 @@ export const ImageColorFixPanel: React.FC<ImageColorFixPanelProps> = ({ analysis
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="inline-flex items-center px-5 py-2.5 rounded-xl text-sm font-medium bg-[#007BFF]/15 border border-[#007BFF]/40 text-[#007BFF] hover:bg-[#007BFF]/25 cursor-pointer transition-all"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Baixar PDF com Imagens em CMYK
-            </button>
+            <div className="inline-flex items-center px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600" />
+              CMYK incorporado ao arquivo de trabalho
+            </div>
 
             <button
               type="button"

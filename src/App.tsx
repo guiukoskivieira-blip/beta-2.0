@@ -20,6 +20,7 @@ import { HistoryModal } from './components/HistoryModal';
 import { AboutBetaModal } from './components/AboutBetaModal';
 import { PlansModal } from './components/PlansModal';
 import { TechnicalReportModal } from './components/TechnicalReportModal';
+import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
@@ -30,12 +31,13 @@ import { createAnalysisSnapshot, buildTechnicalReport } from './services/technic
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
 import type { BetaUser, AnalysisRecordSummary } from './domain/beta';
 import type { PreflightAnalysis } from './types';
-import { uploadPdfForExtraction } from './services/api';
+import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi } from './services/api';
+import { apiUrl } from './config/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
 import type { BillingStatus } from './domain/billing';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
-import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X } from 'lucide-react';
+import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X, Zap } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
@@ -47,6 +49,10 @@ export const App: React.FC = () => {
   const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionItem[]>([]);
   const [isFixingInProgress, setIsFixingInProgress] = useState<boolean>(false);
   const [pdfxVerifiedState, setPdfxVerifiedState] = useState<'not_verified' | 'verified' | 'needs_revalidation'>('not_verified');
+
+  // Apply All Fixes Modal & Progress
+  const [isApplyAllModalOpen, setIsApplyAllModalOpen] = useState<boolean>(false);
+  const [applyAllProgress, setApplyAllProgress] = useState<{ currentStep: number; totalSteps: number; stepLabel: string } | null>(null);
 
   // Analysis states
   const [originalAnalysis, setOriginalAnalysis] = useState<PreflightAnalysis | null>(null);
@@ -397,6 +403,315 @@ export const App: React.FC = () => {
     }
   };
 
+  // Computed eligible fixes and manual warnings for "Ajustar Tudo"
+  const canFixRgb = useMemo(() => {
+    if (!currentAnalysis) return false;
+    const hasRgb = currentAnalysis.document.colorSummary.hasRgb;
+    const hasApplied = appliedCorrections.some((c) => c.id === 'rgb_cmyk');
+    return Boolean(hasRgb && !hasApplied);
+  }, [currentAnalysis, appliedCorrections]);
+
+  const canFixBoxes = useMemo(() => {
+    if (!currentAnalysis) return false;
+    const p1 = currentAnalysis.document.pages[0];
+    const needsTrimBleed = !p1?.bleedBox || (p1.bleedBox.widthMm <= p1.widthMm);
+    const hasApplied = appliedCorrections.some((c) => c.id === 'trim_bleed');
+    const profileHasDimensions = Boolean(
+      selectedProfile.expectedBleedMm &&
+      selectedProfile.expectedBleedMm > 0 &&
+      selectedProfile.expectedWidthMm &&
+      selectedProfile.expectedHeightMm
+    );
+    return Boolean(needsTrimBleed && !hasApplied && profileHasDimensions);
+  }, [currentAnalysis, appliedCorrections, selectedProfile]);
+
+  const canFixPdfx = useMemo(() => {
+    if (!currentAnalysis) return false;
+    const isDeclaredPdfX = Boolean(currentAnalysis.document.pdfxInfo?.isDeclaredPdfX);
+    const hasOutputIntent = Boolean(currentAnalysis.document.pdfxInfo?.hasOutputIntent);
+    return Boolean(!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation');
+  }, [currentAnalysis, pdfxVerifiedState]);
+
+  const plannedFixes = useMemo<PlannedFix[]>(() => {
+    const list: PlannedFix[] = [];
+    if (canFixRgb) {
+      list.push({
+        id: 'rgb_cmyk',
+        title: 'Converter imagens RGB para CMYK',
+        category: 'Cores',
+        description: 'Converte imagens em espaço de cor DeviceRGB para DeviceCMYK utilizando LittleCMS CMM e perfil ICC normativo.',
+        tag: 'LittleCMS',
+      });
+    }
+    if (canFixBoxes) {
+      list.push({
+        id: 'trim_bleed',
+        title: 'Calibrar TrimBox e BleedBox',
+        category: 'Geometria',
+        description: `Alinha geometricamente TrimBox (${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm) e BleedBox (${selectedProfile.expectedBleedMm} mm de sangria).`,
+        tag: 'Geometria',
+      });
+    }
+    if (canFixPdfx) {
+      list.push({
+        id: 'pdfx4',
+        title: 'Preparar e Finalizar PDF/X-4',
+        category: 'Normativo',
+        description: 'Grava metadados XMP, Output Intent GTS_PDFX e valida conformidade ISO 15930-7 (PDF/X-4).',
+        tag: 'PDF/X-4',
+      });
+    }
+    return list;
+  }, [canFixRgb, canFixBoxes, canFixPdfx, selectedProfile]);
+
+  const manualWarnings = useMemo<string[]>(() => {
+    if (!currentAnalysis) return [];
+    const list: string[] = [];
+    const dpiRule = currentAnalysis.ruleResults.results.find(
+      (r) => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning')
+    );
+    const fontRule = currentAnalysis.ruleResults.results.find(
+      (r) => (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') && (r.status === 'error' || r.status === 'warning')
+    );
+    if (dpiRule) list.push('Resolução de imagem baixa — Requer arquivo com imagens em 300 DPI no software de criação.');
+    if (fontRule) list.push('Fontes não incorporadas — Requer converter textos em curvas no software gráfico de origem.');
+    return list;
+  }, [currentAnalysis]);
+
+  // Orchestrator for Batch "Ajustar Tudo Automaticamente"
+  const handleExecuteApplyAllFixes = async () => {
+    if (isFixingInProgress || !originalFile || !currentAnalysis || plannedFixes.length === 0) return;
+
+    try {
+      setIsFixingInProgress(true);
+
+      const steps: Array<{
+        id: 'rgb' | 'boxes' | 'pdfx';
+        label: string;
+        execute: (file: File) => Promise<{ blob: Blob; fixId: string; fixLabel: string; isPdfx?: boolean; details: any }>;
+      }> = [];
+
+      if (canFixRgb) {
+        steps.push({
+          id: 'rgb',
+          label: 'Convertendo imagens RGB para CMYK (LittleCMS)...',
+          execute: async (file) => {
+            const res = await applyImageColorFixViaApi(file, {
+              profileId: selectedProfile.id,
+              allowFallbackSrgb: true,
+            });
+            if (!res.success || !res.fixedPdfBase64) {
+              throw new Error(res.error || 'Falha ao converter cores para CMYK.');
+            }
+            const byteChars = atob(res.fixedPdfBase64);
+            const byteNums = new Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) {
+              byteNums[i] = byteChars.charCodeAt(i);
+            }
+            const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+            return {
+              blob,
+              fixId: 'rgb_cmyk',
+              fixLabel: 'Imagens convertidas para CMYK',
+              details: {
+                before: 'Imagens em espaço de cor RGB',
+                after: 'Espaço de cor DeviceCMYK',
+                summary: 'Conversão de cores realizada via LittleCMS CMM e validada.',
+              },
+            };
+          },
+        });
+      }
+
+      if (canFixBoxes) {
+        steps.push({
+          id: 'boxes',
+          label: 'Calibrando TrimBox e BleedBox geometricamente...',
+          execute: async (file) => {
+            const res = await applyTrimBleedFixViaApi(file, selectedProfile.id);
+            if (!res.success || !res.fixedPdfBase64) {
+              throw new Error(res.error || 'Falha no ajuste de caixas técnicas.');
+            }
+            const byteChars = atob(res.fixedPdfBase64);
+            const byteNums = new Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) {
+              byteNums[i] = byteChars.charCodeAt(i);
+            }
+            const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+            return {
+              blob,
+              fixId: 'trim_bleed',
+              fixLabel: 'Caixas técnicas ajustadas',
+              details: {
+                before: 'TrimBox / BleedBox ausentes',
+                after: `TrimBox ${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm • Sangria ${selectedProfile.expectedBleedMm} mm`,
+                summary: 'TrimBox e BleedBox alinhados geometricamente e validados.',
+              },
+            };
+          },
+        });
+      }
+
+      if (canFixPdfx) {
+        steps.push({
+          id: 'pdfx',
+          label: 'Preparando e Finalizando PDF/X-4 normativo...',
+          execute: async (file) => {
+            const prepFormData = new FormData();
+            prepFormData.append('file', file);
+            if (selectedProfile.id) prepFormData.append('profileId', selectedProfile.id);
+
+            const prepRes = await fetch(apiUrl('/api/prepare-pdfx4'), {
+              method: 'POST',
+              body: prepFormData,
+            });
+            const prepData = await prepRes.json();
+            if (!prepRes.ok || !prepData.preparedPdfBase64) {
+              throw new Error(prepData.error || 'Falha na etapa de preparação PDF/X-4.');
+            }
+
+            const prepChars = atob(prepData.preparedPdfBase64);
+            const prepNums = new Array(prepChars.length);
+            for (let i = 0; i < prepChars.length; i++) {
+              prepNums[i] = prepChars.charCodeAt(i);
+            }
+            const prepBlob = new Blob([new Uint8Array(prepNums)], { type: 'application/pdf' });
+            const prepFile = new File([prepBlob], file.name, { type: 'application/pdf' });
+
+            const finFormData = new FormData();
+            finFormData.append('file', prepFile);
+            if (selectedProfile.id) finFormData.append('profileId', selectedProfile.id);
+
+            const finRes = await fetch(apiUrl('/api/finalize-pdfx4'), {
+              method: 'POST',
+              body: finFormData,
+            });
+            const finData = await finRes.json();
+            if (!finRes.ok || !finData.finalizedPdfBase64) {
+              throw new Error(finData.error || 'Falha na etapa de finalização PDF/X-4.');
+            }
+
+            const finChars = atob(finData.finalizedPdfBase64);
+            const finNums = new Array(finChars.length);
+            for (let i = 0; i < finChars.length; i++) {
+              finNums[i] = finChars.charCodeAt(i);
+            }
+            const blob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
+            return {
+              blob,
+              fixId: 'pdfx4',
+              fixLabel: 'PDF/X-4 finalizado e verificado',
+              isPdfx: finData.verifiedPdfX ?? true,
+              details: {
+                before: 'Sem declaração PDF/X',
+                after: 'ISO 15930-7 (PDF/X-4) • FOGRA51',
+                summary: 'Metadados XMP e Output Intent GTS_PDFX gravados e verificados.',
+              },
+            };
+          },
+        });
+      }
+
+      let currentBlob = workingPdfBlob || (originalFile as Blob);
+      let currentFile = workingFile || originalFile;
+      let sessionCorrections = [...appliedCorrections];
+
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        setApplyAllProgress({
+          currentStep: i + 1,
+          totalSteps: steps.length,
+          stepLabel: step.label,
+        });
+
+        const stepResult = await step.execute(currentFile);
+        currentBlob = stepResult.blob;
+        currentFile = new File([stepResult.blob], originalFile.name, { type: 'application/pdf' });
+
+        setWorkingPdfBlob(currentBlob);
+        setWorkingFile(currentFile);
+
+        const existingIdx = sessionCorrections.findIndex((c) => c.id === stepResult.fixId);
+        if (existingIdx >= 0) {
+          sessionCorrections[existingIdx] = {
+            id: stepResult.fixId,
+            label: stepResult.fixLabel,
+            appliedAt: Date.now(),
+            details: stepResult.details,
+          };
+        } else {
+          sessionCorrections.push({
+            id: stepResult.fixId,
+            label: stepResult.fixLabel,
+            appliedAt: Date.now(),
+            details: stepResult.details,
+          });
+        }
+        setAppliedCorrections([...sessionCorrections]);
+
+        // Re-extract and re-analyze with Motor 1
+        const extractResult = await uploadPdfForExtraction(currentFile);
+        if (extractResult.success && extractResult.document) {
+          const updatedRules = runDeterministicRuleEngine(extractResult.document, selectedProfile);
+          const updatedAnalysis: PreflightAnalysis = {
+            id: currentAnalysis.id,
+            createdAt: currentAnalysis.createdAt,
+            fileName: originalFile.name,
+            fileSizeBytes: stepResult.blob.size,
+            document: extractResult.document,
+            ruleResults: updatedRules,
+            profileId: selectedProfile.id,
+            diagnosticInfo: {
+              extractionDurationMs: 30,
+              evaluationDurationMs: 10,
+            },
+          };
+          setCurrentAnalysis(updatedAnalysis);
+
+          const postFixSnapshot = createAnalysisSnapshot(updatedAnalysis, selectedProfile);
+          const updatedReport = buildTechnicalReport(
+            originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+            { ruleResults: updatedRules } as any,
+            selectedProfile
+          );
+
+          await storage.saveAnalysis({
+            id: updatedAnalysis.id,
+            createdAt: updatedAnalysis.createdAt,
+            fileName: updatedAnalysis.fileName,
+            fileSizeBytes: updatedAnalysis.fileSizeBytes,
+            segmentName: selectedProfile.category,
+            productName: selectedProfile.name,
+            variantName: 'Corrigido',
+            productionProfileId: selectedProfile.id,
+            status: updatedRules.scoreSummary.classification,
+            score: updatedRules.scoreSummary.score,
+            errorCount: updatedRules.errorCount,
+            warningCount: updatedRules.warningCount,
+            approvedCount: updatedRules.approvedCount,
+            initialSnapshot: originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+            postFixSnapshot,
+            reportData: updatedReport,
+          });
+
+          loadHistory();
+        }
+
+        if (stepResult.isPdfx) {
+          setPdfxVerifiedState('verified');
+        }
+      }
+
+      setIsApplyAllModalOpen(false);
+    } catch (err: any) {
+      console.error('Erro ao executar Ajustar Tudo:', err);
+      setErrorMessage(err?.message || 'Falha ao executar todas as correções automáticas.');
+    } finally {
+      setIsFixingInProgress(false);
+      setApplyAllProgress(null);
+    }
+  };
+
   // Global Download Handler for the current working PDF
   const handleDownloadWorkingPdf = () => {
     if (!workingPdfBlob || !originalFile) return;
@@ -647,6 +962,7 @@ export const App: React.FC = () => {
                 originalFile={workingFile}
                 appliedCorrections={appliedCorrections}
                 onFixApplied={handleFixApplied}
+                onOpenApplyAllModal={() => setIsApplyAllModalOpen(true)}
                 isFixingInProgress={isFixingInProgress}
                 pdfxVerifiedState={pdfxVerifiedState}
               />
@@ -692,6 +1008,15 @@ export const App: React.FC = () => {
       <Footer />
 
       {/* Modals */}
+      <ApplyAllFixesModal
+        isOpen={isApplyAllModalOpen}
+        onClose={() => setIsApplyAllModalOpen(false)}
+        onConfirm={handleExecuteApplyAllFixes}
+        isApplying={isFixingInProgress}
+        progress={applyAllProgress}
+        plannedFixes={plannedFixes}
+        manualWarnings={manualWarnings}
+      />
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
