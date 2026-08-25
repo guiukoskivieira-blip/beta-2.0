@@ -236,20 +236,20 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
             </div>
           </div>
         ) : dimensionConfirmationRequired ? (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50/70 to-white border border-amber-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50/70 to-white border border-amber-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-xl bg-[#FFFBEB] text-[#D97706] shrink-0 mt-0.5">
                 <RotateCcw className="w-4 h-4" />
               </div>
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#0F172A]">ORIENTAÇÃO DA PÁGINA INVERTIDA</span>
+                  <span className="text-xs font-bold text-[#0F172A]">ORIENTAÇÃO INCOMPATÍVEL</span>
                   <span className="px-2 py-0.5 rounded-md bg-[#FEF3C7] text-[#B45309] text-[10px] font-bold">Confirmação</span>
                 </div>
                 <p className="text-xs text-[#475569] leading-relaxed">
-                  <strong>O que foi encontrado:</strong> O documento possui {dimensionEligibility.sourceWidthMm.toFixed(1)} × {dimensionEligibility.sourceHeightMm.toFixed(1)} mm (orientação oposta ao perfil {dimensionEligibility.targetWidthMm} × {dimensionEligibility.targetHeightMm} mm).<br />
-                  <strong>Por que importa:</strong> A imposição gráfica e impressão esperam a orientação correta.<br />
-                  <strong>Ação recomendada:</strong> Girar as páginas do documento em 90° de forma determinística.
+                  <strong>Arquivo:</strong> {dimensionEligibility.sourceWidthMm.toFixed(0)} × {dimensionEligibility.sourceHeightMm.toFixed(0)} mm — {dimensionEligibility.sourceWidthMm > dimensionEligibility.sourceHeightMm ? 'Horizontal' : 'Vertical'}<br />
+                  <strong>Contrato:</strong> {dimensionEligibility.targetWidthMm} × {dimensionEligibility.targetHeightMm} mm — {dimensionEligibility.targetWidthMm > dimensionEligibility.targetHeightMm ? 'Horizontal' : 'Vertical'}<br />
+                  <span className="text-slate-500">Esta ação altera apenas a orientação geométrica do PDF e não deforma a arte.</span>
                 </p>
               </div>
             </div>
@@ -274,9 +274,9 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
           </div>
         ) : (hasDimensionsApplied && isDimensionApproved) ? (
           <AppliedFixStatusCard
-            title="Dimensões ajustadas pelo ArteCheck"
+            title={appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('Orientação') || appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('giradas') || appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('Rotação') ? 'Orientação ajustada pelo ArteCheck' : 'Dimensões ajustadas pelo ArteCheck'}
             category="Geometria"
-            details={`${profile.expectedWidthMm} × ${profile.expectedHeightMm} mm • Escala proporcional`}
+            details={appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('Orientação') || appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('giradas') || appliedCorrections.find(c => c.id === 'dimensions')?.label?.includes('Rotação') ? `${profile.expectedWidthMm} × ${profile.expectedHeightMm} mm • Rotação 90°` : `${profile.expectedWidthMm} × ${profile.expectedHeightMm} mm • Escala proporcional`}
             validationText="Revalidado pelo Motor 1"
           />
         ) : null}

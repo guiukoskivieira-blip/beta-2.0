@@ -273,39 +273,79 @@ export function runDeterministicRuleEngine(
         typeof p.trimBox.heightMm === 'number' &&
         p.trimBox.heightMm > 0;
 
-      const w = hasValidTrimBox ? p.trimBox!.widthMm : p.widthMm;
-      const h = hasValidTrimBox ? p.trimBox!.heightMm : p.heightMm;
+      const isRotated = p.rotation === 90 || p.rotation === 270;
+      let w = hasValidTrimBox ? p.trimBox!.widthMm : (p.visualWidthMm || p.widthMm);
+      let h = hasValidTrimBox ? p.trimBox!.heightMm : (p.visualHeightMm || p.heightMm);
+
+      if (hasValidTrimBox && isRotated) {
+        w = p.trimBox!.heightMm;
+        h = p.trimBox!.widthMm;
+      }
+
       return { w, h, hasValidTrimBox };
     };
 
-    const invalidPages = (doc.pages || []).filter((p) => {
+    const hasNormalMismatch = (doc.pages || []).some((p) => {
       const { w, h } = getNominalDimensions(p);
-      const matchNormal = Math.abs(w - expW) <= tol && Math.abs(h - expH) <= tol;
-      const matchRotated = Math.abs(w - expH) <= tol && Math.abs(h - expW) <= tol;
-      return !matchNormal && !matchRotated;
+      return Math.abs(w - expW) > tol || Math.abs(h - expH) > tol;
     });
 
-    if (invalidPages.length > 0) {
-      profileRules.push({
-        ruleId: 'RULE-PROF-DIM-001',
-        title: 'Dimensões Nominais do Perfil',
-        category: 'profile_conditioned',
-        status: 'error',
-        evidence: `Página(s) divergem das dimensões esperadas (${expW} × ${expH} mm). Encontrado: ${invalidPages.map((p) => {
+    const isRotatedMatch = (doc.pages || []).length > 0 && (doc.pages || []).every((p) => {
+      const { w, h } = getNominalDimensions(p);
+      return Math.abs(w - expH) <= tol && Math.abs(h - expW) <= tol;
+    });
+
+    if (hasNormalMismatch) {
+      if (isRotatedMatch) {
+        const p1 = doc.pages[0];
+        const { w, h } = getNominalDimensions(p1);
+        const fileOrientation = w > h ? 'Horizontal' : 'Vertical';
+        const profileOrientation = expW > expH ? 'Horizontal' : 'Vertical';
+
+        profileRules.push({
+          ruleId: 'RULE-PROF-DIM-001',
+          title: 'Dimensões Nominais do Perfil',
+          category: 'profile_conditioned',
+          status: 'warning',
+          evidence: `Orientação do documento (${w.toFixed(1)} × ${h.toFixed(1)} mm — ${fileOrientation}) está invertida em relação ao perfil "${profile.name}" (${expW} × ${expH} mm — ${profileOrientation}).`,
+          explanation: `O perfil "${profile.name}" exige o formato ${expW} × ${expH} mm (${profileOrientation}). O arquivo atual está em orientação ${fileOrientation}.`,
+          recommendation: 'Gire as páginas em 90° na seção de correções ou altere o perfil para o formato horizontal correspondente.',
+          references: (doc.pages || []).map((p) => {
+            const { w: pw, h: ph } = getNominalDimensions(p);
+            return {
+              page: p.page,
+              objectType: 'page',
+              details: `${pw.toFixed(1)} × ${ph.toFixed(1)} mm (${fileOrientation}) • Esperado: ${expW} × ${expH} mm (${profileOrientation})`,
+            };
+          }),
+        });
+      } else {
+        const invalidPages = (doc.pages || []).filter((p) => {
           const { w, h } = getNominalDimensions(p);
-          return `Pág ${p.page}: ${w.toFixed(1)} × ${h.toFixed(1)} mm`;
-        }).join(', ')}.`,
-        explanation: `O perfil "${profile.name}" exige o formato nominal de ${expW} × ${expH} mm.`,
-        recommendation: `Ajuste o tamanho da prancheta para ${expW} × ${expH} mm antes de exportar.`,
-        references: invalidPages.map((p) => {
-          const { w, h } = getNominalDimensions(p);
-          return {
-            page: p.page,
-            objectType: 'page',
-            details: `${w.toFixed(1)} × ${h.toFixed(1)} mm (Esperado: ${expW} × ${expH} mm)`,
-          };
-        }),
-      });
+          return Math.abs(w - expW) > tol || Math.abs(h - expH) > tol;
+        });
+
+        profileRules.push({
+          ruleId: 'RULE-PROF-DIM-001',
+          title: 'Dimensões Nominais do Perfil',
+          category: 'profile_conditioned',
+          status: 'error',
+          evidence: `Página(s) divergem das dimensões esperadas (${expW} × ${expH} mm). Encontrado: ${invalidPages.map((p) => {
+            const { w, h } = getNominalDimensions(p);
+            return `Pág ${p.page}: ${w.toFixed(1)} × ${h.toFixed(1)} mm`;
+          }).join(', ')}.`,
+          explanation: `O perfil "${profile.name}" exige o formato nominal de ${expW} × ${expH} mm.`,
+          recommendation: `Ajuste o tamanho da prancheta para ${expW} × ${expH} mm antes de exportar.`,
+          references: invalidPages.map((p) => {
+            const { w, h } = getNominalDimensions(p);
+            return {
+              page: p.page,
+              objectType: 'page',
+              details: `${w.toFixed(1)} × ${h.toFixed(1)} mm (Esperado: ${expW} × ${expH} mm)`,
+            };
+          }),
+        });
+      }
     } else {
       profileRules.push({
         ruleId: 'RULE-PROF-DIM-001',

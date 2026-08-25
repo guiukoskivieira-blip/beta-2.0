@@ -181,14 +181,17 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
 
   // Determine Checklist items status
   const p1 = document.pages[0];
-  const formatValue = p1 ? `${p1.widthMm.toFixed(0)} × ${p1.heightMm.toFixed(0)} mm` : '210 × 297 mm';
+  const displayW = p1 ? (p1.visualWidthMm ?? p1.widthMm) : 210;
+  const displayH = p1 ? (p1.visualHeightMm ?? p1.heightMm) : 297;
+  const formatValue = `${displayW.toFixed(0)} × ${displayH.toFixed(0)} mm`;
   
   // Dimensions status from Motor 1
   const dimRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DIM-001');
   const isGenericProfile = Boolean(!profile.expectedWidthMm || !profile.expectedHeightMm);
-  const dimStatusText = isGenericProfile || dimRule?.status === 'approved' 
+  const isRotatedWarning = Boolean(dimRule?.status === 'warning' && (dimRule?.evidence?.includes('invertida') || dimRule?.evidence?.includes('Orientação')));
+  const dimStatusText: 'OK' | 'Orientação' | 'Ajustável' = (isGenericProfile || dimRule?.status === 'approved')
     ? 'OK' 
-    : (dimRule?.status === 'warning' ? 'Atenção' : 'Ajustável');
+    : (isRotatedWarning ? 'Orientação' : 'Ajustável');
 
   // Bleed status
   const bleedRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
@@ -353,7 +356,7 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                 dimStatusText === 'OK' 
                   ? 'bg-[#ECFDF5] text-[#059669]' 
-                  : (dimStatusText === 'Atenção' ? 'bg-[#FEF3C7] text-[#B45309]' : 'bg-[#EFF6FF] text-[#1D4ED8]')
+                  : (dimStatusText === 'Orientação' ? 'bg-[#FEF3C7] text-[#B45309]' : 'bg-[#EFF6FF] text-[#1D4ED8]')
               }`}>{dimStatusText}</span>
             </div>
           </div>

@@ -23,6 +23,7 @@ import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesModal';
 import { PdfxPrerequisitesModal } from './components/PdfxPrerequisitesModal';
 import { ChangeProfileModal } from './components/ChangeProfileModal';
+import { RotateConfirmationModal } from './components/RotateConfirmationModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
@@ -33,7 +34,7 @@ import { createAnalysisSnapshot, buildTechnicalReport } from './services/technic
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
 import type { BetaUser, AnalysisRecordSummary } from './domain/beta';
 import type { PreflightAnalysis } from './types';
-import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi, applyDimensionFixViaApi, finalizePdfx4ViaApi } from './services/api';
+import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi, applyDimensionFixViaApi, finalizePdfx4ViaApi, preparePdfx4ViaApi, executePdfxFinalizeViaApi } from './services/api';
 import { checkTrimBleedEligibility } from './services/trimBleedFix';
 import { checkDimensionFixEligibility } from './services/dimensionFix';
 import { apiUrl } from './config/api';
@@ -92,6 +93,7 @@ export const App: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfilesOpen, setIsProfilesOpen] = useState(false);
   const [isChangeProfileOpen, setIsChangeProfileOpen] = useState(false);
+  const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -656,51 +658,15 @@ export const App: React.FC = () => {
           id: 'pdfx',
           label: 'Preparando e Finalizando PDF/X-4 normativo...',
           execute: async (file) => {
-            const prepFormData = new FormData();
-            prepFormData.append('file', file);
-            if (selectedProfile.id) prepFormData.append('profileId', selectedProfile.id);
-
-            const prepRes = await fetch(apiUrl('/api/prepare-pdfx4'), {
-              method: 'POST',
-              body: prepFormData,
-            });
-            const prepData = await prepRes.json();
-            if (!prepRes.ok || !prepData.preparedPdfBase64) {
-              throw new Error(prepData.error || 'Falha na etapa de preparação PDF/X-4.');
+            const res = await executePdfxFinalizeViaApi(file, selectedProfile);
+            if (!res.success || !res.finalizedPdfBlob) {
+              throw new Error(res.error || 'Falha na finalização PDF/X-4.');
             }
-
-            const prepChars = atob(prepData.preparedPdfBase64);
-            const prepNums = new Array(prepChars.length);
-            for (let i = 0; i < prepChars.length; i++) {
-              prepNums[i] = prepChars.charCodeAt(i);
-            }
-            const prepBlob = new Blob([new Uint8Array(prepNums)], { type: 'application/pdf' });
-            const prepFile = new File([prepBlob], file.name, { type: 'application/pdf' });
-
-            const finFormData = new FormData();
-            finFormData.append('file', prepFile);
-            if (selectedProfile.id) finFormData.append('profileId', selectedProfile.id);
-
-            const finRes = await fetch(apiUrl('/api/finalize-pdfx4'), {
-              method: 'POST',
-              body: finFormData,
-            });
-            const finData = await finRes.json();
-            if (!finRes.ok || !finData.finalizedPdfBase64) {
-              throw new Error(finData.error || 'Falha na etapa de finalização PDF/X-4.');
-            }
-
-            const finChars = atob(finData.finalizedPdfBase64);
-            const finNums = new Array(finChars.length);
-            for (let i = 0; i < finChars.length; i++) {
-              finNums[i] = finChars.charCodeAt(i);
-            }
-            const blob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
             return {
-              blob,
+              blob: res.finalizedPdfBlob,
               fixId: 'pdfx4',
               fixLabel: 'PDF/X-4 finalizado e verificado',
-              isPdfx: finData.verifiedPdfX ?? true,
+              isPdfx: res.verifiedPdfX ?? true,
               details: {
                 before: 'Sem declaração PDF/X',
                 after: 'ISO 15930-7 (PDF/X-4) • FOGRA51',
@@ -827,6 +793,15 @@ export const App: React.FC = () => {
     }
   };
 
+  // Dimension fix request dispatcher: if action requires confirmation (rotate_90), open modal; otherwise execute
+  const handleRequestDimensionFix = (action: 'scale_uniform' | 'rotate_90' = 'scale_uniform') => {
+    if (action === 'rotate_90') {
+      setIsRotateModalOpen(true);
+    } else {
+      handleFixDimensions('scale_uniform');
+    }
+  };
+
   // Individual Dimension Fix Handler (scale_uniform or rotate_90)
   const handleFixDimensions = async (action: 'scale_uniform' | 'rotate_90' = 'scale_uniform') => {
     if (isFixingInProgress || !originalFile || !currentAnalysis) return;
@@ -848,9 +823,9 @@ export const App: React.FC = () => {
       }
       const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
 
-      const label = action === 'rotate_90' ? 'Páginas giradas em 90°' : 'Dimensões nominais ajustadas';
+      const label = action === 'rotate_90' ? 'Orientação ajustada pelo ArteCheck' : 'Dimensões ajustadas pelo ArteCheck';
       const summary = action === 'rotate_90'
-        ? 'Orientação de página corrigida deterministamente.'
+        ? 'Orientação de página corrigida deterministamente via rotação vetorial 90°.'
         : `Escala vetorial proporcional uniforme (${dimEligibility?.sourceWidthMm.toFixed(0)}×${dimEligibility?.sourceHeightMm.toFixed(0)} mm → ${selectedProfile.expectedWidthMm}×${selectedProfile.expectedHeightMm} mm).`;
 
       await applyWorkingPdfUpdate(
@@ -864,6 +839,8 @@ export const App: React.FC = () => {
           summary,
         }
       );
+
+      setIsRotateModalOpen(false);
     } catch (err: any) {
       console.error('Erro no ajuste de dimensões:', err);
       setErrorMessage(err?.message || 'Falha ao ajustar dimensões.');
@@ -883,7 +860,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // Direct normative PDF/X finalization (no prerequisite fixing, strictly normative)
+  // Direct normative PDF/X finalization (unified with ApplyAll PDF/X step)
   const handleDirectFinalizePdfx = async () => {
     if (isFixingInProgress || !originalFile || !currentAnalysis) return;
 
@@ -892,20 +869,13 @@ export const App: React.FC = () => {
       setErrorMessage(null);
       const fileToSend = workingFile || originalFile;
 
-      const finData = await finalizePdfx4ViaApi(fileToSend, selectedProfile);
-      if (!finData.success || !finData.finalizedPdfBase64) {
+      const finData = await executePdfxFinalizeViaApi(fileToSend, selectedProfile);
+      if (!finData.success || !finData.finalizedPdfBlob) {
         throw new Error(finData.error || 'Falha na finalização PDF/X-4.');
       }
 
-      const finChars = atob(finData.finalizedPdfBase64);
-      const finNums = new Array(finChars.length);
-      for (let i = 0; i < finChars.length; i++) {
-        finNums[i] = finChars.charCodeAt(i);
-      }
-      const blob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
-
       await applyWorkingPdfUpdate(
-        blob,
+        finData.finalizedPdfBlob,
         'pdfx4',
         'PDF/X-4 finalizado e verificado',
         finData.verifiedPdfX ?? true,
@@ -1003,30 +973,15 @@ export const App: React.FC = () => {
         id: 'pdfx',
         label: 'Finalizando PDF/X-4 normativo...',
         execute: async (file) => {
-          const finFormData = new FormData();
-          finFormData.append('file', file);
-          if (selectedProfile.id) finFormData.append('profileId', selectedProfile.id);
-
-          const finRes = await fetch(apiUrl('/api/finalize-pdfx4'), {
-            method: 'POST',
-            body: finFormData,
-          });
-          const finData = await finRes.json();
-          if (!finRes.ok || !finData.finalizedPdfBase64) {
-            throw new Error(finData.error || 'Falha na finalização PDF/X-4.');
+          const res = await executePdfxFinalizeViaApi(file, selectedProfile);
+          if (!res.success || !res.finalizedPdfBlob) {
+            throw new Error(res.error || 'Falha na finalização PDF/X-4.');
           }
-
-          const finChars = atob(finData.finalizedPdfBase64);
-          const finNums = new Array(finChars.length);
-          for (let i = 0; i < finChars.length; i++) {
-            finNums[i] = finChars.charCodeAt(i);
-          }
-          const blob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
           return {
-            blob,
+            blob: res.finalizedPdfBlob,
             fixId: 'pdfx4',
             fixLabel: 'PDF/X-4 finalizado e verificado',
-            isPdfx: finData.verifiedPdfX ?? true,
+            isPdfx: res.verifiedPdfX ?? true,
             details: {
               before: 'Sem declaração PDF/X',
               after: 'ISO 15930-7 (PDF/X-4) • FOGRA51',
@@ -1378,7 +1333,7 @@ export const App: React.FC = () => {
                 appliedCorrections={appliedCorrections}
                 onFixApplied={handleFixApplied}
                 onOpenApplyAllModal={() => setIsApplyAllModalOpen(true)}
-                onRequestDimensionFix={handleFixDimensions}
+                onRequestDimensionFix={handleRequestDimensionFix}
                 onRequestPdfxFinalize={handleOpenPdfxFlow}
                 onOpenPdfxModal={handleOpenPdfxFlow}
                 isFixingInProgress={isFixingInProgress}
@@ -1459,6 +1414,18 @@ export const App: React.FC = () => {
         onFixAllAndFinalize={handleCompoundFixAndFinalizePdfx}
         isProcessing={isFixingInProgress}
       />
+      {dimEligibility && (
+        <RotateConfirmationModal
+          isOpen={isRotateModalOpen}
+          onClose={() => setIsRotateModalOpen(false)}
+          onConfirm={() => handleFixDimensions('rotate_90')}
+          isFixingInProgress={isFixingInProgress}
+          sourceWidthMm={dimEligibility.sourceWidthMm}
+          sourceHeightMm={dimEligibility.sourceHeightMm}
+          targetWidthMm={dimEligibility.targetWidthMm}
+          targetHeightMm={dimEligibility.targetHeightMm}
+        />
+      )}
       <ApplyAllFixesModal
         isOpen={isApplyAllModalOpen}
         onClose={() => setIsApplyAllModalOpen(false)}

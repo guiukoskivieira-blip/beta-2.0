@@ -78,7 +78,7 @@ export const RecommendedProfileBanner: React.FC<RecommendedProfileBannerProps> =
                 </span>
               </div>
               <p className="text-xs text-[#451A03] leading-relaxed">
-                Este perfil ("<strong>{currentProfile.name}</strong>") usa orientação <strong>{profileOrientationLabel}</strong> ({currentProfile.expectedWidthMm} × {currentProfile.expectedHeightMm} mm). Seu arquivo está em orientação <strong>{fileOrientationLabel}</strong>.
+                Este perfil ("<strong>{currentProfile.name}</strong>") usa orientação <strong>{profileOrientationLabel}</strong> ({currentProfile.expectedWidthMm} × {currentProfile.expectedHeightMm} mm), enquanto seu arquivo está em <strong>{fileOrientationLabel}</strong>. Você pode alterar o contrato para um perfil compatível ou manter este perfil e girar a página em 90° na seção de correções.
               </p>
             </div>
           </div>

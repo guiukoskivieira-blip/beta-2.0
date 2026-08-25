@@ -614,4 +614,90 @@ export async function preparePdfx4ViaApi(
   }
 }
 
+export interface ExecutePdfxFinalizeResult {
+  success: boolean;
+  finalizedPdfBlob?: Blob;
+  finalizedPdfBase64?: string;
+  verifiedPdfX?: boolean;
+  summaryMessage?: string;
+  error?: string;
+}
+
+/**
+ * Unified single atomic executor for PDF/X-4 preparation and finalization.
+ * Used identically by both the individual [ Finalizar PDF/X-4 ] button AND the PDF/X step of [ Ajustar tudo ].
+ */
+export async function executePdfxFinalizeViaApi(
+  file: File | Blob,
+  profile: ProductionProfile | string,
+  options?: {
+    destinationIccPresetId?: string;
+    destIccFile?: File | Blob;
+    allowFallbackSrgb?: boolean;
+    title?: string;
+    author?: string;
+    creator?: string;
+  }
+): Promise<ExecutePdfxFinalizeResult> {
+  try {
+    // 1. Preparation phase: injects Output Intent, ICC, geometry calibrations and verifies Safe Scope
+    const prepRes = await preparePdfx4ViaApi(file, profile, {
+      destinationIccPresetId: options?.destinationIccPresetId,
+      destIccFile: options?.destIccFile,
+      allowFallbackSrgb: options?.allowFallbackSrgb ?? true,
+    });
+
+    if (!prepRes.success || !prepRes.preparedPdfBase64) {
+      return {
+        success: false,
+        error: prepRes.error || 'Falha na etapa de preparação para PDF/X-4.',
+      };
+    }
+
+    const prepChars = atob(prepRes.preparedPdfBase64);
+    const prepNums = new Array(prepChars.length);
+    for (let i = 0; i < prepChars.length; i++) {
+      prepNums[i] = prepChars.charCodeAt(i);
+    }
+    const prepBlob = new Blob([new Uint8Array(prepNums)], { type: 'application/pdf' });
+
+    // 2. Finalization phase: records XMP metadata, GTS_PDFX declarations and verifies standard
+    const finRes = await finalizePdfx4ViaApi(prepBlob, profile, {
+      destinationIccPresetId: options?.destinationIccPresetId,
+      destIccFile: options?.destIccFile,
+      title: options?.title,
+      author: options?.author,
+      creator: options?.creator,
+    });
+
+    if (!finRes.success || !finRes.finalizedPdfBase64) {
+      return {
+        success: false,
+        error: finRes.error || 'Falha na etapa de finalização normativa PDF/X-4.',
+      };
+    }
+
+    const finChars = atob(finRes.finalizedPdfBase64);
+    const finNums = new Array(finChars.length);
+    for (let i = 0; i < finChars.length; i++) {
+      finNums[i] = finChars.charCodeAt(i);
+    }
+    const finalizedPdfBlob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
+
+    return {
+      success: true,
+      finalizedPdfBlob,
+      finalizedPdfBase64: finRes.finalizedPdfBase64,
+      verifiedPdfX: finRes.verifiedPdfX ?? true,
+      summaryMessage: finRes.summaryMessage || 'PDF/X-4 finalizado e verificado com sucesso.',
+    };
+  } catch (err: any) {
+    console.error('executePdfxFinalizeViaApi error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Falha no processo de finalização PDF/X-4.',
+    };
+  }
+}
+
 
