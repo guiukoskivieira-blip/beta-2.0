@@ -1,4 +1,5 @@
 import { UploadResponse, HealthResponse, AiAssistantResponse, AiGroundingContext } from '../types';
+import type { ProductionProfile } from '../utils/productionProfiles';
 import { auth } from '../auth';
 import { apiUrl } from '../config/api';
 
@@ -380,4 +381,237 @@ export async function applyImageColorFixViaApi(
 
   return data as ImageColorFixApiResponse;
 }
+
+export interface DimensionFixApiResponse {
+  success: boolean;
+  fixedPdfBase64?: string;
+  transformedDimensions?: { widthMm: number; heightMm: number };
+  error?: string;
+}
+
+export async function applyDimensionFixViaApi(
+  file: File | Blob,
+  profile: ProductionProfile | string,
+  action: 'scale_uniform' | 'rotate_90' = 'scale_uniform'
+): Promise<DimensionFixApiResponse> {
+  const targetUrl = apiUrl('/api/fix-dimensions');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (typeof profile === 'string') {
+      formData.append('profileId', profile);
+    } else {
+      formData.append('profileId', profile.id);
+      formData.append('profileName', profile.name);
+      if (profile.expectedWidthMm) formData.append('expectedWidthMm', String(profile.expectedWidthMm));
+      if (profile.expectedHeightMm) formData.append('expectedHeightMm', String(profile.expectedHeightMm));
+      if (profile.expectedBleedMm !== undefined) formData.append('expectedBleedMm', String(profile.expectedBleedMm));
+    }
+    formData.append('action', action);
+
+    let authHeader = {};
+    try {
+      authHeader = await getAuthHeader();
+    } catch {}
+
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...authHeader,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        error: data?.error || `Erro HTTP ${res.status} ao ajustar dimensões.`,
+      };
+    }
+
+    return data as DimensionFixApiResponse;
+  } catch (err: any) {
+    console.error('applyDimensionFixViaApi error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Falha de comunicação com o servidor ao ajustar dimensões.',
+    };
+  }
+}
+
+export interface FinalizePdfx4ApiResponse {
+  success: boolean;
+  declaredPdfX?: string | null;
+  verifiedPdfX?: boolean;
+  targetStandard?: string;
+  checks?: any[];
+  failures?: any[];
+  warnings?: any[];
+  preparedSha256?: string;
+  finalizedSha256?: string;
+  finalizedPdfBase64?: string;
+  finalizedPdfSize?: number;
+  summaryMessage?: string;
+  error?: string;
+}
+
+export async function finalizePdfx4ViaApi(
+  file: File | Blob,
+  profile: ProductionProfile | string,
+  options?: {
+    destinationIccPresetId?: string;
+    destIccFile?: File | Blob;
+    title?: string;
+    author?: string;
+    creator?: string;
+  }
+): Promise<FinalizePdfx4ApiResponse> {
+  const targetUrl = apiUrl('/api/finalize-pdfx4');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (typeof profile === 'string') {
+      formData.append('profileId', profile);
+    } else {
+      formData.append('profileId', profile.id);
+      formData.append('profileName', profile.name);
+      if (profile.expectedWidthMm) formData.append('expectedWidthMm', String(profile.expectedWidthMm));
+      if (profile.expectedHeightMm) formData.append('expectedHeightMm', String(profile.expectedHeightMm));
+      if (profile.expectedBleedMm !== undefined) formData.append('expectedBleedMm', String(profile.expectedBleedMm));
+    }
+
+    if (options?.destinationIccPresetId) {
+      formData.append('destinationIccPresetId', options.destinationIccPresetId);
+    }
+    if (options?.destIccFile) {
+      formData.append('destIccFile', options.destIccFile);
+    }
+    if (options?.title) formData.append('title', options.title);
+    if (options?.author) formData.append('author', options.author);
+    if (options?.creator) formData.append('creator', options.creator);
+
+    let authHeader = {};
+    try {
+      authHeader = await getAuthHeader();
+    } catch {}
+
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...authHeader,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        error: data?.error || `Erro HTTP ${res.status} na finalização PDF/X-4.`,
+      };
+    }
+
+    return data as FinalizePdfx4ApiResponse;
+  } catch (err: any) {
+    console.error('finalizePdfx4ViaApi error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Falha de comunicação ao finalizar PDF/X-4.',
+    };
+  }
+}
+
+export interface PreparePdfx4ApiResponse {
+  success: boolean;
+  status?: string;
+  steps?: any[];
+  eligibleAfterPreparation?: { eligible: boolean; reasons: string[] };
+  preparedPdfBase64?: string;
+  preparedPdfSize?: number;
+  originalSha256?: string;
+  preparedSha256?: string;
+  verifiedPdfX?: boolean;
+  summaryMessage?: string;
+  error?: string;
+}
+
+export async function preparePdfx4ViaApi(
+  file: File | Blob,
+  profile: ProductionProfile | string,
+  options?: {
+    destinationIccPresetId?: string;
+    destIccFile?: File | Blob;
+    sourceIccPresetId?: string;
+    sourceIccFile?: File | Blob;
+    allowFallbackSrgb?: boolean;
+  }
+): Promise<PreparePdfx4ApiResponse> {
+  const targetUrl = apiUrl('/api/prepare-pdfx4');
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (typeof profile === 'string') {
+      formData.append('profileId', profile);
+    } else {
+      formData.append('profileId', profile.id);
+      formData.append('profileName', profile.name);
+      if (profile.expectedWidthMm) formData.append('expectedWidthMm', String(profile.expectedWidthMm));
+      if (profile.expectedHeightMm) formData.append('expectedHeightMm', String(profile.expectedHeightMm));
+      if (profile.expectedBleedMm !== undefined) formData.append('expectedBleedMm', String(profile.expectedBleedMm));
+    }
+
+    if (options?.destinationIccPresetId) {
+      formData.append('destinationIccPresetId', options.destinationIccPresetId);
+    }
+    if (options?.destIccFile) {
+      formData.append('destIccFile', options.destIccFile);
+    }
+    if (options?.sourceIccPresetId) {
+      formData.append('sourceIccPresetId', options.sourceIccPresetId);
+    }
+    if (options?.sourceIccFile) {
+      formData.append('sourceIccFile', options.sourceIccFile);
+    }
+    if (options?.allowFallbackSrgb !== undefined) {
+      formData.append('allowFallbackSrgb', String(options.allowFallbackSrgb));
+    }
+
+    let authHeader = {};
+    try {
+      authHeader = await getAuthHeader();
+    } catch {}
+
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...authHeader,
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        error: data?.error || `Erro HTTP ${res.status} na preparação PDF/X-4.`,
+      };
+    }
+
+    return data as PreparePdfx4ApiResponse;
+  } catch (err: any) {
+    console.error('preparePdfx4ViaApi error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Falha de comunicação ao preparar PDF/X-4.',
+    };
+  }
+}
+
 

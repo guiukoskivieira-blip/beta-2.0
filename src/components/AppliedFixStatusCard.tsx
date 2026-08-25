@@ -7,6 +7,7 @@ export interface AppliedFixStatusCardProps {
   details?: string;
   icon?: React.ReactNode;
   validationText?: string;
+  badgeText?: string;
 }
 
 export const AppliedFixStatusCard: React.FC<AppliedFixStatusCardProps> = ({
@@ -15,6 +16,7 @@ export const AppliedFixStatusCard: React.FC<AppliedFixStatusCardProps> = ({
   details,
   icon,
   validationText = 'Revalidado pelo Motor 1',
+  badgeText = '✓ Aplicada nesta sessão',
 }) => {
   return (
     <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/90 border border-slate-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all animate-in fade-in duration-200">
@@ -47,7 +49,7 @@ export const AppliedFixStatusCard: React.FC<AppliedFixStatusCardProps> = ({
           </span>
         )}
         <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-          ✓ Aplicada
+          {badgeText}
         </span>
       </div>
     </div>

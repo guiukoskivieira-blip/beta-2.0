@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap, Loader2 } from 'lucide-react';
+import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap, Loader2, Maximize2, RotateCcw } from 'lucide-react';
 import type { PreflightAnalysis } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
 import { ImageColorFixPanel } from './ImageColorFixPanel';
@@ -8,6 +8,7 @@ import { PdfxPreparationPanel } from './PdfxPreparationPanel';
 import { FixEnginePanel } from './FixEnginePanel';
 import { AppliedFixStatusCard } from './AppliedFixStatusCard';
 import { checkTrimBleedEligibility } from '../services/trimBleedFix';
+import { checkDimensionFixEligibility } from '../services/dimensionFix';
 
 interface AvailableFixesSectionProps {
   analysis: PreflightAnalysis;
@@ -16,6 +17,7 @@ interface AvailableFixesSectionProps {
   appliedCorrections?: Array<{ id: string; label: string; appliedAt: number; details?: { before?: string; after?: string; summary?: string } }>;
   onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   onOpenApplyAllModal?: () => void;
+  onRequestDimensionFix?: (action?: 'scale_uniform' | 'rotate_90') => void;
   onRequestPdfxFinalize?: () => void;
   onOpenPdfxModal?: () => void;
   isFixingInProgress?: boolean;
@@ -30,6 +32,7 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   appliedCorrections = [],
   onFixApplied,
   onOpenApplyAllModal,
+  onRequestDimensionFix,
   onRequestPdfxFinalize,
   onOpenPdfxModal,
   isFixingInProgress = false,
@@ -48,6 +51,26 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
       setActiveTab('pdfx');
     }
   };
+
+  // Dimension eligibility evaluation
+  const dimensionEligibility = checkDimensionFixEligibility(analysis.document, profile);
+  const hasDimensionsApplied = appliedCorrections.some(c => c.id === 'dimensions');
+  const dimRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DIM-001');
+
+  const profileHasExpectedDimensions = Boolean(profile.expectedWidthMm && profile.expectedHeightMm);
+  const isDimensionApproved = Boolean(!dimRule || dimRule.status === 'approved');
+
+  const canFixDimensions = Boolean(
+    profileHasExpectedDimensions &&
+    !isDimensionApproved &&
+    dimensionEligibility.status === 'eligible'
+  );
+
+  const dimensionConfirmationRequired = Boolean(
+    profileHasExpectedDimensions &&
+    !isDimensionApproved &&
+    dimensionEligibility.status === 'confirmation_required'
+  );
 
   // Check what issues actually exist in the working file using Motor 1 as the single source of truth
   const colorRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-CLR-001' || r.category === 'color');
@@ -74,14 +97,21 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied);
   const canFixPdfx = Boolean((!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation') && pdfxVerifiedState !== 'verified');
 
-  const autoFixesCount = (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
-  const hasAnyFixes = hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || appliedCorrections.length > 0;
-  const hasPdfxPrereqs = Boolean(canFixRgb || canFixBoxes);
+  const autoFixesCount = (canFixDimensions ? 1 : 0) + (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
+  const hasAnyFixes = canFixDimensions || dimensionConfirmationRequired || hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || appliedCorrections.length > 0;
+  const hasPdfxPrereqs = Boolean(canFixDimensions || canFixRgb || canFixBoxes);
 
   // Detect manual issues that cannot be auto-fixed
   const dpiRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning'));
   const fontRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') && (r.status === 'error' || r.status === 'warning'));
   const manualIssues: string[] = [];
+
+  if (dimensionEligibility.status === 'manual_required' && dimensionEligibility.reasonCode === 'ASPECT_RATIO_MISMATCH') {
+    manualIssues.push('Proporção incompatível — Não é seguro adaptar esta composição automaticamente. Uma futura Correção Inteligente poderá reconstruir a arte para este formato.');
+  } else if (dimensionEligibility.status === 'manual_required' && dimensionEligibility.reasonCode === 'PAGE_SIZE_HETEROGENEOUS') {
+    manualIssues.push('Páginas heterogêneas — O documento possui páginas com tamanhos diferentes que requerem padronização manual.');
+  }
+
   if (dpiRule) manualIssues.push('Resolução de imagem baixa — Requer imagens originais em 300 DPI no software de criação.');
   if (fontRule) manualIssues.push('Fontes não incorporadas — Requer converter textos em curvas ou incorporar as fontes.');
 
@@ -167,6 +197,90 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
 
       {/* Actionable Cards: What was found, Why it matters, What to do */}
       <div className="space-y-3">
+        {/* Fix 0: Dimension Scaling / Rotation */}
+        {canFixDimensions ? (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-50/70 to-white border border-sky-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-[#F0F9FF] text-[#0284C7] shrink-0 mt-0.5">
+                <Maximize2 className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-[#0F172A]">DIMENSÕES NOMINAIS DIVERGENTES</span>
+                  <span className="px-2 py-0.5 rounded-md bg-[#E0F2FE] text-[#0369A1] text-[10px] font-bold">Geometria</span>
+                </div>
+                <p className="text-xs text-[#475569] leading-relaxed">
+                  <strong>O que foi encontrado:</strong> O documento possui {dimensionEligibility.sourceWidthMm.toFixed(1)} × {dimensionEligibility.sourceHeightMm.toFixed(1)} mm, divergente do perfil nominal ({dimensionEligibility.targetWidthMm} × {dimensionEligibility.targetHeightMm} mm).<br />
+                  <strong>Por que importa:</strong> Formatos não calibrados podem gerar cortes indevidos ou sangrias insuficientes na impressão.<br />
+                  <strong>Ação recomendada:</strong> Aplicar escala vetorial proporcional uniforme ({dimensionEligibility.uniformScale.toFixed(2)}×) sem distorção visual.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-end">
+              <button
+                type="button"
+                disabled={isFixingInProgress}
+                onClick={() => onRequestDimensionFix?.('scale_uniform')}
+                className="px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isFixingInProgress ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Ajustando...</span>
+                  </>
+                ) : (
+                  'Ajustar Dimensões'
+                )}
+              </button>
+            </div>
+          </div>
+        ) : dimensionConfirmationRequired ? (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50/70 to-white border border-amber-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-[#FFFBEB] text-[#D97706] shrink-0 mt-0.5">
+                <RotateCcw className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-[#0F172A]">ORIENTAÇÃO DA PÁGINA INVERTIDA</span>
+                  <span className="px-2 py-0.5 rounded-md bg-[#FEF3C7] text-[#B45309] text-[10px] font-bold">Confirmação</span>
+                </div>
+                <p className="text-xs text-[#475569] leading-relaxed">
+                  <strong>O que foi encontrado:</strong> O documento possui {dimensionEligibility.sourceWidthMm.toFixed(1)} × {dimensionEligibility.sourceHeightMm.toFixed(1)} mm (orientação oposta ao perfil {dimensionEligibility.targetWidthMm} × {dimensionEligibility.targetHeightMm} mm).<br />
+                  <strong>Por que importa:</strong> A imposição gráfica e impressão esperam a orientação correta.<br />
+                  <strong>Ação recomendada:</strong> Girar as páginas do documento em 90° de forma determinística.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-end">
+              <button
+                type="button"
+                disabled={isFixingInProgress}
+                onClick={() => onRequestDimensionFix?.('rotate_90')}
+                className="px-4 py-2 rounded-xl bg-[#D97706] hover:bg-[#B45309] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isFixingInProgress ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Girando...</span>
+                  </>
+                ) : (
+                  'Girar página 90°'
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (hasDimensionsApplied && isDimensionApproved) ? (
+          <AppliedFixStatusCard
+            title="Dimensões ajustadas pelo ArteCheck"
+            category="Geometria"
+            details={`${profile.expectedWidthMm} × ${profile.expectedHeightMm} mm • Escala proporcional`}
+            validationText="Revalidado pelo Motor 1"
+          />
+        ) : null}
+
         {/* Fix 1: RGB -> CMYK Color Conversion */}
         {canFixRgb ? (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 to-white border border-blue-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -198,9 +312,9 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </button>
             </div>
           </div>
-        ) : (hasRgbApplied || (!analysis.document.colorSummary.hasRgb && (colorRule?.status === 'approved' || appliedCorrections.length > 0))) ? (
+        ) : (hasRgbApplied && !analysis.document.colorSummary.hasRgb) ? (
           <AppliedFixStatusCard
-            title="Cores CMYK incorporadas ao arquivo de trabalho"
+            title="Conversão CMYK realizada pelo ArteCheck"
             category="Cores"
             details="Espaço de cor DeviceCMYK • Conversão LittleCMS CMM e perfil normativo"
             validationText="Revalidado pelo Motor 1"
@@ -265,9 +379,9 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </button>
             </div>
           </div>
-        ) : (hasPdfxApplied || pdfxVerifiedState === 'verified' || (isDeclaredPdfX && hasOutputIntent)) ? (
+        ) : (hasPdfxApplied && (pdfxVerifiedState === 'verified' || (isDeclaredPdfX && hasOutputIntent))) ? (
           <AppliedFixStatusCard
-            title="PDF/X-4 incorporado ao arquivo de trabalho"
+            title="PDF/X-4 finalizado pelo ArteCheck"
             category="Normativo"
             details="ISO 15930-7 (PDF/X-4) • Metadados XMP e Output Intent GTS_PDFX"
             validationText="Revalidado pelo Motor 1"
@@ -305,9 +419,9 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               </button>
             </div>
           </div>
-        ) : (hasBoxesApplied || (bleedRule?.status === 'approved' && (appliedCorrections.length > 0 || analysis.document.pages[0]?.trimBox?.status === 'explicit'))) ? (
+        ) : (hasBoxesApplied && bleedRule?.status === 'approved') ? (
           <AppliedFixStatusCard
-            title="Caixas técnicas incorporadas ao arquivo de trabalho"
+            title="Caixas técnicas ajustadas pelo ArteCheck"
             category="Geometria"
             details={`TrimBox: ${analysis.document.pages[0]?.trimBox?.widthMm || profile.expectedWidthMm || 0} × ${analysis.document.pages[0]?.trimBox?.heightMm || profile.expectedHeightMm || 0} mm • Sangria: ${profile.expectedBleedMm || 3} mm`}
             validationText="Revalidado pelo Motor 1"

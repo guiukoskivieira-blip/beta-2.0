@@ -22,6 +22,7 @@ import { PlansModal } from './components/PlansModal';
 import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesModal';
 import { PdfxPrerequisitesModal } from './components/PdfxPrerequisitesModal';
+import { ChangeProfileModal } from './components/ChangeProfileModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
@@ -32,8 +33,9 @@ import { createAnalysisSnapshot, buildTechnicalReport } from './services/technic
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
 import type { BetaUser, AnalysisRecordSummary } from './domain/beta';
 import type { PreflightAnalysis } from './types';
-import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi } from './services/api';
+import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi, applyDimensionFixViaApi, finalizePdfx4ViaApi } from './services/api';
 import { checkTrimBleedEligibility } from './services/trimBleedFix';
+import { checkDimensionFixEligibility } from './services/dimensionFix';
 import { apiUrl } from './config/api';
 import { auth } from './auth';
 import { getBillingStatus } from './services/billing';
@@ -89,6 +91,7 @@ export const App: React.FC = () => {
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isProfilesOpen, setIsProfilesOpen] = useState(false);
+  const [isChangeProfileOpen, setIsChangeProfileOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -436,6 +439,20 @@ export const App: React.FC = () => {
   };
 
   // Computed eligible fixes and manual warnings for "Ajustar Tudo"
+  const dimEligibility = useMemo(() => {
+    if (!currentAnalysis) return null;
+    return checkDimensionFixEligibility(currentAnalysis.document, selectedProfile);
+  }, [currentAnalysis, selectedProfile]);
+
+  const canFixDimensions = useMemo(() => {
+    if (!currentAnalysis || !selectedProfile.expectedWidthMm || !selectedProfile.expectedHeightMm) return false;
+    const dimRule = currentAnalysis.ruleResults.results.find(
+      (r) => r.ruleId === 'RULE-PROF-DIM-001'
+    );
+    if (!dimRule || dimRule.status === 'approved') return false;
+    return Boolean(dimEligibility && dimEligibility.status === 'eligible');
+  }, [currentAnalysis, selectedProfile, dimEligibility]);
+
   const canFixRgb = useMemo(() => {
     if (!currentAnalysis) return false;
     const hasRgb = currentAnalysis.document.colorSummary.hasRgb;
@@ -473,6 +490,15 @@ export const App: React.FC = () => {
 
   const plannedFixes = useMemo<PlannedFix[]>(() => {
     const list: PlannedFix[] = [];
+    if (canFixDimensions && dimEligibility) {
+      list.push({
+        id: 'dimensions',
+        title: 'Ajustar dimensões nominais',
+        category: 'Geometria',
+        description: `Aplica escala vetorial proporcional uniforme (${dimEligibility.sourceWidthMm.toFixed(0)} × ${dimEligibility.sourceHeightMm.toFixed(0)} mm → ${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm).`,
+        tag: 'Geometria',
+      });
+    }
     if (canFixRgb) {
       list.push({
         id: 'rgb_cmyk',
@@ -501,11 +527,16 @@ export const App: React.FC = () => {
       });
     }
     return list;
-  }, [canFixRgb, canFixBoxes, canFixPdfx, selectedProfile]);
+  }, [canFixDimensions, dimEligibility, canFixRgb, canFixBoxes, canFixPdfx, selectedProfile]);
 
   const manualWarnings = useMemo<string[]>(() => {
     if (!currentAnalysis) return [];
     const list: string[] = [];
+    if (dimEligibility?.status === 'manual_required' && dimEligibility.reasonCode === 'ASPECT_RATIO_MISMATCH') {
+      list.push('Proporção incompatível — Não é seguro adaptar esta composição automaticamente. Uma futura Correção Inteligente poderá reconstruir a arte para este formato.');
+    } else if (dimEligibility?.status === 'manual_required' && dimEligibility.reasonCode === 'PAGE_SIZE_HETEROGENEOUS') {
+      list.push('Páginas heterogêneas — O documento possui páginas com tamanhos diferentes.');
+    }
     const dpiRule = currentAnalysis.ruleResults.results.find(
       (r) => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning')
     );
@@ -515,7 +546,7 @@ export const App: React.FC = () => {
     if (dpiRule) list.push('Resolução de imagem baixa — Requer arquivo com imagens em 300 DPI no software de criação.');
     if (fontRule) list.push('Fontes não incorporadas — Requer converter textos em curvas no software gráfico de origem.');
     return list;
-  }, [currentAnalysis]);
+  }, [currentAnalysis, dimEligibility]);
 
   // Orchestrator for Batch "Ajustar Tudo Automaticamente"
   const handleExecuteApplyAllFixes = async () => {
@@ -525,10 +556,39 @@ export const App: React.FC = () => {
       setIsFixingInProgress(true);
 
       const steps: Array<{
-        id: 'rgb' | 'boxes' | 'pdfx';
+        id: 'dimensions' | 'rgb' | 'boxes' | 'pdfx';
         label: string;
         execute: (file: File) => Promise<{ blob: Blob; fixId: string; fixLabel: string; isPdfx?: boolean; details: any }>;
       }> = [];
+
+      if (canFixDimensions) {
+        steps.push({
+          id: 'dimensions',
+          label: 'Ajustando dimensões proporcionalmente...',
+          execute: async (file) => {
+            const res = await applyDimensionFixViaApi(file, selectedProfile, 'scale_uniform');
+            if (!res.success || !res.fixedPdfBase64) {
+              throw new Error(res.error || 'Falha ao ajustar dimensões.');
+            }
+            const byteChars = atob(res.fixedPdfBase64);
+            const byteNums = new Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) {
+              byteNums[i] = byteChars.charCodeAt(i);
+            }
+            const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+            return {
+              blob,
+              fixId: 'dimensions',
+              fixLabel: 'Dimensões nominais ajustadas',
+              details: {
+                before: `${dimEligibility?.sourceWidthMm.toFixed(1)} × ${dimEligibility?.sourceHeightMm.toFixed(1)} mm`,
+                after: `${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm`,
+                summary: 'Escala vetorial proporcional uniforme sem rasterização.',
+              },
+            };
+          },
+        });
+      }
 
       if (canFixRgb) {
         steps.push({
@@ -767,10 +827,55 @@ export const App: React.FC = () => {
     }
   };
 
+  // Individual Dimension Fix Handler (scale_uniform or rotate_90)
+  const handleFixDimensions = async (action: 'scale_uniform' | 'rotate_90' = 'scale_uniform') => {
+    if (isFixingInProgress || !originalFile || !currentAnalysis) return;
+
+    try {
+      setIsFixingInProgress(true);
+      setErrorMessage(null);
+      const fileToSend = workingFile || originalFile;
+
+      const res = await applyDimensionFixViaApi(fileToSend, selectedProfile, action);
+      if (!res.success || !res.fixedPdfBase64) {
+        throw new Error(res.error || 'Falha ao ajustar dimensões do documento.');
+      }
+
+      const byteChars = atob(res.fixedPdfBase64);
+      const byteNums = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNums[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+
+      const label = action === 'rotate_90' ? 'Páginas giradas em 90°' : 'Dimensões nominais ajustadas';
+      const summary = action === 'rotate_90'
+        ? 'Orientação de página corrigida deterministamente.'
+        : `Escala vetorial proporcional uniforme (${dimEligibility?.sourceWidthMm.toFixed(0)}×${dimEligibility?.sourceHeightMm.toFixed(0)} mm → ${selectedProfile.expectedWidthMm}×${selectedProfile.expectedHeightMm} mm).`;
+
+      await applyWorkingPdfUpdate(
+        blob,
+        'dimensions',
+        label,
+        false,
+        {
+          before: `${dimEligibility?.sourceWidthMm.toFixed(1) || ''} × ${dimEligibility?.sourceHeightMm.toFixed(1) || ''} mm`,
+          after: `${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm`,
+          summary,
+        }
+      );
+    } catch (err: any) {
+      console.error('Erro no ajuste de dimensões:', err);
+      setErrorMessage(err?.message || 'Falha ao ajustar dimensões.');
+    } finally {
+      setIsFixingInProgress(false);
+    }
+  };
+
   // Open PDF/X flow: if prerequisites are pending, open modal; otherwise directly finalize
   const handleOpenPdfxFlow = () => {
     if (!currentAnalysis) return;
-    const hasPrereqs = Boolean(canFixRgb || canFixBoxes);
+    const hasPrereqs = Boolean(canFixDimensions || canFixRgb || canFixBoxes);
     if (hasPrereqs) {
       setIsPdfxPrereqsModalOpen(true);
     } else {
@@ -784,18 +889,11 @@ export const App: React.FC = () => {
 
     try {
       setIsFixingInProgress(true);
+      setErrorMessage(null);
       const fileToSend = workingFile || originalFile;
 
-      const finFormData = new FormData();
-      finFormData.append('file', fileToSend);
-      if (selectedProfile.id) finFormData.append('profileId', selectedProfile.id);
-
-      const finRes = await fetch(apiUrl('/api/finalize-pdfx4'), {
-        method: 'POST',
-        body: finFormData,
-      });
-      const finData = await finRes.json();
-      if (!finRes.ok || !finData.finalizedPdfBase64) {
+      const finData = await finalizePdfx4ViaApi(fileToSend, selectedProfile);
+      if (!finData.success || !finData.finalizedPdfBase64) {
         throw new Error(finData.error || 'Falha na finalização PDF/X-4.');
       }
 
@@ -1107,10 +1205,8 @@ export const App: React.FC = () => {
         viewMode={viewMode}
         onToggleViewMode={(mode) => setViewMode(mode)}
         selectedProfile={selectedProfile}
-        onOpenProfiles={() => {
-          setCustomInitDimensions(null);
-          setIsProfilesOpen(true);
-        }}
+        onOpenChangeProfile={() => setIsChangeProfileOpen(true)}
+        hasActiveAnalysis={Boolean(currentAnalysis)}
       />
 
       {/* Main Layout Area */}
@@ -1282,6 +1378,7 @@ export const App: React.FC = () => {
                 appliedCorrections={appliedCorrections}
                 onFixApplied={handleFixApplied}
                 onOpenApplyAllModal={() => setIsApplyAllModalOpen(true)}
+                onRequestDimensionFix={handleFixDimensions}
                 onRequestPdfxFinalize={handleOpenPdfxFlow}
                 onOpenPdfxModal={handleOpenPdfxFlow}
                 isFixingInProgress={isFixingInProgress}
@@ -1307,6 +1404,13 @@ export const App: React.FC = () => {
                 file={workingFile}
                 onClear={handleReset}
                 onAnalyze={handleStartAnalysis}
+                isLoading={processingStatus !== 'idle'}
+                selectedProfile={selectedProfile}
+                onOpenProfilesModal={() => {
+                  setCustomInitDimensions(null);
+                  setIsProfilesOpen(true);
+                }}
+                onSelectProfile={handleSelectProfile}
               />
             </div>
           ) : (
@@ -1329,6 +1433,16 @@ export const App: React.FC = () => {
       <Footer />
 
       {/* Modals */}
+      <ChangeProfileModal
+        isOpen={isChangeProfileOpen}
+        onClose={() => setIsChangeProfileOpen(false)}
+        currentProfile={selectedProfile}
+        onConfirmChange={handleSelectProfile}
+        onOpenFullLibrary={() => {
+          setCustomInitDimensions(null);
+          setIsProfilesOpen(true);
+        }}
+      />
       <PdfxPrerequisitesModal
         isOpen={isPdfxPrereqsModalOpen}
         onClose={() => setIsPdfxPrereqsModalOpen(false)}

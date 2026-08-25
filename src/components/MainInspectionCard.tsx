@@ -183,6 +183,13 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
   const p1 = document.pages[0];
   const formatValue = p1 ? `${p1.widthMm.toFixed(0)} × ${p1.heightMm.toFixed(0)} mm` : '210 × 297 mm';
   
+  // Dimensions status from Motor 1
+  const dimRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DIM-001');
+  const isGenericProfile = Boolean(!profile.expectedWidthMm || !profile.expectedHeightMm);
+  const dimStatusText = isGenericProfile || dimRule?.status === 'approved' 
+    ? 'OK' 
+    : (dimRule?.status === 'warning' ? 'Atenção' : 'Ajustável');
+
   // Bleed status
   const bleedRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
   const bleedMm = p1?.bleedBox?.widthMm && p1?.trimBox?.widthMm 
@@ -343,7 +350,11 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-[#0F172A]">{formatValue}</span>
-              <span className="px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669] text-[10px] font-bold">OK</span>
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                dimStatusText === 'OK' 
+                  ? 'bg-[#ECFDF5] text-[#059669]' 
+                  : (dimStatusText === 'Atenção' ? 'bg-[#FEF3C7] text-[#B45309]' : 'bg-[#EFF6FF] text-[#1D4ED8]')
+              }`}>{dimStatusText}</span>
             </div>
           </div>
 

@@ -12,7 +12,8 @@ import { applyOutputIntentFix } from "./src/services/outputIntentFix";
 import { applyImageColorFix } from "./src/services/imageColorFix";
 import { preparePdfForPdfx4 } from "./src/services/pdfxPreparation";
 import { finalizePdfx4Document } from "./src/services/pdfxFinalize";
-import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE } from "./src/utils/productionProfiles";
+import { applyDimensionFix } from "./src/services/dimensionFix";
+import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE, STANDARD_PROFILES } from "./src/utils/productionProfiles";
 import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
 import { LIMITS } from "./src/config/limits";
@@ -1074,19 +1075,46 @@ async function startServer() {
     }
   });
 
+  // Helper to resolve ProductionProfile from request body supporting standard & custom profiles
+  function resolveProfileFromBody(req: Request): ProductionProfile {
+    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const profileMap: Record<string, ProductionProfile> = {};
+    for (const p of STANDARD_PROFILES) {
+      profileMap[p.id] = p;
+    }
+    profileMap['commercial_print_300dpi'] = COMMERCIAL_PRINT_300DPI_PROFILE;
+    profileMap['commercial_flyer_a4'] = A4_COMMERCIAL_FLYER_PROFILE;
+    profileMap['large_format_banner'] = LARGE_FORMAT_BANNER_PROFILE;
+
+    let profile: ProductionProfile = profileMap[profileId] || {
+      id: profileId || 'custom_profile',
+      name: typeof req.body?.profileName === 'string' ? req.body.profileName : 'Perfil Personalizado',
+      category: 'custom' as const,
+      description: 'Perfil personalizado',
+      minEffectiveDpi: 300,
+      warningDpiThreshold: 200,
+      rgbPolicy: 'error' as const,
+    };
+
+    if (req.body?.expectedWidthMm && req.body?.expectedHeightMm) {
+      profile = {
+        ...profile,
+        expectedWidthMm: Number(req.body.expectedWidthMm),
+        expectedHeightMm: Number(req.body.expectedHeightMm),
+      };
+    }
+    if (req.body?.expectedBleedMm !== undefined) {
+      profile.expectedBleedMm = Number(req.body.expectedBleedMm);
+    }
+    return profile;
+  }
+
   // POST /api/fix-trim-bleed - Apply TrimBox/BleedBox correction to a copy of the PDF
   app.post("/api/fix-trim-bleed", upload.single("file"), async (req: Request, res: Response) => {
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
 
-    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
-
-    const profileMap: Record<string, ProductionProfile> = {
-      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
-      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
-      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
-    };
-    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+    const profile = resolveProfileFromBody(req);
 
     try {
       if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
@@ -1150,6 +1178,43 @@ async function startServer() {
     }
   });
 
+  // POST /api/fix-dimensions - Deterministic vector dimension scaling or rotation
+  app.post("/api/fix-dimensions", upload.single("file"), async (req: Request, res: Response) => {
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
+
+    const action = typeof req.body?.action === "string" ? req.body.action : "scale_uniform";
+    const profile = resolveProfileFromBody(req);
+
+    try {
+      if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({ success: false, error: "Arquivo sem assinatura PDF válida." });
+      }
+
+      res.setHeader("X-ArteCheck-Backend-Version", "dimension-fix-v1");
+
+      const result = await applyDimensionFix(file.buffer, profile, { action: action as any });
+
+      if (!result.success || !result.fixedPdfBase64) {
+        return res.json({
+          success: false,
+          error: result.error || "Falha ao ajustar dimensões do PDF.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        fixedPdfBase64: result.fixedPdfBase64,
+        transformedDimensions: result.transformedDimensions,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        error: error?.message || "Falha na aplicação do ajuste de dimensões.",
+      });
+    }
+  });
+
   // POST /api/fix-output-intent - Configure OutputIntent and real ICC profile on a copy of the PDF
   app.post("/api/fix-output-intent", upload.fields([{ name: 'file', maxCount: 1 }, { name: 'iccFile', maxCount: 1 }]), async (req: Request, res: Response) => {
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
@@ -1158,19 +1223,12 @@ async function startServer() {
 
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
 
-    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
+    const profile = resolveProfileFromBody(req);
     const iccProfileId = typeof req.body?.iccProfileId === "string" ? req.body.iccProfileId : "cgats_tr_001_swop";
     const outputConditionIdentifier = typeof req.body?.outputConditionIdentifier === "string" ? req.body.outputConditionIdentifier : "CGATS TR 001";
     const targetColorSpace = (typeof req.body?.targetColorSpace === "string" ? req.body.targetColorSpace : "CMYK") as any;
     const registryName = typeof req.body?.registryName === "string" ? req.body.registryName : undefined;
     const info = typeof req.body?.info === "string" ? req.body.info : undefined;
-
-    const profileMap: Record<string, ProductionProfile> = {
-      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
-      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
-      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
-    };
-    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
 
     try {
       if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
@@ -1340,17 +1398,11 @@ async function startServer() {
 
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
 
-    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
     const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
     const renderingIntent = typeof req.body?.renderingIntent === "string" ? req.body.renderingIntent : "RelativeColorimetric";
     const allowFallbackSrgb = req.body?.allowFallbackSrgb === "true" || req.body?.allowFallbackSrgb === true;
 
-    const profileMap: Record<string, ProductionProfile> = {
-      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
-      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
-      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
-    };
-    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+    const profile = resolveProfileFromBody(req);
 
     try {
       if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
@@ -1446,16 +1498,10 @@ async function startServer() {
 
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
 
-    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
     const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
     const allowFallbackSrgb = req.body?.allowFallbackSrgb === "true" || req.body?.allowFallbackSrgb === true;
 
-    const profileMap: Record<string, ProductionProfile> = {
-      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
-      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
-      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
-    };
-    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+    const profile = resolveProfileFromBody(req);
 
     try {
       if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
@@ -1530,18 +1576,12 @@ async function startServer() {
 
     if (!file) return res.status(400).json({ success: false, error: "Nenhum PDF enviado para finalização." });
 
-    const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
     const destinationIccPresetId = typeof req.body?.destinationIccPresetId === "string" ? req.body.destinationIccPresetId : "cgats_tr_001_swop";
     const title = typeof req.body?.title === "string" ? req.body.title : undefined;
     const author = typeof req.body?.author === "string" ? req.body.author : undefined;
     const creator = typeof req.body?.creator === "string" ? req.body.creator : undefined;
 
-    const profileMap: Record<string, ProductionProfile> = {
-      commercial_print_300dpi: COMMERCIAL_PRINT_300DPI_PROFILE,
-      commercial_flyer_a4: A4_COMMERCIAL_FLYER_PROFILE,
-      large_format_banner: LARGE_FORMAT_BANNER_PROFILE,
-    };
-    const profile = profileMap[profileId] || COMMERCIAL_PRINT_300DPI_PROFILE;
+    const profile = resolveProfileFromBody(req);
 
     try {
       if (!file.buffer.subarray(0, Math.min(file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
