@@ -321,7 +321,101 @@ export const App: React.FC = () => {
     await reanalyzeWorkingDocument(newProfile);
   };
 
-  // Cumulative Fix Application Handler
+  // Core updater for working PDF and Motor 1 reanalysis (does NOT check isFixingInProgress guard)
+  const applyWorkingPdfUpdate = async (
+    newBlob: Blob,
+    fixId: string,
+    fixLabel: string,
+    isPdfxVerified?: boolean,
+    details?: { before?: string; after?: string; summary?: string }
+  ) => {
+    if (!originalFile) return;
+
+    const updatedFileName = originalFile.name;
+    const updatedWorkingFile = new File([newBlob], updatedFileName, { type: 'application/pdf' });
+
+    setWorkingPdfBlob(newBlob);
+    setWorkingFile(updatedWorkingFile);
+
+    const existingIdx = appliedCorrections.findIndex((c) => c.id === fixId);
+    let newCorrections: AppliedCorrectionItem[];
+    if (existingIdx >= 0) {
+      newCorrections = [...appliedCorrections];
+      newCorrections[existingIdx] = {
+        id: fixId,
+        label: fixLabel,
+        appliedAt: Date.now(),
+        details: details || newCorrections[existingIdx].details,
+      };
+    } else {
+      newCorrections = [
+        ...appliedCorrections,
+        { id: fixId, label: fixLabel, appliedAt: Date.now(), details },
+      ];
+    }
+    setAppliedCorrections(newCorrections);
+
+    // Re-extract and re-analyze deterministic rules over the updated working PDF
+    const result = await uploadPdfForExtraction(updatedWorkingFile);
+    if (result.success && result.document) {
+      const updatedRules = runDeterministicRuleEngine(result.document, selectedProfile);
+
+      const updatedAnalysis: PreflightAnalysis = {
+        id: currentAnalysis?.id || `analysis_${Date.now()}`,
+        createdAt: currentAnalysis?.createdAt || Date.now(),
+        fileName: updatedFileName,
+        fileSizeBytes: newBlob.size,
+        document: result.document,
+        ruleResults: updatedRules,
+        profileId: selectedProfile.id,
+        diagnosticInfo: {
+          extractionDurationMs: 35,
+          evaluationDurationMs: 12,
+        },
+      };
+
+      setCurrentAnalysis(updatedAnalysis);
+
+      // Update local storage record with post-fix snapshot
+      const postFixSnapshot = createAnalysisSnapshot(updatedAnalysis, selectedProfile);
+      const updatedReport = buildTechnicalReport(
+        originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+        { ruleResults: updatedRules } as any,
+        selectedProfile
+      );
+
+      await storage.saveAnalysis({
+        id: updatedAnalysis.id,
+        createdAt: updatedAnalysis.createdAt,
+        fileName: updatedAnalysis.fileName,
+        fileSizeBytes: updatedAnalysis.fileSizeBytes,
+        segmentName: selectedProfile.category,
+        productName: selectedProfile.name,
+        variantName: 'Corrigido',
+        productionProfileId: selectedProfile.id,
+        status: updatedRules.scoreSummary.classification,
+        score: updatedRules.scoreSummary.score,
+        errorCount: updatedRules.errorCount,
+        warningCount: updatedRules.warningCount,
+        approvedCount: updatedRules.approvedCount,
+        initialSnapshot: originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
+        postFixSnapshot,
+        reportData: updatedReport,
+      });
+
+      loadHistory();
+    }
+
+    // Manage PDF/X verification status
+    if (isPdfxVerified) {
+      setPdfxVerifiedState('verified');
+    } else if (pdfxVerifiedState === 'verified') {
+      // If a non-PDF/X fix was applied after PDF/X was verified, require revalidation
+      setPdfxVerifiedState('needs_revalidation');
+    }
+  };
+
+  // Safe wrapper for child components
   const handleFixApplied = async (
     newBlob: Blob,
     fixId: string,
@@ -333,89 +427,7 @@ export const App: React.FC = () => {
 
     try {
       setIsFixingInProgress(true);
-
-      const updatedFileName = originalFile.name;
-      const updatedWorkingFile = new File([newBlob], updatedFileName, { type: 'application/pdf' });
-
-      setWorkingPdfBlob(newBlob);
-      setWorkingFile(updatedWorkingFile);
-
-      const existingIdx = appliedCorrections.findIndex((c) => c.id === fixId);
-      let newCorrections: AppliedCorrectionItem[];
-      if (existingIdx >= 0) {
-        newCorrections = [...appliedCorrections];
-        newCorrections[existingIdx] = {
-          id: fixId,
-          label: fixLabel,
-          appliedAt: Date.now(),
-          details: details || newCorrections[existingIdx].details,
-        };
-      } else {
-        newCorrections = [
-          ...appliedCorrections,
-          { id: fixId, label: fixLabel, appliedAt: Date.now(), details },
-        ];
-      }
-      setAppliedCorrections(newCorrections);
-
-      // Re-extract and re-analyze deterministic rules over the updated working PDF
-      const result = await uploadPdfForExtraction(updatedWorkingFile);
-      if (result.success && result.document) {
-        const updatedRules = runDeterministicRuleEngine(result.document, selectedProfile);
-
-        const updatedAnalysis: PreflightAnalysis = {
-          id: currentAnalysis?.id || `analysis_${Date.now()}`,
-          createdAt: currentAnalysis?.createdAt || Date.now(),
-          fileName: updatedFileName,
-          fileSizeBytes: newBlob.size,
-          document: result.document,
-          ruleResults: updatedRules,
-          profileId: selectedProfile.id,
-          diagnosticInfo: {
-            extractionDurationMs: 35,
-            evaluationDurationMs: 12,
-          },
-        };
-
-        setCurrentAnalysis(updatedAnalysis);
-
-        // Update local storage record with post-fix snapshot
-        const postFixSnapshot = createAnalysisSnapshot(updatedAnalysis, selectedProfile);
-        const updatedReport = buildTechnicalReport(
-          originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
-          { ruleResults: updatedRules } as any,
-          selectedProfile
-        );
-
-        await storage.saveAnalysis({
-          id: updatedAnalysis.id,
-          createdAt: updatedAnalysis.createdAt,
-          fileName: updatedAnalysis.fileName,
-          fileSizeBytes: updatedAnalysis.fileSizeBytes,
-          segmentName: selectedProfile.category,
-          productName: selectedProfile.name,
-          variantName: 'Corrigido',
-          productionProfileId: selectedProfile.id,
-          status: updatedRules.scoreSummary.classification,
-          score: updatedRules.scoreSummary.score,
-          errorCount: updatedRules.errorCount,
-          warningCount: updatedRules.warningCount,
-          approvedCount: updatedRules.approvedCount,
-          initialSnapshot: originalAnalysis ? createAnalysisSnapshot(originalAnalysis, selectedProfile) : postFixSnapshot,
-          postFixSnapshot,
-          reportData: updatedReport,
-        });
-
-        loadHistory();
-      }
-
-      // Manage PDF/X verification status
-      if (isPdfxVerified) {
-        setPdfxVerifiedState('verified');
-      } else if (pdfxVerifiedState === 'verified') {
-        // If a non-PDF/X fix was applied after PDF/X was verified, require revalidation
-        setPdfxVerifiedState('needs_revalidation');
-      }
+      await applyWorkingPdfUpdate(newBlob, fixId, fixLabel, isPdfxVerified, details);
     } catch (err) {
       console.error('Erro ao reanalisar o PDF corrigido:', err);
     } finally {
@@ -794,7 +806,7 @@ export const App: React.FC = () => {
       }
       const blob = new Blob([new Uint8Array(finNums)], { type: 'application/pdf' });
 
-      await handleFixApplied(
+      await applyWorkingPdfUpdate(
         blob,
         'pdfx4',
         'PDF/X-4 finalizado e verificado',
@@ -809,7 +821,7 @@ export const App: React.FC = () => {
       setIsPdfxPrereqsModalOpen(false);
     } catch (err: any) {
       console.error('Erro na finalização PDF/X-4 direta:', err);
-      setErrorMessage(err?.message || 'Falha ao finalizar PDF/X-4.');
+      setErrorMessage(err?.message || 'Não foi possível finalizar PDF/X-4.');
     } finally {
       setIsFixingInProgress(false);
     }
@@ -1270,6 +1282,7 @@ export const App: React.FC = () => {
                 appliedCorrections={appliedCorrections}
                 onFixApplied={handleFixApplied}
                 onOpenApplyAllModal={() => setIsApplyAllModalOpen(true)}
+                onRequestPdfxFinalize={handleOpenPdfxFlow}
                 onOpenPdfxModal={handleOpenPdfxFlow}
                 isFixingInProgress={isFixingInProgress}
                 pdfxVerifiedState={pdfxVerifiedState}

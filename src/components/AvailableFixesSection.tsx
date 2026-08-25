@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
+import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap, Loader2 } from 'lucide-react';
 import type { PreflightAnalysis } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
 import { ImageColorFixPanel } from './ImageColorFixPanel';
@@ -16,6 +16,7 @@ interface AvailableFixesSectionProps {
   appliedCorrections?: Array<{ id: string; label: string; appliedAt: number; details?: { before?: string; after?: string; summary?: string } }>;
   onFixApplied?: (blob: Blob, fixId: string, fixLabel: string, isPdfxVerified?: boolean, details?: { before?: string; after?: string; summary?: string }) => void;
   onOpenApplyAllModal?: () => void;
+  onRequestPdfxFinalize?: () => void;
   onOpenPdfxModal?: () => void;
   isFixingInProgress?: boolean;
   pdfxVerifiedState?: 'not_verified' | 'verified' | 'needs_revalidation';
@@ -29,12 +30,24 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   appliedCorrections = [],
   onFixApplied,
   onOpenApplyAllModal,
+  onRequestPdfxFinalize,
   onOpenPdfxModal,
   isFixingInProgress = false,
   pdfxVerifiedState = 'not_verified',
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'color' | 'boxes' | 'pdfx'>('all');
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const handlePdfxClick = () => {
+    if (onRequestPdfxFinalize) {
+      onRequestPdfxFinalize();
+    } else if (onOpenPdfxModal) {
+      onOpenPdfxModal();
+    } else {
+      setIsExpanded(true);
+      setActiveTab('pdfx');
+    }
+  };
 
   // Check what issues actually exist in the working file using Motor 1 as the single source of truth
   const colorRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-CLR-001' || r.category === 'color');
@@ -236,17 +249,19 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               <button
                 type="button"
                 disabled={isFixingInProgress}
-                onClick={() => {
-                  if (onOpenPdfxModal) {
-                    onOpenPdfxModal();
-                  } else {
-                    setIsExpanded(true);
-                    setActiveTab('pdfx');
-                  }
-                }}
-                className="px-4 py-2 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                onClick={handlePdfxClick}
+                className="px-4 py-2 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
               >
-                {hasPdfxPrereqs ? 'Ver Requisitos / Finalizar' : 'Finalizar PDF/X-4'}
+                {isFixingInProgress ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Finalizando PDF/X-4...</span>
+                  </>
+                ) : hasPdfxPrereqs ? (
+                  'Ver Requisitos'
+                ) : (
+                  'Finalizar PDF/X-4'
+                )}
               </button>
             </div>
           </div>
