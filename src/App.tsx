@@ -1255,6 +1255,25 @@ export const App: React.FC = () => {
             />
           ) : currentAnalysis ? (
             <div className="space-y-6">
+              {/* Error Message Toast / Alert */}
+              {errorMessage && (
+                <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-900 shadow-2xs flex items-center justify-between gap-3 animate-in fade-in duration-200 select-none">
+                  <div className="flex items-center gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+                    <div className="text-xs font-semibold">
+                      <span>{errorMessage}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setErrorMessage(null)}
+                    className="p-1 rounded-lg text-red-600 hover:bg-red-100 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {/* Profile Change Feedback Toast */}
               {profileChangeFeedback && (
                 <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 shadow-2xs flex items-center justify-between gap-3 animate-in fade-in duration-200 select-none">

@@ -14,6 +14,7 @@
  */
 
 import crypto from 'crypto';
+import { PDFDocument } from 'pdf-lib';
 import type {
   PdfDocumentStructure,
   RuleEngineSummary,
@@ -443,7 +444,32 @@ export async function preparePdfForPdfx4(
           status: 'applied',
           before: 'Caixas de página incompletas ou ausentes',
           after: 'TrimBox e BleedBox explícitos configurados',
-          evidence: 'RULE-PROF-BLD-001 aprovado pelo Motor 1',
+          evidence: 'TrimBox e BleedBox calibrados geometricamente',
+        });
+      } else if (trimCheck && trimCheck.status === 'fixable') {
+        // Fallback: set nominal TrimBox & BleedBox equal to MediaBox for ISO 15930-7 conformance
+        const pdfDoc = await PDFDocument.load(workingBytes, { updateMetadata: false });
+        const pages = pdfDoc.getPages();
+        for (const page of pages) {
+          const mb = page.getMediaBox();
+          page.setTrimBox(mb.x, mb.y, mb.width, mb.height);
+          page.setBleedBox(mb.x, mb.y, mb.width, mb.height);
+        }
+        const fallbackBytes = await pdfDoc.save({ useObjectStreams: false });
+        const reStruct = await extractPdfStructure(fallbackBytes);
+        const reRules = runDeterministicRuleEngine(reStruct, profile);
+
+        workingBytes = fallbackBytes;
+        currentStructure = reStruct;
+        currentRules = reRules;
+
+        steps.push({
+          code: 'PDFX_PREP_BOXES',
+          title: 'Ajuste de TrimBox / BleedBox',
+          status: 'applied',
+          before: 'TrimBox ausente',
+          after: 'TrimBox e BleedBox configurados a partir do MediaBox',
+          evidence: 'Caixas técnicas nominais definidas para conformidade normativa PDF/X-4.',
         });
       } else {
         steps.push({

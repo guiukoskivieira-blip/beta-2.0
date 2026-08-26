@@ -448,15 +448,15 @@ export function evaluatePdfx4Eligibility(
           id: 'PDFX_BLEEDBOX',
           title: 'Caixa de Sangria (BleedBox)',
           category: 'geometry',
-          status: 'manual_required',
-          reasonCode: 'PDFX_BLEEDBOX_MANUAL_REQUIRED',
-          message: `Margem física no MediaBox insuficiente para acomodar a sangria exigida de ${requiredBleedMm} mm.`,
-          fixType: 'manual',
+          status: 'passed',
+          reasonCode: 'PDFX_BLEEDBOX_PROFILE_MISMATCH',
+          message: `Margem física no MediaBox insuficiente para acomodar a sangria de ${requiredBleedMm} mm exigida pelo perfil. A conformidade normativa PDF/X-4 é mantida com caixas nominais.`,
+          fixType: 'none',
         });
-        blockers.push({
-          code: 'PDFX_BLEEDBOX_MANUAL_REQUIRED',
-          title: 'Sangria Física Insuficiente',
-          reason: `O tamanho da prancheta (MediaBox) não possui margem física para comportar os ${requiredBleedMm} mm de sangria sem cortar conteúdo.`,
+        warnings.push({
+          code: 'PDFX_BLEEDBOX_PROFILE_MISMATCH',
+          title: 'Sangria do Perfil Não Atingida',
+          reason: `O arquivo não possui margem física para comportar os ${requiredBleedMm} mm de sangria do perfil "${profile.name}". A finalização PDF/X-4 manterá as caixas nominais.`,
         });
       }
     } else {
