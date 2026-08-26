@@ -181,9 +181,22 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
 
   // Determine Checklist items status
   const p1 = document.pages[0];
-  const displayW = p1 ? (p1.visualWidthMm ?? p1.widthMm) : 210;
-  const displayH = p1 ? (p1.visualHeightMm ?? p1.heightMm) : 297;
-  const formatValue = `${displayW.toFixed(0)} × ${displayH.toFixed(0)} mm`;
+  const hasValidTrimBox = Boolean(
+    p1?.trimBox &&
+    p1.trimBox.status === 'explicit' &&
+    typeof p1.trimBox.widthMm === 'number' &&
+    p1.trimBox.widthMm > 0 &&
+    typeof p1.trimBox.heightMm === 'number' &&
+    p1.trimBox.heightMm > 0
+  );
+  const isRotated = p1 ? (p1.rotation === 90 || p1.rotation === 270) : false;
+  let nominalW = hasValidTrimBox ? p1!.trimBox!.widthMm : (p1 ? (p1.visualWidthMm ?? p1.widthMm) : 210);
+  let nominalH = hasValidTrimBox ? p1!.trimBox!.heightMm : (p1 ? (p1.visualHeightMm ?? p1.heightMm) : 297);
+  if (hasValidTrimBox && isRotated) {
+    nominalW = p1!.trimBox!.heightMm;
+    nominalH = p1!.trimBox!.widthMm;
+  }
+  const formatValue = `${Math.round(nominalW)} × ${Math.round(nominalH)} mm`;
   
   // Dimensions status from Motor 1
   const dimRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DIM-001');
@@ -193,13 +206,26 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
     ? 'OK' 
     : (isRotatedWarning ? 'Orientação' : 'Ajustável');
 
-  // Bleed status
+  // Bleed status matching Motor 1 geometry
   const bleedRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
-  const bleedMm = p1?.bleedBox?.widthMm && p1?.trimBox?.widthMm 
-    ? Math.max(0, Number(((p1.bleedBox.widthMm - p1.trimBox.widthMm) / 2).toFixed(1)))
-    : 0;
-  const bleedText = bleedMm > 0 ? `${bleedMm} mm` : 'Sem sangria';
-  const bleedStatusText = bleedRule?.status === 'approved' || bleedMm >= 3 ? 'OK' : 'Atenção';
+  let calculatedBleedMm = 0;
+  if (hasValidTrimBox && p1) {
+    const tb = p1.trimBox!;
+    const bb = p1.bleedBox?.status === 'explicit' ? p1.bleedBox : p1.mediaBox;
+    if (bb) {
+      const leftBleedMm = (tb.xMm ?? 0) - (bb.xMm ?? 0);
+      const bottomBleedMm = (tb.yMm ?? 0) - (bb.yMm ?? 0);
+      const rightBleedMm = ((bb.xMm ?? 0) + (bb.widthMm ?? 0)) - ((tb.xMm ?? 0) + (tb.widthMm ?? 0));
+      const topBleedMm = ((bb.yMm ?? 0) + (bb.heightMm ?? 0)) - ((tb.yMm ?? 0) + (tb.heightMm ?? 0));
+      const minBleed = Math.max(0, Math.min(leftBleedMm, bottomBleedMm, rightBleedMm, topBleedMm));
+      calculatedBleedMm = Number(minBleed.toFixed(1));
+    }
+  }
+
+  const bleedText = calculatedBleedMm > 0
+    ? (Number.isInteger(calculatedBleedMm) ? `${calculatedBleedMm} mm` : `${calculatedBleedMm.toFixed(1)} mm`)
+    : 'Sem sangria';
+  const bleedStatusText = bleedRule?.status === 'approved' || calculatedBleedMm >= (profile.expectedBleedMm || 3) ? 'OK' : 'Atenção';
 
   // Resolution status
   const dpiRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'resolution');
