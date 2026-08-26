@@ -40,6 +40,9 @@ if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
   }
 }
 
+import { formatColorSummaryText } from '../utils/colorSummaryFormatter';
+export { formatColorSummaryText };
+
 interface MainInspectionCardProps {
   analysis: PreflightAnalysis;
   profile: ProductionProfile;
@@ -294,7 +297,7 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
   const hasRgbRaster = Boolean(document.colorSummary.hasRgbRaster);
   const hasRgbVector = Boolean(document.colorSummary.hasRgbVector);
   const hasRgb = Boolean(document.colorSummary.hasRgb);
-  const colorText = hasRgb ? 'RGB' : (document.colorSummary.hasCmyk ? 'CMYK' : 'Spot / Gray');
+  const colorText = formatColorSummaryText(document.colorSummary);
   const colorStatusText: 'OK' | 'Ajustável' | 'Manual' = !hasRgb 
     ? 'OK' 
     : (hasRgbRaster ? 'Ajustável' : 'Manual');
