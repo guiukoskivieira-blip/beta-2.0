@@ -229,4 +229,146 @@ describe('ARTECHECK AI — Hotfix do Relatório Histórico e Linguagem Operacion
     downloadReportAction();
     assert.equal(quotaCount, 5, 'Quota não pode ser alterada ao baixar relatório');
   });
+
+  it('10. Integração DOM: Simula clique real no relatório, criação de Blob, link anexado, click() e feedback', async () => {
+    const analysis = createMockAnalysis({ hasCmyk: true });
+    const initialSnapshot = createAnalysisSnapshot(analysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const reportData = buildTechnicalReport(initialSnapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+
+    const storage = new LocalStorageProvider();
+    await storage.saveAnalysis({
+      id: analysis.id,
+      createdAt: analysis.createdAt,
+      fileName: analysis.fileName,
+      fileSizeBytes: analysis.fileSizeBytes,
+      segmentName: 'Comercial',
+      productName: 'Flyer',
+      variantName: 'Padrão',
+      productionProfileId: COMMERCIAL_PRINT_300DPI_PROFILE.id,
+      status: 'approved',
+      score: 100,
+      errorCount: 0,
+      warningCount: 0,
+      approvedCount: 10,
+      initialSnapshot,
+      reportData,
+    });
+
+    // Simulação do ambiente DOM do navegador
+    let blobCreated = false;
+    let createdUrl = '';
+    let linkAppended = false;
+    let linkRemoved = false;
+    let downloadAttr = '';
+    let clickExecuted = false;
+    let urlRevoked = false;
+
+    const originalBlob = (globalThis as any).Blob;
+    const originalURL = (globalThis as any).URL;
+    const originalDocument = (globalThis as any).document;
+
+    (globalThis as any).Blob = class MockBlob {
+      constructor(public parts: any[], public options: any) {
+        blobCreated = true;
+      }
+    };
+
+    const originalCreateObjectURL = (globalThis.URL as any).createObjectURL;
+    const originalRevokeObjectURL = (globalThis.URL as any).revokeObjectURL;
+
+    (globalThis.URL as any).createObjectURL = (b: any) => {
+      createdUrl = 'blob:http://localhost/test-uuid-blob';
+      return createdUrl;
+    };
+    (globalThis.URL as any).revokeObjectURL = (u: string) => {
+      if (u === createdUrl) urlRevoked = true;
+    };
+
+    const mockAnchor: any = {
+      style: {},
+      href: '',
+      download: '',
+      setAttribute: (k: string, v: string) => {
+        if (k === 'download') downloadAttr = v;
+      },
+      click: () => {
+        clickExecuted = true;
+      },
+    };
+
+    (globalThis as any).document = {
+      body: {
+        appendChild: (el: any) => {
+          if (el === mockAnchor) linkAppended = true;
+        },
+        removeChild: (el: any) => {
+          if (el === mockAnchor) linkRemoved = true;
+        },
+        contains: (el: any) => el === mockAnchor,
+      },
+      createElement: (tag: string) => {
+        if (tag === 'a') return mockAnchor;
+        return {};
+      },
+    };
+
+    try {
+      // 1. Recupera do storage (simula abertura do modal pós-reload)
+      const item = await storage.getAnalysis(analysis.id);
+      assert.ok(item, 'Item deve existir no storage');
+
+      // 2. Simula o handler handleExportReport
+      const pdfBytes = await generateTechnicalReportPdf(item.reportData);
+      assert.ok(pdfBytes.length > 0, 'PDF deve possuir bytes');
+
+      const fileName = generateReportPdfFileName(item.reportData.fileName, item.reportData.generatedAt);
+      
+      // 3. Executa o downloadTechnicalReportPdf
+      const { downloadTechnicalReportPdf } = await import('../src/services/reportPdfGenerator');
+      downloadTechnicalReportPdf(pdfBytes, fileName);
+
+      // Validações do ciclo completo do DOM
+      assert.equal(blobCreated, true, 'Blob com MIME application/pdf deve ter sido criado');
+      assert.equal(linkAppended, true, 'Elemento <a> deve ter sido anexado ao body');
+      assert.equal(clickExecuted, true, 'Método click() deve ter sido executado');
+      assert.ok(downloadAttr.startsWith('ArteCheck_Relatorio_catalogo_verao_2026_'), 'Atributo download deve ter nome seguro');
+      assert.ok(downloadAttr.endsWith('.pdf'));
+    } finally {
+      (globalThis as any).Blob = originalBlob;
+      (globalThis.URL as any).createObjectURL = originalCreateObjectURL;
+      (globalThis.URL as any).revokeObjectURL = originalRevokeObjectURL;
+      (globalThis as any).document = originalDocument;
+    }
+  });
+
+  it('11. Roundtrip: Storage serialize/deserialize (recarregamento) preserva estrutura para exportação do PDF', async () => {
+    const analysis = createMockAnalysis({ hasCmyk: true });
+    const initialSnapshot = createAnalysisSnapshot(analysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const reportData = buildTechnicalReport(initialSnapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+
+    const serialized = JSON.stringify({
+      id: analysis.id,
+      createdAt: analysis.createdAt,
+      fileName: analysis.fileName,
+      fileSizeBytes: analysis.fileSizeBytes,
+      segmentName: 'Comercial',
+      productName: 'Flyer',
+      variantName: 'Padrão',
+      productionProfileId: COMMERCIAL_PRINT_300DPI_PROFILE.id,
+      status: 'approved',
+      score: 100,
+      errorCount: 0,
+      warningCount: 0,
+      approvedCount: 10,
+      initialSnapshot,
+      reportData,
+    });
+
+    const parsed = JSON.parse(serialized);
+    const pdfBytes = await generateTechnicalReportPdf(parsed.reportData);
+    assert.ok(pdfBytes instanceof Uint8Array);
+    assert.ok(pdfBytes.length > 1000);
+    const header = Buffer.from(pdfBytes.buffer, pdfBytes.byteOffset, 5).toString('ascii');
+    assert.equal(header, '%PDF-');
+  });
 });

@@ -15,6 +15,7 @@ interface HistoryModalProps {
 export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onSelectAnalysis }) => {
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<{ id: string; type: 'loading' | 'success' | 'error'; message: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const storage = new LocalStorageProvider();
@@ -23,6 +24,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
     if (isOpen) {
       setExportError(null);
       setExportSuccess(null);
+      setExportStatus(null);
       storage.listAnalyses().then(setHistory);
     }
   }, [isOpen]);
@@ -39,6 +41,10 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
       setExportError(null);
       setExportSuccess(null);
       setExportingId(item.id);
+      setExportStatus({ id: item.id, type: 'loading', message: 'Gerando relatório...' });
+
+      // Yield frame to guarantee browser paints "Gerando relatório..."
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
       let reportData = item.reportData;
       if (!reportData && item.initialSnapshot && item.initialSnapshot.documentSummary) {
@@ -56,11 +62,18 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
       const pdfBytes = await generateTechnicalReportPdf(reportData);
       const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
       downloadTechnicalReportPdf(pdfBytes, fileName);
-      setExportSuccess(`Relatório técnico de "${item.fileName}" gerado e baixado com sucesso.`);
-      setTimeout(() => setExportSuccess(null), 4000);
+
+      setExportStatus({ id: item.id, type: 'success', message: 'Relatório baixado com sucesso' });
+      setExportSuccess(`Relatório baixado com sucesso: ${fileName}`);
+      setTimeout(() => {
+        setExportStatus((prev) => (prev?.id === item.id && prev.type === 'success' ? null : prev));
+        setExportSuccess(null);
+      }, 5000);
     } catch (err: any) {
       console.error('Erro ao exportar relatório do histórico:', err);
-      setExportError(`Falha ao gerar PDF do relatório para "${item.fileName}": ${err?.message || 'Erro interno'}`);
+      const errMsg = err?.message || 'Não foi possível gerar este relatório';
+      setExportStatus({ id: item.id, type: 'error', message: 'Não foi possível gerar este relatório' });
+      setExportError(`Não foi possível gerar este relatório para "${item.fileName}": ${errMsg}`);
     } finally {
       setExportingId(null);
     }
@@ -127,6 +140,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                   : 'bg-rose-50 text-rose-700 border-rose-200';
 
               const hasReportData = Boolean(item.reportData || (item.initialSnapshot && item.initialSnapshot.documentSummary));
+              const itemStatus = exportStatus?.id === item.id ? exportStatus : null;
 
               return (
                 <div
@@ -141,6 +155,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${statusBg}`}>
                         Score {item.score}
                       </span>
+                      {itemStatus?.type === 'success' && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 animate-in fade-in">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          <span>Relatório baixado com sucesso</span>
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-[11px] text-[#64748B]">
                       <span>{dateStr}</span>
@@ -154,6 +174,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                         Relatório técnico completo indisponível para este registro antigo (apenas metadados).
                       </p>
                     )}
+                    {itemStatus?.type === 'error' && (
+                      <p className="text-[10px] text-rose-600 font-semibold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>Não foi possível gerar este relatório</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -162,7 +188,9 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                       onClick={() => handleExportReport(item)}
                       disabled={!hasReportData || exportingId === item.id}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
-                        hasReportData
+                        itemStatus?.type === 'success'
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 shadow-2xs'
+                          : hasReportData
                           ? 'bg-white hover:bg-slate-100 border-slate-200 text-[#334155] shadow-2xs cursor-pointer'
                           : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-60'
                       }`}
@@ -176,6 +204,11 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
                           <span>Gerando relatório...</span>
+                        </>
+                      ) : itemStatus?.type === 'success' ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Baixado</span>
                         </>
                       ) : (
                         <>

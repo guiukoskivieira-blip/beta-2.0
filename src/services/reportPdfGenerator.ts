@@ -472,7 +472,8 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
   cursorY -= 15;
 
   // 4. Intervenções Manuais Recomendadas
-  if (report.manualInterventions.length > 0) {
+  const interventions = report.manualInterventions || [];
+  if (interventions.length > 0) {
     checkPageBreak(80);
 
     currentPage.drawText('INTERVENÇÕES MANUAIS NECESSÁRIAS NO ARQUIVO DE ORIGEM', {
@@ -484,7 +485,7 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
     });
     cursorY -= 15;
 
-    for (const intervention of report.manualInterventions) {
+    for (const intervention of interventions) {
       const instLines = wrapText(intervention.instruction, helvetica, 7.5, CONTENT_WIDTH - 20);
       const cardHeight = 28 + instLines.length * 10;
       checkPageBreak(cardHeight + 10);
@@ -555,13 +556,27 @@ export async function generateTechnicalReportPdf(report: TechnicalReportData): P
  * Dispara o download do PDF do relatório diretamente no navegador do usuário.
  */
 export function downloadTechnicalReportPdf(pdfBytes: Uint8Array, fileName: string): void {
-  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const cleanBuffer = pdfBytes.buffer.slice(
+    pdfBytes.byteOffset,
+    pdfBytes.byteOffset + pdfBytes.byteLength
+  );
+  const blob = new Blob([cleanBuffer], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.style.display = 'none';
   a.href = url;
   a.download = fileName;
+  a.setAttribute('download', fileName);
+  a.setAttribute('target', '_blank');
+  a.setAttribute('rel', 'noopener noreferrer');
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setTimeout(() => {
+    try {
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    } catch {}
+  }, 10000);
 }
