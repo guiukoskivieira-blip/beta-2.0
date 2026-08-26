@@ -223,18 +223,23 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
   if (!isValidUuid(userId)) return;
 
   const admin = getBillingAdmin();
-  if (!admin) return;
+  if (!admin) {
+    throw new Error('Supabase billing admin client indisponível.');
+  }
 
   const state = await getSubscriptionUsage(userId);
-  if (!state || state.remaining <= 0) return;
+  if (!state || state.remaining <= 0) {
+    throw new Error('Limite de análises atingido para este ciclo.');
+  }
 
   if (state.isFree) {
-    // Para plano Free sem subscription física, registra na tabela base analyses
+    // Para plano Free sem subscription física, registra na tabela base analyses com file_size_bytes
     const { error } = await admin.from('analyses').insert({
       id: analysisId,
       user_id: userId,
       organization_id: state.subscription.organization_id || null,
       file_name: 'analysis.pdf',
+      file_size_bytes: Math.max(0, uploadBytes || 0),
       score: 100,
       error_count: 0,
       warning_count: 0,
@@ -244,6 +249,7 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
 
     if (error) {
       console.error(`[Billing] Falha ao registrar evento de uso free para análise ${analysisId}:`, error.message);
+      throw new Error(`Falha ao registrar uso da cota: ${error.message}`);
     }
   } else {
     // Plano pago: registra em analysis_usage_events com subscription_id física válida
@@ -264,6 +270,7 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
 
     if (error) {
       console.error(`[Billing] Falha ao registrar evento de uso pago para análise ${analysisId}:`, error.message);
+      throw new Error(`Falha ao registrar uso da cota: ${error.message}`);
     }
   }
 }

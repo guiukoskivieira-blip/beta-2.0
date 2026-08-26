@@ -91,7 +91,7 @@ function extractPages(rule: RuleEvaluationResult): number[] {
   return Array.from(pages).sort((a, b) => a - b);
 }
 
-export function classifyRule(rule: RuleEvaluationResult): FixProposal | null {
+export function classifyRule(rule: RuleEvaluationResult, analysis?: PreflightAnalysis): FixProposal | null {
   if (rule.status === 'approved' || rule.status === 'undetermined') return null;
 
   const fixType = RULE_ID_TO_FIX_TYPE[rule.ruleId];
@@ -135,22 +135,44 @@ export function classifyRule(rule: RuleEvaluationResult): FixProposal | null {
         requiredInputDescription: 'Seleção de perfil ICC padrão (FOGRA39, ISO Coated v2, SWOP) ou envio de arquivo .icc calibrado.',
       };
 
-    case 'color_conversion':
+    case 'color_conversion': {
+      const hasRgbRaster = Boolean(analysis?.document?.colorSummary?.hasRgbRaster);
+
+      if (hasRgbRaster) {
+        return {
+          id: `fix_${rule.ruleId}`,
+          ruleId: rule.ruleId,
+          type: 'color_conversion',
+          safetyLevel: 'assisted',
+          title: 'Converter imagens RGB para CMYK',
+          description: 'Conversão determinística de imagens raster RGB para CMYK via LittleCMS CMM WebAssembly com perfil ICC de destino calibrado e preservação dimensional.',
+          affectedPages,
+          canApply: true,
+          requiresHumanApproval: true,
+          reasonIfUnavailable: 'A conversão de cores exige seleção de perfil ICC CMYK de destino e autorização de renderização.',
+          measuredValue: 'Imagens DeviceRGB detectadas',
+          expectedValue: 'DeviceCMYK',
+          requiredInputDescription: 'Seleção de Perfil ICC CMYK de destino (ex: CGATS TR 001 SWOP, FOGRA39, ISO Coated v2).',
+        };
+      }
+
+      // Pure vector or text RGB without raster images
       return {
         id: `fix_${rule.ruleId}`,
         ruleId: rule.ruleId,
         type: 'color_conversion',
-        safetyLevel: 'assisted',
-        title: 'Converter imagens RGB para CMYK',
-        description: 'Conversão determinística de imagens raster RGB para CMYK via LittleCMS CMM WebAssembly com perfil ICC de destino calibrado e preservação dimensional.',
+        safetyLevel: 'manual',
+        title: 'Elementos vetoriais ou textos em RGB',
+        description: 'Elementos vetoriais e textos definidos em espaço DeviceRGB não podem ser convertidos automaticamente pelo motor de imagens LittleCMS.',
         affectedPages,
-        canApply: true,
+        canApply: false,
         requiresHumanApproval: true,
-        reasonIfUnavailable: 'A conversão de cores exige seleção de perfil ICC CMYK de destino e autorização de renderização (soft-proof). Elementos vetoriais ou sombreados complexos requerem ajuste na arte.',
-        measuredValue: 'DeviceRGB detectado',
+        reasonIfUnavailable: 'A correção automática de vetores/textos RGB ainda não está disponível. Ajuste as cores dos elementos vetoriais para CMYK diretamente no software de criação.',
+        measuredValue: 'Vetores/Textos DeviceRGB detectados',
         expectedValue: 'DeviceCMYK',
-        requiredInputDescription: 'Seleção de Perfil ICC CMYK de destino (ex: CGATS TR 001 SWOP, FOGRA39, ISO Coated v2) e autorização para calibração de cores.',
+        requiredInputDescription: 'Ajuste manual da paleta de cores no software gráfico de origem.',
       };
+    }
 
     case 'dpi_enhancement':
       return {
@@ -222,12 +244,16 @@ export function classifyRule(rule: RuleEvaluationResult): FixProposal | null {
 export function buildFixProposals(analysis: PreflightAnalysis): FixEngineResult {
   const proposals: FixProposal[] = [];
   const allRules = [
-    ...analysis.ruleResults.universalRules,
-    ...analysis.ruleResults.profileRules,
+    ...(analysis.ruleResults.universalRules || []),
+    ...(analysis.ruleResults.profileRules || []),
+    ...(analysis.ruleResults.results || []),
   ];
 
+  const seenRuleIds = new Set<string>();
   for (const rule of allRules) {
-    const proposal = classifyRule(rule);
+    if (seenRuleIds.has(rule.ruleId)) continue;
+    seenRuleIds.add(rule.ruleId);
+    const proposal = classifyRule(rule, analysis);
     if (proposal) proposals.push(proposal);
   }
 
@@ -236,4 +262,8 @@ export function buildFixProposals(analysis: PreflightAnalysis): FixEngineResult 
   const manualCount = proposals.filter((p) => p.safetyLevel === 'manual').length;
 
   return { proposals, autoCount, assistedCount, manualCount };
+}
+
+export function getAvailableFixes(analysis: PreflightAnalysis): FixProposal[] {
+  return buildFixProposals(analysis).proposals;
 }

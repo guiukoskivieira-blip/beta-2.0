@@ -15,10 +15,12 @@ interface HistoryModalProps {
 export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onSelectAnalysis }) => {
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const storage = new LocalStorageProvider();
 
   useEffect(() => {
     if (isOpen) {
+      setExportError(null);
       storage.listAnalyses().then(setHistory);
     }
   }, [isOpen]);
@@ -32,6 +34,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
 
   const handleExportReport = async (item: AnalysisRecordSummary) => {
     try {
+      setExportError(null);
       setExportingId(item.id);
 
       let reportData = item.reportData;
@@ -76,8 +79,9 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
       const pdfBytes = await generateTechnicalReportPdf(reportData);
       const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
       downloadTechnicalReportPdf(pdfBytes, fileName);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao exportar relatório do histórico:', err);
+      setExportError(`Falha ao gerar PDF do relatório para "${item.fileName}": ${err?.message || 'Erro interno'}`);
     } finally {
       setExportingId(null);
     }
@@ -110,6 +114,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {exportError && (
+          <div className="mx-6 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+            {exportError}
+          </div>
+        )}
 
         {/* Content list */}
         <div className="py-4 overflow-y-auto flex-1 space-y-3">

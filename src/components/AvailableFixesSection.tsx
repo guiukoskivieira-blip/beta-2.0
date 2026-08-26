@@ -78,6 +78,8 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   const colorRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-CLR-001' || r.category === 'color');
   const bleedRule = analysis.ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
 
+  const hasRgbRaster = Boolean(analysis.document.colorSummary.hasRgbRaster);
+  const hasRgbVector = Boolean(analysis.document.colorSummary.hasRgbVector);
   const hasRgb = Boolean(analysis.document.colorSummary.hasRgb || (colorRule && colorRule.status !== 'approved'));
   const isDeclaredPdfX = Boolean(analysis.document.pdfxInfo?.isDeclaredPdfX);
   const hasOutputIntent = Boolean(analysis.document.pdfxInfo?.hasOutputIntent);
@@ -95,17 +97,30 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   const hasBoxesApplied = appliedCorrections.some(c => c.id === 'trim_bleed');
   const hasPdfxApplied = appliedCorrections.some(c => c.id.startsWith('pdfx'));
 
-  const canFixRgb = Boolean(hasRgb && !hasRgbApplied);
+  // RGB fix is available ONLY if there are raster images to convert
+  const canFixRgb = Boolean(hasRgbRaster && !hasRgbApplied);
   const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied);
-  const canFixPdfx = Boolean((!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation') && pdfxVerifiedState !== 'verified');
-
-  const autoFixesCount = (canFixDimensions ? 1 : 0) + (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
-  const hasAnyFixes = canFixDimensions || dimensionConfirmationRequired || hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || (bleedRule && bleedRule.status !== 'approved') || appliedCorrections.length > 0;
-  const hasPdfxPrereqs = Boolean(canFixDimensions || canFixRgb || canFixBoxes);
 
   // Detect manual issues that cannot be auto-fixed
   const dpiRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning'));
   const fontRule = analysis.ruleResults.results.find(r => (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') && (r.status === 'error' || r.status === 'warning'));
+  const bleedNotApproved = Boolean(bleedRule && bleedRule.status !== 'approved');
+  const bleedManualRequired = Boolean(bleedNotApproved && profileHasDimensions && !isBleedEligible && !hasBoxesApplied);
+  const dimManualRequired = Boolean(dimensionEligibility.status === 'manual_required');
+  const vectorRgbManualRequired = Boolean(hasRgbVector && !hasRgbRaster && profile.rgbPolicy === 'error');
+
+  const hasPdfxBlockers = Boolean(fontRule || dimManualRequired || bleedManualRequired || vectorRgbManualRequired);
+
+  const canFixPdfx = Boolean(
+    (!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation') &&
+    pdfxVerifiedState !== 'verified' &&
+    !hasPdfxBlockers
+  );
+
+  const autoFixesCount = (canFixDimensions ? 1 : 0) + (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
+  const hasAnyFixes = canFixDimensions || dimensionConfirmationRequired || canFixRgb || canFixPdfx || needsTrimBleed || appliedCorrections.length > 0;
+  const hasPdfxPrereqs = Boolean(canFixDimensions || canFixRgb || canFixBoxes);
+
   const manualIssues: string[] = [];
 
   if (dimensionEligibility.status === 'manual_required' && dimensionEligibility.reasonCode === 'ASPECT_RATIO_MISMATCH') {
@@ -114,12 +129,14 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
     manualIssues.push('Páginas heterogêneas — O documento possui páginas com tamanhos diferentes que requerem padronização manual.');
   }
 
+  if (hasRgbVector && !hasRgbRaster) {
+    manualIssues.push('Vetores ou textos em RGB — O documento possui elementos gráficos vetoriais/textos em DeviceRGB. A conversão automática no ArteCheck é suportada exclusivamente para imagens raster. Ajuste as cores vetoriais para CMYK diretamente no software gráfico de origem.');
+  }
+
   if (dpiRule) manualIssues.push('Resolução de imagem baixa — Requer imagens originais em 300 DPI no software de criação.');
   if (fontRule) manualIssues.push('Fontes não incorporadas — Requer converter textos em curvas ou incorporar as fontes.');
 
   // Bleed: Motor 1 flagged but auto-fix not eligible (MediaBox too small to contain bleed area)
-  const bleedNotApproved = Boolean(bleedRule && bleedRule.status !== 'approved');
-  const bleedManualRequired = Boolean(bleedNotApproved && profileHasDimensions && !isBleedEligible && !hasBoxesApplied);
   if (bleedManualRequired) {
     manualIssues.push(`Sangria insuficiente — O perfil "${profile.name}" exige ${profile.expectedBleedMm} mm de sangria, mas a área da página (MediaBox) não é grande o suficiente para conter o formato final mais sangria. Exporte o PDF com sangria de ${profile.expectedBleedMm} mm no software de criação.`);
   }

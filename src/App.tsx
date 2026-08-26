@@ -488,9 +488,9 @@ export const App: React.FC = () => {
 
   const canFixRgb = useMemo(() => {
     if (!currentAnalysis) return false;
-    const hasRgb = currentAnalysis.document.colorSummary.hasRgb;
+    const hasRgbRaster = Boolean(currentAnalysis.document.colorSummary.hasRgbRaster);
     const hasApplied = appliedCorrections.some((c) => c.id === 'rgb_cmyk');
-    return Boolean(hasRgb && !hasApplied);
+    return Boolean(hasRgbRaster && !hasApplied);
   }, [currentAnalysis, appliedCorrections]);
 
   const canFixBoxes = useMemo(() => {
@@ -518,8 +518,38 @@ export const App: React.FC = () => {
     if (!currentAnalysis) return false;
     const isDeclaredPdfX = Boolean(currentAnalysis.document.pdfxInfo?.isDeclaredPdfX);
     const hasOutputIntent = Boolean(currentAnalysis.document.pdfxInfo?.hasOutputIntent);
+    const alreadyVerified = pdfxVerifiedState === 'verified';
+    if (isDeclaredPdfX && hasOutputIntent && alreadyVerified) return false;
+
+    // Detect unfixable blockers that prevent PDF/X
+    const fontRule = currentAnalysis.ruleResults.results.find(
+      (r) => (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') && (r.status === 'error' || r.status === 'warning')
+    );
+    if (fontRule) return false;
+
+    if (dimEligibility?.status === 'manual_required') return false;
+
+    const bleedRule = currentAnalysis.ruleResults.results.find(
+      (r) => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed'
+    );
+    const profileHasDims = Boolean(
+      selectedProfile.expectedBleedMm && selectedProfile.expectedBleedMm > 0 &&
+      selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm
+    );
+    const isBleedEligible = profileHasDims && checkTrimBleedEligibility(currentAnalysis.document, selectedProfile).eligible;
+    const hasBoxesApplied = appliedCorrections.some((c) => c.id === 'trim_bleed');
+    if (bleedRule && bleedRule.status !== 'approved' && !isBleedEligible && !hasBoxesApplied) {
+      return false;
+    }
+
+    const hasRgbVector = Boolean(currentAnalysis.document.colorSummary.hasRgbVector);
+    const hasRgbRaster = Boolean(currentAnalysis.document.colorSummary.hasRgbRaster);
+    if (hasRgbVector && !hasRgbRaster && selectedProfile.rgbPolicy === 'error') {
+      return false;
+    }
+
     return Boolean(!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation');
-  }, [currentAnalysis, pdfxVerifiedState]);
+  }, [currentAnalysis, pdfxVerifiedState, dimEligibility, selectedProfile, appliedCorrections]);
 
   const plannedFixes = useMemo<PlannedFix[]>(() => {
     const list: PlannedFix[] = [];
@@ -537,7 +567,7 @@ export const App: React.FC = () => {
         id: 'rgb_cmyk',
         title: 'Converter imagens RGB para CMYK',
         category: 'Cores',
-        description: 'Converte imagens em espaço de cor DeviceRGB para DeviceCMYK utilizando LittleCMS CMM e perfil ICC normativo.',
+        description: 'Converte imagens raster em espaço de cor DeviceRGB para DeviceCMYK utilizando LittleCMS CMM e perfil ICC normativo.',
         tag: 'LittleCMS',
       });
     }
@@ -568,8 +598,15 @@ export const App: React.FC = () => {
     if (dimEligibility?.status === 'manual_required' && dimEligibility.reasonCode === 'ASPECT_RATIO_MISMATCH') {
       list.push('Proporção incompatível — Não é seguro adaptar esta composição automaticamente. Uma futura Correção Inteligente poderá reconstruir a arte para este formato.');
     } else if (dimEligibility?.status === 'manual_required' && dimEligibility.reasonCode === 'PAGE_SIZE_HETEROGENEOUS') {
-      list.push('Páginas heterogêneas — O documento possui páginas com tamanhos diferentes.');
+      list.push('Páginas heterogêneas — O documento possui páginas com tamanhos diferentes que requerem padronização manual.');
     }
+
+    const hasRgbVector = Boolean(currentAnalysis.document.colorSummary.hasRgbVector);
+    const hasRgbRaster = Boolean(currentAnalysis.document.colorSummary.hasRgbRaster);
+    if (hasRgbVector && !hasRgbRaster) {
+      list.push('Vetores ou textos em RGB — O documento possui elementos gráficos vetoriais/textos em DeviceRGB. A conversão automática no ArteCheck é suportada exclusivamente para imagens raster. Ajuste as cores vetoriais para CMYK diretamente no software gráfico de origem.');
+    }
+
     const dpiRule = currentAnalysis.ruleResults.results.find(
       (r) => (r.ruleId === 'RULE-PROF-DPI-001' || r.category === 'dpi') && (r.status === 'error' || r.status === 'warning')
     );
@@ -832,6 +869,7 @@ export const App: React.FC = () => {
       setIsApplyAllModalOpen(false);
     } catch (err: any) {
       console.error('Erro ao executar Ajustar Tudo:', err);
+      setIsApplyAllModalOpen(false);
       setErrorMessage(err?.message || 'Falha ao executar todas as correções automáticas.');
     } finally {
       setIsFixingInProgress(false);
