@@ -162,6 +162,7 @@ export interface PdfPageStructure {
   hasCmykVector?: boolean;
   hasSpotVector?: boolean;
   hasGrayVector?: boolean;
+  hasGrayRaster?: boolean;
   imageOccurrences: PdfImageOccurrence[];
   colorOccurrences: PdfColorOccurrence[];
   fonts?: any[];
@@ -174,22 +175,22 @@ export * from '../domain/colorManagement';
 export interface PdfIccProfileInfo {
   id?: string;
   name?: string;
-  components: number;
-  colorSpace: string;
-  byteLength: number;
+  components?: number;
+  colorSpace?: string;
+  byteLength?: number;
+  isValidIcc?: boolean;
   sha256?: string;
   shortSha256?: string;
-  isValidIcc: boolean;
+  alternate?: string;
   version?: string;
   deviceClass?: string;
   magicSignature?: string;
-  alternate?: string;
 }
 
 export interface PdfOutputIntent {
   type: string;
   subtype: string;
-  outputConditionIdentifier: string;
+  outputConditionIdentifier?: string;
   outputCondition?: string;
   registryName?: string;
   info?: string;
@@ -215,7 +216,9 @@ export interface PdfDocumentStructure {
     hasCmykVector?: boolean;
     hasSpotColors: boolean;
     hasSpotVector?: boolean;
+    hasGray?: boolean;
     hasGrayVector?: boolean;
+    hasGrayRaster?: boolean;
     familiesDetected: string[];
     spotPlates?: string[];
   };

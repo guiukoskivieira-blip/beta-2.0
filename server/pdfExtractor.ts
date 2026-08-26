@@ -482,9 +482,17 @@ export function parseContentStreamVectorColors(
     } else if (token === 'cs') {
       const prev = tokens[t - 1] || '';
       currentState.fillColorSpace = resolveColorSpace(prev);
+      if (currentState.fillColorSpace === 'DeviceGray') {
+        result.hasGrayVector = true;
+        result.operators.push('cs');
+      }
     } else if (token === 'CS') {
       const prev = tokens[t - 1] || '';
       currentState.strokeColorSpace = resolveColorSpace(prev);
+      if (currentState.strokeColorSpace === 'DeviceGray') {
+        result.hasGrayVector = true;
+        result.operators.push('CS');
+      }
     } else if (token === 'sc' || token === 'scn') {
       if (currentState.fillColorSpace === 'DeviceRGB') {
         result.hasRgbVector = true;
@@ -494,8 +502,10 @@ export function parseContentStreamVectorColors(
         result.operators.push(token);
       } else if (currentState.fillColorSpace === 'DeviceGray') {
         result.hasGrayVector = true;
+        result.operators.push(token);
       } else if (currentState.fillColorSpace === 'Spot') {
         result.hasSpotVector = true;
+        result.operators.push(token);
       }
     } else if (token === 'SC' || token === 'SCN') {
       if (currentState.strokeColorSpace === 'DeviceRGB') {
@@ -506,8 +516,10 @@ export function parseContentStreamVectorColors(
         result.operators.push(token);
       } else if (currentState.strokeColorSpace === 'DeviceGray') {
         result.hasGrayVector = true;
+        result.operators.push(token);
       } else if (currentState.strokeColorSpace === 'Spot') {
         result.hasSpotVector = true;
+        result.operators.push(token);
       }
     }
   }
@@ -591,6 +603,7 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
   let hasGlobalRgb = false;
   let hasGlobalCmyk = false;
   let hasGlobalSpot = false;
+  let hasGlobalGray = false;
   const detectedFamilies = new Set<string>();
 
   const pages: PdfPageStructure[] = [];
@@ -914,6 +927,9 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
             } else if (colorSpace.includes('Spot')) {
               hasGlobalSpot = true;
               detectedFamilies.add('Spot');
+            } else if (colorSpace.includes('Gray') || colorSpace.includes('DeviceGray')) {
+              hasGlobalGray = true;
+              detectedFamilies.add('DeviceGray');
             }
           } else if (subtype === '/Form') {
             const placement = parentPlacements?.get(rawName) || (depth === 0 ? imagePlacements.get(rawName) : undefined);
@@ -1013,22 +1029,38 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
     const pageHasRgbRaster = imageOccurrences.some((i) => i.colorSpace?.includes('RGB'));
     const pageHasRgb = pageHasRgbRaster || pageHasRgbVector;
 
+    const pageHasGrayRaster = imageOccurrences.some((i) => i.colorSpace?.includes('Gray') || i.colorSpace?.includes('DeviceGray'));
+    const pageHasGray = pageHasGrayVector || pageHasGrayRaster;
+
+    const pageHasCmykRaster = imageOccurrences.some((i) => i.colorSpace?.includes('CMYK'));
+    const pageHasCmyk = pageHasCmykVector || pageHasCmykRaster;
+
+    const pageHasSpotRaster = imageOccurrences.some((i) => i.colorSpace?.includes('Spot'));
+    const pageHasSpot = pageHasSpotVector || pageHasSpotRaster;
+
     if (pageHasRgb) {
       colorOccurrences.push({ page: pageNum, family: 'DeviceRGB', count: 1 });
       hasGlobalRgb = true;
       detectedFamilies.add('DeviceRGB');
     }
-    if (pageHasCmykVector || imageOccurrences.some((i) => i.colorSpace?.includes('CMYK'))) {
+    if (pageHasCmyk) {
       colorOccurrences.push({ page: pageNum, family: 'DeviceCMYK', count: 1 });
       hasGlobalCmyk = true;
       detectedFamilies.add('DeviceCMYK');
     }
-    if (pageHasSpotVector || imageOccurrences.some((i) => i.colorSpace?.includes('Spot'))) {
+    if (pageHasSpot) {
       colorOccurrences.push({ page: pageNum, family: 'Spot', count: 1 });
       hasGlobalSpot = true;
       detectedFamilies.add('Spot');
     }
-    if (!pageHasRgb && !pageHasCmykVector && !pageHasSpotVector && imageOccurrences.length === 0) {
+    if (pageHasGray) {
+      colorOccurrences.push({ page: pageNum, family: 'DeviceGray', count: 1 });
+      hasGlobalGray = true;
+      detectedFamilies.add('DeviceGray');
+    }
+
+    // Strict fallback: ONLY if NO color family at all was detected on this page (no RGB, no CMYK, no Spot, no Gray, no images)
+    if (!pageHasRgb && !pageHasCmyk && !pageHasSpot && !pageHasGray && imageOccurrences.length === 0) {
       colorOccurrences.push({ page: pageNum, family: 'DeviceCMYK', count: 1 });
       hasGlobalCmyk = true;
       detectedFamilies.add('DeviceCMYK');
@@ -1051,6 +1083,10 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
       hasTransparency,
       hasRgbRaster: pageHasRgbRaster,
       hasRgbVector: pageHasRgbVector,
+      hasCmykVector: pageHasCmykVector,
+      hasSpotVector: pageHasSpotVector,
+      hasGrayVector: pageHasGrayVector,
+      hasGrayRaster: pageHasGrayRaster,
       imageOccurrences,
       colorOccurrences,
     });
@@ -1233,8 +1269,13 @@ export async function extractPdfStructure(pdfBuffer: Uint8Array | Buffer): Promi
       hasRgb: hasGlobalRgb,
       hasRgbRaster: pages.some((p) => Boolean(p.hasRgbRaster)),
       hasRgbVector: pages.some((p) => Boolean(p.hasRgbVector)),
-      hasCmyk: hasGlobalCmyk || (!hasGlobalRgb && !hasGlobalSpot),
+      hasCmyk: hasGlobalCmyk || (!hasGlobalRgb && !hasGlobalSpot && !hasGlobalGray),
+      hasCmykVector: pages.some((p) => Boolean(p.hasCmykVector)),
       hasSpotColors: hasGlobalSpot,
+      hasSpotVector: pages.some((p) => Boolean(p.hasSpotVector)),
+      hasGray: hasGlobalGray,
+      hasGrayVector: pages.some((p) => Boolean(p.hasGrayVector)),
+      hasGrayRaster: pages.some((p) => Boolean(p.hasGrayRaster)),
       familiesDetected: Array.from(detectedFamilies),
     },
     pdfxInfo: {
