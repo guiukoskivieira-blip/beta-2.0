@@ -26,6 +26,8 @@ import { ChangeProfileModal } from './components/ChangeProfileModal';
 import { RotateConfirmationModal } from './components/RotateConfirmationModal';
 import { TransparencyModal } from './components/TransparencyModal';
 import { Footer } from './components/Footer';
+import { LogoWordmark } from './components/BrandLogos';
+import { Loader2 } from 'lucide-react';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
 import { getLocalCustomProfiles } from './utils/customProfilesStorage';
@@ -104,6 +106,7 @@ export const App: React.FC = () => {
 
   // User & Billing states
   const [currentUser, setCurrentUser] = useState<BetaUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
 
@@ -114,18 +117,36 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
     loadHistory();
-    auth.getCurrentUser().then((u) => {
-      if (u) setCurrentUser(u);
-    });
+
+    auth.getCurrentUser()
+      .then((u) => {
+        if (isMounted) {
+          setCurrentUser(u);
+          setIsAuthLoading(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setCurrentUser(null);
+          setIsAuthLoading(false);
+        }
+      });
 
     if (auth.onAuthStateChange) {
       const unsubscribe = auth.onAuthStateChange((session) => {
-        setCurrentUser(session?.user || null);
+        if (isMounted) {
+          setCurrentUser(session?.user || null);
+          setIsAuthLoading(false);
+        }
       });
       return () => {
+        isMounted = false;
         unsubscribe();
       };
+    } else {
+      setIsAuthLoading(false);
     }
   }, [loadHistory]);
 
@@ -176,6 +197,11 @@ export const App: React.FC = () => {
 
   const handleStartAnalysis = async () => {
     if (!workingFile) return;
+
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
 
     setProcessingStatus('uploading');
     setErrorMessage(null);
@@ -253,6 +279,9 @@ export const App: React.FC = () => {
       const msg = err?.message || 'Erro inesperado ao analisar o documento.';
       setErrorMessage(msg);
       setLimitReached(msg.includes('limite') || msg.includes('upgrade') || msg.includes('atingiu'));
+      if (msg.toLowerCase().includes('login') || msg.toLowerCase().includes('autenticação') || msg.toLowerCase().includes('401')) {
+        setIsAuthOpen(true);
+      }
     }
   };
 
@@ -1168,6 +1197,18 @@ export const App: React.FC = () => {
     }
   };
 
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6 select-none">
+        <LogoWordmark height={36} />
+        <div className="flex items-center gap-2.5 text-xs text-slate-500 font-bold mt-6 bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-2xs">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+          <span>Verificando sessão segura...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
       {/* Top Header */}
@@ -1195,10 +1236,13 @@ export const App: React.FC = () => {
           }}
           currentUser={currentUser}
           onOpenUpgradeModal={() => setIsPlansOpen(true)}
+          onOpenLogin={() => setIsAuthOpen(true)}
           onLogout={async () => {
             await auth.signOut();
             setCurrentUser(null);
             setBillingStatus(null);
+            handleReset();
+            setIsAuthOpen(true);
           }}
         />
 
@@ -1209,6 +1253,8 @@ export const App: React.FC = () => {
               status={processingStatus}
               errorMessage={errorMessage || undefined}
               onRetry={handleStartAnalysis}
+              onBack={() => setProcessingStatus('idle')}
+              onLogin={() => setIsAuthOpen(true)}
               onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
             />
           ) : activeTab === 'files' ? (

@@ -5,6 +5,8 @@ interface ProcessingStateProps {
   status: 'uploading' | 'extracting' | 'analyzing' | 'error';
   errorMessage?: string;
   onRetry?: () => void;
+  onBack?: () => void;
+  onLogin?: () => void;
   onUpgrade?: () => void;
 }
 
@@ -12,6 +14,8 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
   status,
   errorMessage,
   onRetry,
+  onBack,
+  onLogin,
   onUpgrade,
 }) => {
   const steps = [
@@ -38,25 +42,49 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
       errorMessage?.toLowerCase().includes('senha') ||
       errorMessage?.includes('PDF_ENCRYPTED');
 
+    const isAuthError =
+      errorMessage?.toLowerCase().includes('login') ||
+      errorMessage?.toLowerCase().includes('autenticação') ||
+      errorMessage?.toLowerCase().includes('sessão') ||
+      errorMessage?.toLowerCase().includes('401');
+
     return (
       <div className="w-full max-w-2xl mx-auto my-12 p-8 bg-white border border-red-200 rounded-3xl text-center shadow-xs select-none">
         <div className="w-14 h-14 mx-auto rounded-2xl bg-[#FEE2E2] border border-red-200 flex items-center justify-center text-[#B91C1C] mb-4">
           <AlertCircle className="w-7 h-7" />
         </div>
         <h3 className="text-xl font-black text-[#0F172A] mb-2 tracking-tight">
-          {isEncrypted ? 'PDF Protegido por Senha' : 'Falha no Processamento'}
+          {isEncrypted ? 'PDF Protegido por Senha' : isAuthError ? 'Autenticação Necessária' : 'Falha no Processamento'}
         </h3>
         <p className="text-xs sm:text-sm text-[#64748B] mb-6 max-w-md mx-auto leading-relaxed">
           {errorMessage || 'Ocorreu um erro ao processar e avaliar o arquivo PDF.'}
         </p>
-        <div className="flex items-center justify-center gap-3">
-          {onRetry && (
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          {isAuthError && onLogin && (
+            <button
+              type="button"
+              onClick={onLogin}
+              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs cursor-pointer"
+            >
+              Fazer Login
+            </button>
+          )}
+          {onRetry && !isAuthError && (
             <button
               type="button"
               onClick={onRetry}
               className="px-6 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs cursor-pointer"
             >
               Tentar Novamente
+            </button>
+          )}
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs cursor-pointer"
+            >
+              Voltar ao Arquivo
             </button>
           )}
           {onUpgrade && (

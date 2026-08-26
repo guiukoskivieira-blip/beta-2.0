@@ -17,6 +17,22 @@ export function createAuthProvider(resolver: typeof resolveSupabaseEnv = resolve
   if (envState.hasPartialConfig) {
     return new IncompleteConfigAuthProvider();
   }
+
+  // Strictly prevent fake mock authentication in production environments
+  let isProd = false;
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      isProd = Boolean((import.meta as any).env.PROD || (import.meta as any).env.MODE === 'production');
+    }
+  } catch {}
+  if (!isProd && typeof process !== 'undefined' && process.env) {
+    isProd = process.env.NODE_ENV === 'production';
+  }
+
+  if (isProd) {
+    return new IncompleteConfigAuthProvider();
+  }
+
   return new LocalDevAuthProvider();
 }
 
