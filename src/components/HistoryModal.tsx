@@ -16,11 +16,13 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const storage = new LocalStorageProvider();
 
   useEffect(() => {
     if (isOpen) {
       setExportError(null);
+      setExportSuccess(null);
       storage.listAnalyses().then(setHistory);
     }
   }, [isOpen]);
@@ -35,10 +37,11 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
   const handleExportReport = async (item: AnalysisRecordSummary) => {
     try {
       setExportError(null);
+      setExportSuccess(null);
       setExportingId(item.id);
 
       let reportData = item.reportData;
-      if (!reportData && item.initialSnapshot) {
+      if (!reportData && item.initialSnapshot && item.initialSnapshot.documentSummary) {
         reportData = buildTechnicalReport(
           item.initialSnapshot,
           item.postFixSnapshot ? { ruleResults: { results: item.postFixSnapshot.rules, scoreSummary: { score: item.postFixSnapshot.score, classification: item.postFixSnapshot.classification } } } as any : null,
@@ -47,38 +50,14 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
       }
 
       if (!reportData) {
-        const syntheticSnapshot: any = {
-          id: item.id,
-          createdAt: item.createdAt,
-          fileName: item.fileName,
-          fileSizeBytes: item.fileSizeBytes,
-          profileId: item.productionProfileId,
-          profileName: item.productName,
-          profileCategory: item.segmentName,
-          score: item.score,
-          classification: item.status,
-          label: item.status === 'approved' ? 'Pronto para Impressão' : item.status === 'review' ? 'Revisão Necessária' : 'Impressão Inviável',
-          errorCount: item.errorCount,
-          warningCount: item.warningCount,
-          approvedCount: item.approvedCount,
-          undeterminedCount: 0,
-          rules: [],
-          documentSummary: {
-            pageCount: 1,
-            dimensionsSummary: 'Dimensão registrada',
-            hasRgb: false,
-            hasCmyk: true,
-            hasSpotColors: false,
-            familiesDetected: ['DeviceCMYK'],
-            isDeclaredPdfX: false,
-          },
-        };
-        reportData = buildTechnicalReport(syntheticSnapshot);
+        throw new Error('Relatório técnico completo indisponível para este registro. Metadados salvos não contêm snapshot estrutural.');
       }
 
       const pdfBytes = await generateTechnicalReportPdf(reportData);
       const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
       downloadTechnicalReportPdf(pdfBytes, fileName);
+      setExportSuccess(`Relatório técnico de "${item.fileName}" gerado e baixado com sucesso.`);
+      setTimeout(() => setExportSuccess(null), 4000);
     } catch (err: any) {
       console.error('Erro ao exportar relatório do histórico:', err);
       setExportError(`Falha ao gerar PDF do relatório para "${item.fileName}": ${err?.message || 'Erro interno'}`);
@@ -116,8 +95,16 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
         </div>
 
         {exportError && (
-          <div className="mx-6 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-            {exportError}
+          <div className="mx-6 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{exportError}</span>
+          </div>
+        )}
+
+        {exportSuccess && (
+          <div className="mx-6 mt-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{exportSuccess}</span>
           </div>
         )}
 
@@ -138,6 +125,8 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                   : item.status === 'review'
                   ? 'bg-amber-50 text-amber-700 border-amber-200'
                   : 'bg-rose-50 text-rose-700 border-rose-200';
+
+              const hasReportData = Boolean(item.reportData || (item.initialSnapshot && item.initialSnapshot.documentSummary));
 
               return (
                 <div
@@ -160,22 +149,40 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, onS
                       <span>•</span>
                       <span className="truncate max-w-[150px]">{item.productName || 'Perfil Padrão'}</span>
                     </div>
+                    {!hasReportData && (
+                      <p className="text-[10px] text-slate-400 italic">
+                        Relatório técnico completo indisponível para este registro antigo (apenas metadados).
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => handleExportReport(item)}
-                      disabled={exportingId === item.id}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-xs font-bold text-[#334155] shadow-2xs transition-colors cursor-pointer"
-                      title="Exportar PDF do Relatório Técnico"
+                      disabled={!hasReportData || exportingId === item.id}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
+                        hasReportData
+                          ? 'bg-white hover:bg-slate-100 border-slate-200 text-[#334155] shadow-2xs cursor-pointer'
+                          : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-60'
+                      }`}
+                      title={
+                        hasReportData
+                          ? 'Exportar PDF do Relatório Técnico'
+                          : 'Relatório indisponível para este registro antigo (apenas metadados salvos).'
+                      }
                     >
                       {exportingId === item.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                          <span>Gerando relatório...</span>
+                        </>
                       ) : (
-                        <Download className="w-3.5 h-3.5 text-slate-500" />
+                        <>
+                          <Download className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Relatório</span>
+                        </>
                       )}
-                      <span>Relatório</span>
                     </button>
 
                     <button

@@ -108,8 +108,10 @@ export function createAnalysisSnapshot(
 ): AnalysisSnapshot {
   const pages = analysis.document?.pages || [];
   const firstPage = pages[0];
+  const firstWidth = firstPage?.widthMm ?? firstPage?.mediaBox?.widthMm ?? 0;
+  const firstHeight = firstPage?.heightMm ?? firstPage?.mediaBox?.heightMm ?? 0;
   const dimStr = firstPage
-    ? `${firstPage.widthMm.toFixed(1)} × ${firstPage.heightMm.toFixed(1)} mm (${pages.length} pág${pages.length > 1 ? 's' : ''})`
+    ? `${firstWidth.toFixed(1)} × ${firstHeight.toFixed(1)} mm (${pages.length} pág${pages.length > 1 ? 's' : ''})`
     : `${pages.length} páginas`;
 
   const snapshotRules: SnapshotRuleItem[] = (analysis.ruleResults?.results || []).map((r) => ({

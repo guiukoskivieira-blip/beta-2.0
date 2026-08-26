@@ -291,8 +291,13 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
     : (minDpi >= 200 ? 'Atenção' : 'Manual');
 
   // Color status
-  const colorText = document.colorSummary.hasRgb ? 'RGB' : (document.colorSummary.hasCmyk ? 'CMYK' : 'Spot / Gray');
-  const colorStatusText = !document.colorSummary.hasRgb ? 'OK' : 'Corrigir';
+  const hasRgbRaster = Boolean(document.colorSummary.hasRgbRaster);
+  const hasRgbVector = Boolean(document.colorSummary.hasRgbVector);
+  const hasRgb = Boolean(document.colorSummary.hasRgb);
+  const colorText = hasRgb ? 'RGB' : (document.colorSummary.hasCmyk ? 'CMYK' : 'Spot / Gray');
+  const colorStatusText: 'OK' | 'Ajustável' | 'Manual' = !hasRgb 
+    ? 'OK' 
+    : (hasRgbRaster ? 'Ajustável' : 'Manual');
 
   // Font status
   const unembedded = document.fonts.filter(f => f.isUsedInContent !== false && (f.isEmbedded === 'no' || f.isEmbedded === false));
@@ -304,8 +309,19 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
   const transpText = hasTransp ? 'Ativas (PDF/X-4)' : 'Nenhuma';
 
   // PDF/X status
-  const pdfxText = document.pdfxInfo?.isDeclaredPdfX ? 'Declarado' : 'Não declarado';
-  const pdfxStatusText = document.pdfxInfo?.isDeclaredPdfX ? 'OK' : 'Ajustável';
+  const isDeclaredPdfX = Boolean(document.pdfxInfo?.isDeclaredPdfX);
+  const hasOutputIntent = Boolean(document.pdfxInfo?.hasOutputIntent);
+  const hasPdfxBlockers = Boolean(
+    unembedded.length > 0 ||
+    dimStatusText === 'Manual' ||
+    (hasRgbVector && !hasRgbRaster && profile.rgbPolicy === 'error') ||
+    (bleedStatusText === 'Atenção' && !isGenericProfile)
+  );
+
+  const pdfxText = isDeclaredPdfX ? 'Declarado' : 'Não declarado';
+  const pdfxStatusText = (isDeclaredPdfX && hasOutputIntent) 
+    ? 'OK' 
+    : (hasPdfxBlockers ? 'Bloqueado por pendências' : 'Ajustável');
 
   // Overall verdict label
   let verdictStatus = 'PRONTO PARA PRODUÇÃO';
@@ -482,7 +498,11 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-[#0F172A]">{colorText}</span>
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                colorStatusText === 'OK' ? 'bg-[#ECFDF5] text-[#059669]' : 'bg-[#EFF6FF] text-[#1D4ED8]'
+                colorStatusText === 'OK' 
+                  ? 'bg-[#ECFDF5] text-[#059669]' 
+                  : (colorStatusText === 'Ajustável' 
+                      ? 'bg-[#EFF6FF] text-[#1D4ED8]' 
+                      : 'bg-[#FEE2E2] text-[#B91C1C]')
               }`}>{colorStatusText}</span>
             </div>
           </div>
@@ -522,7 +542,11 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-[#0F172A]">{pdfxText}</span>
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                pdfxStatusText === 'OK' ? 'bg-[#ECFDF5] text-[#059669]' : 'bg-[#EFF6FF] text-[#1D4ED8]'
+                pdfxStatusText === 'OK' 
+                  ? 'bg-[#ECFDF5] text-[#059669]' 
+                  : (pdfxStatusText === 'Ajustável' 
+                      ? 'bg-[#EFF6FF] text-[#1D4ED8]' 
+                      : 'bg-[#FEF3C7] text-[#B45309]')
               }`}>
                 {pdfxStatusText}
               </span>

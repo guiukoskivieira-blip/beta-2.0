@@ -1414,14 +1414,46 @@ export const App: React.FC = () => {
               />
 
               {/* Operational Decision Banner */}
-              <OperationalVerdictBanner
-                ruleResults={currentAnalysis.ruleResults}
-                availableFixesCount={
-                  (currentAnalysis.document.colorSummary.hasRgb ? 1 : 0) +
-                  (!currentAnalysis.document.pdfxInfo?.isDeclaredPdfX ? 1 : 0)
-                }
-                onScrollToFixes={scrollToFixes}
-              />
+              {(() => {
+                const hasRgbRaster = Boolean(currentAnalysis.document.colorSummary.hasRgbRaster);
+                const hasRgbVector = Boolean(currentAnalysis.document.colorSummary.hasRgbVector);
+                const hasRgbApplied = appliedCorrections.some((c) => c.id === 'rgb_cmyk');
+                const canFixRgb = Boolean(hasRgbRaster && !hasRgbApplied);
+
+                const hasBoxesApplied = appliedCorrections.some((c) => c.id === 'trim_bleed');
+                const isGenericProfile = Boolean(!selectedProfile.expectedWidthMm || !selectedProfile.expectedHeightMm);
+                const needsTrimBleed =
+                  !hasBoxesApplied &&
+                  !isGenericProfile &&
+                  ((currentAnalysis.document.pages[0]?.trimBox?.status !== 'explicit' &&
+                    Boolean(selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm)) ||
+                    (currentAnalysis.document.pages[0]?.bleedBox?.status !== 'explicit' &&
+                      Boolean(selectedProfile.expectedBleedMm)));
+                const canFixBoxes = Boolean(needsTrimBleed && !hasBoxesApplied);
+
+                const fontRule = currentAnalysis.ruleResults.results.find(
+                  (r) =>
+                    (r.ruleId === 'RULE-PROF-FNT-001' || r.category === 'font' || r.category === 'typography') &&
+                    (r.status === 'error' || r.status === 'warning')
+                );
+                const vectorRgbManualRequired = Boolean(hasRgbVector && !hasRgbRaster && selectedProfile.rgbPolicy === 'error');
+                const hasPdfxBlockers = Boolean(fontRule || vectorRgbManualRequired);
+                const canFixPdfx = Boolean(
+                  (!currentAnalysis.document.pdfxInfo?.isDeclaredPdfX ||
+                    !currentAnalysis.document.pdfxInfo?.hasOutputIntent) &&
+                    !hasPdfxBlockers
+                );
+
+                const autoFixesCount = (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
+
+                return (
+                  <OperationalVerdictBanner
+                    ruleResults={currentAnalysis.ruleResults}
+                    availableFixesCount={autoFixesCount}
+                    onScrollToFixes={scrollToFixes}
+                  />
+                );
+              })()}
 
               {/* Main 3-Column Inspection Card */}
               <MainInspectionCard

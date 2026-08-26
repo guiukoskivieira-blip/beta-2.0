@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, ShieldAlert, Sparkles, ArrowRight } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Sparkles, ArrowRight } from 'lucide-react';
 import type { RuleEngineSummary } from '../types';
 
 interface OperationalVerdictBannerProps {
@@ -39,6 +39,13 @@ export const OperationalVerdictBanner: React.FC<OperationalVerdictBannerProps> =
     Icon = AlertTriangle;
   }
 
+  const totalInconformidades = errorCount + warningCount;
+  const showButton = (availableFixesCount > 0 || totalInconformidades > 0) && onScrollToFixes;
+
+  const buttonText = availableFixesCount > 0
+    ? `Ver ${availableFixesCount} ${availableFixesCount === 1 ? 'correção disponível' : 'correções disponíveis'}`
+    : `Ver ${totalInconformidades} ${totalInconformidades === 1 ? 'pendência' : 'pendências'}`;
+
   return (
     <div className={`p-4 sm:p-5 rounded-3xl border shadow-xs mb-6 select-none transition-all ${containerBg}`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -62,8 +69,8 @@ export const OperationalVerdictBanner: React.FC<OperationalVerdictBannerProps> =
           </div>
         </div>
 
-        {/* Right Action Hint if fixes available */}
-        {availableFixesCount > 0 && onScrollToFixes && (
+        {/* Right Action Hint if fixes or manual issues available */}
+        {showButton && (
           <div className="shrink-0 flex items-center">
             <button
               type="button"
@@ -71,7 +78,7 @@ export const OperationalVerdictBanner: React.FC<OperationalVerdictBannerProps> =
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-[#4338CA] bg-[#EEF2FF] hover:bg-[#E0E7FF] border border-[#C7D2FE] transition-all cursor-pointer shadow-2xs"
             >
               <Sparkles className="w-3.5 h-3.5 text-[#6366F1]" />
-              <span>Ver {availableFixesCount} correções</span>
+              <span>{buttonText}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
