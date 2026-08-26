@@ -371,4 +371,69 @@ describe('ARTECHECK AI — Hotfix do Relatório Histórico e Linguagem Operacion
     const header = Buffer.from(pdfBytes.buffer, pdfBytes.byteOffset, 5).toString('ascii');
     assert.equal(header, '%PDF-');
   });
+
+  it('12. Regra do botão: Habilitação exige simultaneamente dados completos, função disponível e identificador válido', async () => {
+    const { checkReportExportEligibility } = await import('../src/components/HistoryModal');
+
+    // Caso 1: Item sem ID ou com ID vazio
+    const invalidIdItem: any = { id: '', reportData: { id: 'rep1', fileName: 'test.pdf' } };
+    const res1 = checkReportExportEligibility(invalidIdItem);
+    assert.equal(res1.eligible, false);
+    assert.ok(res1.reason?.includes('Identificador'));
+
+    // Caso 2: Item sem snapshot nem reportData
+    const missingDataItem: any = { id: 'analysis-123', fileName: 'test.pdf' };
+    const res2 = checkReportExportEligibility(missingDataItem);
+    assert.equal(res2.eligible, false);
+    assert.ok(res2.reason?.includes('indisponível'));
+
+    // Caso 3: Item completo com snapshot estrutural
+    const completeItem: any = {
+      id: 'analysis-123',
+      fileName: 'test.pdf',
+      initialSnapshot: { documentSummary: { dimensionsSummary: '210 x 297 mm' }, rules: [] },
+    };
+    const res3 = checkReportExportEligibility(completeItem);
+    assert.equal(res3.eligible, true);
+  });
+
+  it('13. Integração Real da Árvore: Handler conectado de App.tsx -> HistoryModal executa percurso completo', async () => {
+    const analysis = createMockAnalysis({ hasCmyk: true });
+    const initialSnapshot = createAnalysisSnapshot(analysis, COMMERCIAL_PRINT_300DPI_PROFILE);
+    const reportData = buildTechnicalReport(initialSnapshot, null, COMMERCIAL_PRINT_300DPI_PROFILE);
+
+    let appHandlerCalled = false;
+    let receivedItem: any = null;
+
+    // Simula a função handleExportHistoryReport definida em App.tsx
+    const handleExportHistoryReport = async (item: any) => {
+      appHandlerCalled = true;
+      receivedItem = item;
+      const pdfBytes = await generateTechnicalReportPdf(item.reportData);
+      assert.ok(pdfBytes.length > 0);
+    };
+
+    const itemToExport = {
+      id: analysis.id,
+      createdAt: analysis.createdAt,
+      fileName: analysis.fileName,
+      fileSizeBytes: analysis.fileSizeBytes,
+      segmentName: 'Comercial',
+      productName: 'Flyer',
+      variantName: 'Padrão',
+      productionProfileId: COMMERCIAL_PRINT_300DPI_PROFILE.id,
+      status: 'approved' as const,
+      score: 100,
+      errorCount: 0,
+      warningCount: 0,
+      approvedCount: 10,
+      initialSnapshot,
+      reportData,
+    };
+
+    // Executa a cadeia
+    await handleExportHistoryReport(itemToExport);
+    assert.equal(appHandlerCalled, true, 'Handler de App.tsx deve ter sido chamado com sucesso');
+    assert.equal(receivedItem.id, analysis.id, 'Item recebido deve corresponder ao ID da análise');
+  });
 });

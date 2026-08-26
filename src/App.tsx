@@ -1220,6 +1220,38 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleExportHistoryReport = async (item: AnalysisRecordSummary) => {
+    let reportData = item.reportData;
+    if (!reportData && item.initialSnapshot && item.initialSnapshot.documentSummary) {
+      reportData = buildTechnicalReport(
+        item.initialSnapshot,
+        item.postFixSnapshot
+          ? ({
+              ruleResults: {
+                results: item.postFixSnapshot.rules,
+                scoreSummary: {
+                  score: item.postFixSnapshot.score,
+                  classification: item.postFixSnapshot.classification,
+                },
+              },
+            } as any)
+          : null,
+        {
+          id: item.productionProfileId,
+          name: item.productName,
+          category: item.segmentName,
+          rules: {},
+        } as any
+      );
+    }
+    if (!reportData) {
+      throw new Error('Metadados salvos não contêm snapshot estrutural para emissão do relatório.');
+    }
+    const pdfBytes = await generateTechnicalReportPdf(reportData);
+    const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
+    downloadTechnicalReportPdf(pdfBytes, fileName);
+  };
+
   const handleSidebarTabSelect = (tab: string) => {
     setActiveTab(tab);
     if (tab === 'history') {
@@ -1318,17 +1350,7 @@ export const App: React.FC = () => {
                 await storage.deleteAnalysis(id);
                 loadHistory();
               }}
-              onExportHistoryReport={async (item) => {
-                try {
-                  const snap = item.initialSnapshot;
-                  const reportData = item.reportData || buildTechnicalReport(snap);
-                  const pdfBytes = await generateTechnicalReportPdf(reportData);
-                  const fileName = generateReportPdfFileName(reportData.fileName, reportData.generatedAt);
-                  downloadTechnicalReportPdf(pdfBytes, fileName);
-                } catch (e) {
-                  console.error('Erro ao exportar relatório:', e);
-                }
-              }}
+              onExportHistoryReport={handleExportHistoryReport}
             />
           ) : activeTab === 'verifications' ? (
             <VerificationsView
@@ -1626,6 +1648,7 @@ export const App: React.FC = () => {
       <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
+        onExportReport={handleExportHistoryReport}
       />
       <AboutBetaModal
         isOpen={isAboutOpen}
