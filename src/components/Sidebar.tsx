@@ -3,16 +3,15 @@ import {
   LayoutDashboard, 
   FolderOpen, 
   CheckSquare, 
-  FileSpreadsheet, 
   History, 
-  Settings,
-  Sparkles,
+  Sliders,
   User,
-  LogOut
+  LogOut,
+  Sparkles
 } from 'lucide-react';
 import type { BetaUser } from '../domain/beta';
 
-interface SidebarProps {
+export interface SidebarProps {
   activeTab?: string;
   onSelectTab?: (tab: string) => void;
   billingStatus?: {
@@ -40,9 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'files', label: 'Arquivos & Análises', icon: FolderOpen },
     { id: 'verifications', label: 'Verificações', icon: CheckSquare },
-    { id: 'reports', label: 'Relatórios', icon: FileSpreadsheet },
-    { id: 'history', label: 'Histórico', icon: History },
-    { id: 'settings', label: 'Configurações', icon: Settings },
+    { id: 'history', label: 'Histórico e Relatórios', icon: History },
+    { id: 'profiles', label: 'Perfis de Produção', icon: Sliders },
   ];
 
   const planName = currentUser
@@ -61,140 +59,166 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const userInitial = userDisplayName ? userDisplayName.charAt(0).toUpperCase() : (currentUser?.email ? currentUser.email.charAt(0).toUpperCase() : 'U');
 
   return (
-    <aside className="w-64 shrink-0 bg-white border-r border-slate-200/90 flex flex-col justify-between p-4 min-h-[calc(100vh-61px)] select-none">
-      {/* Top Section: Nav Items */}
-      <div className="space-y-4">
-        {/* Navigation Links */}
-        <nav className="space-y-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
+    <>
+      {/* Desktop & Tablet Sidebar */}
+      <aside className="hidden md:flex w-64 shrink-0 bg-white border-r border-slate-200/90 flex-col justify-between p-4 min-h-[calc(100vh-61px)] select-none">
+        {/* Top Section: Nav Items */}
+        <div className="space-y-4">
+          <nav className="space-y-1">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id || (item.id === 'history' && activeTab === 'reports') || (item.id === 'profiles' && activeTab === 'settings');
 
-            return (
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onSelectTab && onSelectTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-[#EFF6FF] text-[#2563EB]'
+                      : 'text-[#64748B] hover:bg-slate-50 hover:text-[#0F172A]'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-[#2563EB]' : 'text-[#64748B]'}`} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Bottom Section: Plan usage & User Profile */}
+        <div className="space-y-3 pt-4 border-t border-slate-100">
+          {/* Subscription Plan Card */}
+          {currentUser ? (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/40 border border-slate-200/80 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider text-[#0F172A]">
+                  {planName}
+                </span>
+                <span className="text-[10px] font-bold text-[#64748B]">
+                  {used}/{limit} análises
+                </span>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-[#0066FF] to-[#7C3AED] rounded-full transition-all duration-300"
+                  style={{ width: `${percentage}%` }}
+                />
+              </div>
+
               <button
-                key={item.id}
                 type="button"
-                onClick={() => onSelectTab && onSelectTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-[#EFF6FF] text-[#2563EB]'
-                    : 'text-[#64748B] hover:bg-slate-50 hover:text-[#0F172A]'
-                }`}
+                onClick={onOpenUpgradeModal}
+                className="w-full py-1 text-center text-[11px] font-bold text-[#2563EB] hover:text-[#1D4ED8] transition-colors cursor-pointer"
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-[#2563EB]' : 'text-[#64748B]'}`} />
-                <span>{item.label}</span>
+                Fazer Upgrade →
               </button>
-            );
-          })}
-        </nav>
-      </div>
-
-      {/* Bottom Section: Plan usage & User Profile */}
-      <div className="space-y-3 pt-4 border-t border-slate-100">
-        {/* Subscription Plan Card */}
-        {currentUser ? (
-          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/40 border border-slate-200/80 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-[#0F172A]">
-                {planName}
-              </span>
-              <span className="text-[10px] font-bold text-[#64748B]">
-                {used}/{limit} análises
-              </span>
             </div>
-
-            {/* Progress Bar */}
-            <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-[#0066FF] to-[#7C3AED] rounded-full transition-all duration-300"
-                style={{ width: `${percentage}%` }}
-              />
+          ) : (
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-center">
+              <span className="text-xs font-bold text-[#0F172A] block">
+                Conta não conectada
+              </span>
+              <p className="text-[10px] text-[#64748B]">
+                Faça login para salvar análises e gerenciar seu plano.
+              </p>
+              {onOpenLogin && (
+                <button
+                  type="button"
+                  onClick={onOpenLogin}
+                  className="w-full py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                >
+                  Fazer Login
+                </button>
+              )}
             </div>
+          )}
 
+          {/* User Card */}
+          {currentUser ? (
+            <div className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition-colors">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100">
+                  {userInitial}
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-[#0F172A] truncate block">
+                    {userDisplayName || 'Usuário'}
+                  </span>
+                  <span className="text-[10px] text-[#64748B] truncate block">
+                    {currentUser.email}
+                  </span>
+                </div>
+              </div>
+
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#EF4444] hover:bg-red-50 transition-colors cursor-pointer"
+                  title="Encerrar sessão"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-200/60">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-xs shrink-0">
+                  <User className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-700 truncate block">
+                    Não autenticado
+                  </span>
+                  <span className="text-[10px] text-slate-500 truncate block">
+                    Sessão anônima
+                  </span>
+                </div>
+              </div>
+
+              {onOpenLogin && (
+                <button
+                  type="button"
+                  onClick={onOpenLogin}
+                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
+                >
+                  Entrar
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1.5 flex items-center justify-around select-none shadow-lg">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id || (item.id === 'history' && activeTab === 'reports') || (item.id === 'profiles' && activeTab === 'settings');
+
+          return (
             <button
+              key={item.id}
               type="button"
-              onClick={onOpenUpgradeModal}
-              className="w-full py-1 text-center text-[11px] font-bold text-[#2563EB] hover:text-[#1D4ED8] transition-colors cursor-pointer"
+              onClick={() => onSelectTab && onSelectTab(item.id)}
+              className={`flex flex-col items-center gap-0.5 p-1.5 rounded-lg transition-colors ${
+                isActive ? 'text-[#2563EB]' : 'text-slate-500 hover:text-slate-800'
+              }`}
             >
-              Fazer Upgrade →
+              <Icon className="w-4 h-4" />
+              <span className="text-[9px] font-bold tracking-tight max-w-[60px] truncate">
+                {item.id === 'history' ? 'Histórico' : item.id === 'profiles' ? 'Perfis' : item.label.split(' ')[0]}
+              </span>
             </button>
-          </div>
-        ) : (
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-center">
-            <span className="text-xs font-bold text-[#0F172A] block">
-              Conta não conectada
-            </span>
-            <p className="text-[10px] text-[#64748B]">
-              Faça login para salvar análises e gerenciar seu plano.
-            </p>
-            {onOpenLogin && (
-              <button
-                type="button"
-                onClick={onOpenLogin}
-                className="w-full py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
-              >
-                Fazer Login
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* User Card */}
-        {currentUser ? (
-          <div className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition-colors">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100">
-                {userInitial}
-              </div>
-              <div className="min-w-0">
-                <span className="text-xs font-bold text-[#0F172A] truncate block">
-                  {userDisplayName || 'Usuário'}
-                </span>
-                <span className="text-[10px] text-[#64748B] truncate block">
-                  {currentUser.email}
-                </span>
-              </div>
-            </div>
-
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#EF4444] hover:bg-red-50 transition-colors cursor-pointer"
-                title="Encerrar sessão"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-200/60">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-xs shrink-0">
-                <User className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-xs font-bold text-slate-700 truncate block">
-                  Não autenticado
-                </span>
-                <span className="text-[10px] text-slate-500 truncate block">
-                  Sessão anônima
-                </span>
-              </div>
-            </div>
-
-            {onOpenLogin && (
-              <button
-                type="button"
-                onClick={onOpenLogin}
-                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
-              >
-                Entrar
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </aside>
+          );
+        })}
+      </nav>
+    </>
   );
 };

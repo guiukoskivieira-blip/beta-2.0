@@ -1,41 +1,84 @@
-import React, { useEffect, useState } from 'react';
-import { X, Check, Crown, CreditCard, BarChart3, CalendarDays, Loader2, Sparkles } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { X, Check, Crown, Loader2 } from 'lucide-react';
 import { PLANS, type BillingPeriod, type BillingStatus, type PlanCode } from '../domain/billing';
 import { createCheckout, getBillingStatus } from '../services/billing';
 import { auth } from '../auth';
 
-export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export interface PlansModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function PlansModal({ isOpen, onClose }: PlansModalProps) {
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [status, setStatus] = useState<BillingStatus | null>(null);
-  const [isLoadingStatus, setIsLoadingStatus] = useState<boolean>(false);
+  const [isLoadingStatus, setIsLoadingStatus] = useState<boolean>(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [loadingPlanCode, setLoadingPlanCode] = useState<PlanCode | null>(null);
   const [message, setMessage] = useState('');
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (isOpen) {
+      triggerRef.current = document.activeElement as HTMLElement | null;
       setMessage('');
+      setStatusError(null);
       setLoadingPlanCode(null);
       setIsLoadingStatus(true);
-      auth.getSession().then((session) => {
-        if (session?.accessToken) {
-          getBillingStatus()
-            .then((s) => {
-              setStatus(s);
-              setIsLoadingStatus(false);
-            })
-            .catch((e) => {
-              setMessage(e.message);
-              setIsLoadingStatus(false);
-            });
-        } else {
-          setStatus(null);
-          setIsLoadingStatus(false);
+
+      // Lock body scroll
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      // Initial focus on close button
+      const focusTimer = setTimeout(() => {
+        closeButtonRef.current?.focus();
+      }, 50);
+
+      // Keyboard Esc listener
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
         }
-      }).catch(() => {
-        setIsLoadingStatus(false);
-      });
+      };
+      window.addEventListener('keydown', handleKeyDown);
+
+      // Fetch authoritative billing status
+      auth
+        .getSession()
+        .then((session) => {
+          if (session?.accessToken) {
+            getBillingStatus()
+              .then((s) => {
+                setStatus(s);
+                setIsLoadingStatus(false);
+              })
+              .catch((e) => {
+                setStatusError(e?.message || 'Não foi possível consultar seu uso atual.');
+                setIsLoadingStatus(false);
+              });
+          } else {
+            setStatus(null);
+            setIsLoadingStatus(false);
+          }
+        })
+        .catch(() => {
+          setIsLoadingStatus(false);
+        });
+
+      return () => {
+        clearTimeout(focusTimer);
+        window.removeEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = originalOverflow;
+        if (triggerRef.current && typeof triggerRef.current.focus === 'function') {
+          triggerRef.current.focus();
+        }
+      };
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -71,53 +114,113 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   };
 
   const used = typeof status?.usedAnalyses === 'number' && !isNaN(status.usedAnalyses) ? status.usedAnalyses : 0;
-  const limit = typeof status?.limitAnalyses === 'number' && !isNaN(status.limitAnalyses) ? status.limitAnalyses : 0;
+  const limit = typeof status?.limitAnalyses === 'number' && !isNaN(status.limitAnalyses) ? status.limitAnalyses : (status?.plan === 'free' ? 15 : 0);
   const remaining = Math.max(0, limit - used);
   const usagePercent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
   return (
-    <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto flex items-center justify-center select-none">
-      <div className="w-full max-w-5xl my-6 rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
-              <Crown className="w-6 h-6" />
+    <div
+      className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 flex items-center justify-center select-none"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="plans-modal-title"
+    >
+      <div
+        className="w-full max-w-5xl my-auto rounded-3xl border border-slate-200 bg-white shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Sticky Header with Always-Visible Close Button */}
+        <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/90 sticky top-0 z-10 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 sm:p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100 shrink-0">
+              <Crown className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h2 className="text-xl font-black text-[#0F172A] tracking-tight">Planos e Assinaturas</h2>
-              <p className="text-xs text-[#64748B] font-medium">Escolha o volume e a capacidade de processamento ideal para sua gráfica.</p>
+            <div className="min-w-0">
+              <h2 id="plans-modal-title" className="text-lg sm:text-xl font-black text-[#0F172A] tracking-tight truncate">
+                Planos e Assinaturas
+              </h2>
+              <p className="text-xs text-[#64748B] font-medium hidden sm:block">
+                Escolha o volume e a capacidade de processamento ideal para sua gráfica.
+              </p>
             </div>
           </div>
-          <button 
-            onClick={onClose} 
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/70 transition-colors cursor-pointer shrink-0"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6 bg-[#F8FAFC]">
+        {/* Scrollable Content Body */}
+        <div className="p-4 sm:p-6 space-y-6 bg-[#F8FAFC] overflow-y-auto flex-1">
           {/* Usage Status Card */}
-          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">Uso da Assinatura Atual</span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-2xl font-black text-[#0F172A]">{used} / {limit} análises</span>
-                <span className="text-xs text-slate-500 font-medium">({remaining} restantes)</span>
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+            {isLoadingStatus ? (
+              <div className="flex items-center gap-3 py-1">
+                <Loader2 className="w-5 h-5 animate-spin text-indigo-600 shrink-0" />
+                <div>
+                  <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">
+                    Uso da Assinatura Atual
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-slate-600">
+                    Carregando uso da assinatura...
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : statusError ? (
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">
+                  Uso da Assinatura Atual
+                </span>
+                <span className="text-xs text-rose-600 font-semibold block">
+                  {statusError}
+                </span>
+              </div>
+            ) : status ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">
+                    Uso da Assinatura Atual ({status.plan === 'free' ? 'Plano Grátis' : 'Plano Ativo'})
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-xl sm:text-2xl font-black text-[#0F172A]">
+                      {used} / {limit} análises
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      ({remaining} restantes)
+                    </span>
+                  </div>
+                </div>
 
-            <div className="sm:w-64 space-y-1.5">
-              <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden border border-slate-200/60">
-                <div 
-                  className="h-full bg-gradient-to-r from-[#0066FF] to-[#7C3AED] rounded-full transition-all duration-300"
-                  style={{ width: `${usagePercent}%` }}
-                />
+                <div className="sm:w-64 space-y-1.5">
+                  <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden border border-slate-200/60">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#0066FF] to-[#7C3AED] rounded-full transition-all duration-300"
+                      style={{ width: `${usagePercent}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-semibold block text-right">
+                    {usagePercent}% utilizado
+                  </span>
+                </div>
               </div>
-              <span className="text-[10px] text-slate-500 font-semibold block text-right">{usagePercent}% utilizado</span>
-            </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">
+                    Uso da Assinatura
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-slate-700 mt-1 block">
+                    Faça login para acompanhar o consumo da sua cota.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Period Toggle */}
@@ -126,7 +229,7 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
               <button
                 type="button"
                 onClick={() => setPeriod('monthly')}
-                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`px-4 sm:px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   period === 'monthly'
                     ? 'bg-white text-[#0F172A] shadow-2xs'
                     : 'text-[#64748B] hover:text-[#0F172A]'
@@ -137,7 +240,7 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
               <button
                 type="button"
                 onClick={() => setPeriod('yearly')}
-                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`px-4 sm:px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   period === 'yearly'
                     ? 'bg-white text-[#2563EB] shadow-2xs'
                     : 'text-[#64748B] hover:text-[#0F172A]'
@@ -149,7 +252,7 @@ export function PlansModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
           </div>
 
           {message && (
-            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-center">
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold text-center animate-in fade-in">
               {message}
             </div>
           )}

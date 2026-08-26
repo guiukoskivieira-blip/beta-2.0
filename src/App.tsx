@@ -1254,16 +1254,10 @@ export const App: React.FC = () => {
 
   const handleSidebarTabSelect = (tab: string) => {
     setActiveTab(tab);
-    if (tab === 'history') {
+    if (tab === 'history' || tab === 'reports') {
       setIsHistoryOpen(true);
-    } else if (tab === 'settings') {
+    } else if (tab === 'profiles' || tab === 'settings') {
       setIsProfilesOpen(true);
-    } else if (tab === 'reports') {
-      if (currentAnalysis) {
-        setIsReportOpen(true);
-      } else {
-        setIsHistoryOpen(true);
-      }
     }
   };
 
