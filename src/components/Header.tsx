@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Sliders, RefreshCw } from 'lucide-react';
+import { Plus, Sliders } from 'lucide-react';
 import { LogoWordmark } from './BrandLogos';
 import type { ProductionProfile } from '../utils/productionProfiles';
 
@@ -37,39 +37,55 @@ export const Header: React.FC<HeaderProps> = ({
       : `${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm`
     : '';
 
-  return (
-    <header className="sticky top-0 z-20 w-full bg-white/95 backdrop-blur-xs border-b border-slate-200/80 px-4 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between shadow-2xs select-none">
-      {/* Left: Brand & Contract Indicator */}
-      <div className="flex items-center gap-3 sm:gap-5 min-w-0">
-        <LogoWordmark height={26} />
+  const fullProfileLabel = `Perfil de produção: ${profileDisplayName}${profileDimensions ? ` (${profileDimensions})` : ''}. Clique para alterar.`;
 
-        {/* Profile Contract Badge with Explicit "Alterar Perfil" Action */}
+  return (
+    <header className="sticky top-0 z-20 w-full bg-white/95 backdrop-blur-xs border-b border-slate-200/80 px-3 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between shadow-2xs select-none">
+      {/* Left: Brand & Contract Indicator */}
+      <div className="flex items-center gap-2 sm:gap-5 min-w-0">
+        <LogoWordmark height={24} />
+
+        {/* Profile Contract Badge — Desktop / Tablet Full View */}
         {selectedProfile && onOpenChangeProfile && hasActiveAnalysis && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden md:inline">
-                Contrato:
-              </span>
-              <span className="text-xs font-black text-[#0F172A] truncate max-w-[120px] sm:max-w-[180px] md:max-w-[220px]">
-                {profileDisplayName}
-              </span>
-              {profileDimensions && (
-                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100 hidden sm:inline shrink-0">
-                  {profileDimensions}
+          <>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden md:inline">
+                  Contrato:
                 </span>
-              )}
+                <span className="text-xs font-black text-[#0F172A] truncate max-w-[120px] md:max-w-[220px]">
+                  {profileDisplayName}
+                </span>
+                {profileDimensions && (
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100 hidden sm:inline shrink-0">
+                    {profileDimensions}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={onOpenChangeProfile}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-[11px] font-bold text-indigo-700 transition-all cursor-pointer shadow-2xs shrink-0"
+                title={fullProfileLabel}
+                aria-label={fullProfileLabel}
+              >
+                <Sliders className="w-3 h-3 text-indigo-600" />
+                <span>Alterar</span>
+              </button>
             </div>
 
+            {/* Profile Contract Badge — Mobile Compact Button */}
             <button
               type="button"
               onClick={onOpenChangeProfile}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-[11px] font-bold text-indigo-700 transition-all cursor-pointer shadow-2xs shrink-0"
-              title="Reavaliar este documento com outro perfil de produção"
+              className="flex sm:hidden items-center justify-center p-2 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-indigo-700 transition-all cursor-pointer shadow-2xs shrink-0 min-w-[36px] min-h-[36px]"
+              title={fullProfileLabel}
+              aria-label={fullProfileLabel}
             >
-              <Sliders className="w-3 h-3 text-indigo-600" />
-              <span>Alterar</span>
+              <Sliders className="w-4 h-4 text-indigo-600" />
             </button>
-          </div>
+          </>
         )}
       </div>
 
@@ -102,11 +118,11 @@ export const Header: React.FC<HeaderProps> = ({
       )}
 
       {/* Right Actions: Primary "+ Novo Arquivo" */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <button
           type="button"
           onClick={onReset}
-          className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0066FF] via-[#5B21B6] to-[#7C3AED] hover:opacity-95 shadow-md shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer select-none shrink-0"
+          className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0066FF] via-[#5B21B6] to-[#7C3AED] hover:opacity-95 shadow-md shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer select-none shrink-0"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>Novo Arquivo</span>

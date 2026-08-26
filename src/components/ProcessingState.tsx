@@ -49,7 +49,11 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
       errorMessage?.toLowerCase().includes('401');
 
     return (
-      <div className="w-full max-w-2xl mx-auto my-12 p-8 bg-white border border-red-200 rounded-3xl text-center shadow-xs select-none">
+      <div
+        role="alert"
+        aria-live="assertive"
+        className="w-full max-w-2xl mx-auto my-12 p-8 bg-white border border-red-200 rounded-3xl text-center shadow-xs select-none"
+      >
         <div className="w-14 h-14 mx-auto rounded-2xl bg-[#FEE2E2] border border-red-200 flex items-center justify-center text-[#B91C1C] mb-4">
           <AlertCircle className="w-7 h-7" />
         </div>
@@ -102,10 +106,16 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
     );
   }
 
+  const currentStep = steps[currentIndex];
+
   return (
-    <div className="w-full max-w-xl mx-auto my-12 p-8 bg-white border border-slate-200/90 rounded-3xl text-center shadow-xs select-none">
+    <div
+      role="status"
+      aria-live="polite"
+      className="w-full max-w-xl mx-auto my-12 p-8 bg-white border border-slate-200/90 rounded-3xl text-center shadow-xs select-none"
+    >
       <div className="w-14 h-14 mx-auto rounded-2xl bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-center text-[#2563EB] mb-4">
-        <Loader2 className="w-7 h-7 animate-spin" />
+        <Loader2 className="w-7 h-7 animate-spin motion-reduce:animate-none" />
       </div>
 
       <h3 className="text-xl font-black text-[#0F172A] mb-2 tracking-tight">
@@ -115,7 +125,12 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
         Executando inspeção detalhada conforme normas ISO e perfil gráfico calibrado.
       </p>
 
-      <div className="space-y-4 max-w-md mx-auto text-left">
+      {/* Atomic Announcement of Active Processing Step */}
+      <div className="sr-only" aria-atomic="true">
+        {`Etapa ${currentIndex + 1} de ${steps.length}: ${currentStep.label}`}
+      </div>
+
+      <div className="space-y-4 max-w-md mx-auto text-left" aria-hidden="true">
         {steps.map((step, index) => {
           const isDone = index < currentIndex;
           const isCurrent = index === currentIndex;
@@ -126,7 +141,7 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
                 {isDone ? (
                   <CheckCircle2 className="w-5 h-5 text-[#059669]" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-5 h-5 text-[#2563EB] animate-spin" />
+                  <Loader2 className="w-5 h-5 text-[#2563EB] animate-spin motion-reduce:animate-none" />
                 ) : (
                   <div className="w-5 h-5 rounded-full border-2 border-slate-300" />
                 )}

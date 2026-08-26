@@ -49,11 +49,11 @@ export const AppliedCorrectionsSummary: React.FC<AppliedCorrectionsSummaryProps>
         </div>
 
         {/* Global actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
           <button
             type="button"
             onClick={onRestoreOriginal}
-            className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            className="w-full sm:w-auto justify-center px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
             title="Desfazer todas as correções e voltar ao PDF original"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -62,7 +62,7 @@ export const AppliedCorrectionsSummary: React.FC<AppliedCorrectionsSummaryProps>
           <button
             type="button"
             onClick={onDownloadWorkingPdf}
-            className="px-4 py-2 rounded-xl bg-white text-emerald-900 hover:bg-emerald-50 text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-[0.98]"
+            className="w-full sm:w-auto justify-center px-4 py-2 rounded-xl bg-white text-emerald-900 hover:bg-emerald-50 text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-[0.98]"
             title="Baixar PDF com todas as correções acumuladas"
           >
             <Download className="w-4 h-4 stroke-[2.5]" />

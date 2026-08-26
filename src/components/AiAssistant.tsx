@@ -71,7 +71,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ analysis }) => {
           <h3 className="text-base font-bold text-white">
             Assistente Técnico de Pré-impressão (Gemini)
           </h3>
-          <p className="text-xs text-[#8E98A7]">
+          <p className="text-xs text-[#94A3B8]">
             Tire dúvidas sobre fechamento de arquivos e correções operacionais
           </p>
         </div>
@@ -100,14 +100,14 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ analysis }) => {
               {m.text}
             </div>
             {m.role === 'user' && (
-              <div className="w-7 h-7 rounded-lg bg-[#243244] flex items-center justify-center text-[#8E98A7] shrink-0 mt-0.5">
+              <div className="w-7 h-7 rounded-lg bg-[#243244] flex items-center justify-center text-[#94A3B8] shrink-0 mt-0.5">
                 <User className="w-4 h-4" />
               </div>
             )}
           </div>
         ))}
         {isLoading && (
-          <div className="flex items-center space-x-2 text-xs text-[#8E98A7]">
+          <div className="flex items-center space-x-2 text-xs text-[#94A3B8]">
             <Loader2 className="w-4 h-4 animate-spin text-[#007BFF]" />
             <span>Consultando modelo de IA...</span>
           </div>

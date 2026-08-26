@@ -340,7 +340,7 @@ export const VisualPreview: React.FC<VisualPreviewProps> = ({ analysis, profile,
             </div>
             <div className="text-left">
               <h3 className="text-sm font-semibold">Ver no arquivo / Mapa Visual</h3>
-              <p className="text-xs text-[#8E98A7] mt-0.5">
+              <p className="text-xs text-[#94A3B8] mt-0.5">
                 {hasIssues
                   ? `${sortedMarkers.length} problema(s) visual(is) com coordenadas determinísticas`
                   : documentLevelIssues.length > 0
@@ -401,7 +401,7 @@ export const VisualPreview: React.FC<VisualPreviewProps> = ({ analysis, profile,
           </div>
           <div>
             <h3 className="text-lg font-bold text-white">Mapa Visual do Arquivo</h3>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <p className="text-xs text-[#94A3B8] mt-0.5">
               Renderização real do PDF com sobreposições geométricas do Motor 1
             </p>
           </div>
@@ -409,7 +409,7 @@ export const VisualPreview: React.FC<VisualPreviewProps> = ({ analysis, profile,
         <button
           type="button"
           onClick={() => setIsOpen(false)}
-          className="px-3 py-1.5 rounded-lg text-xs text-[#8E98A7] hover:text-white hover:bg-[#16202E] transition-colors cursor-pointer"
+          className="px-3 py-1.5 rounded-lg text-xs text-[#94A3B8] hover:text-white hover:bg-[#16202E] transition-colors cursor-pointer"
         >
           Fechar
         </button>
@@ -420,12 +420,12 @@ export const VisualPreview: React.FC<VisualPreviewProps> = ({ analysis, profile,
         {/* Issue navigation */}
         {sortedMarkers.length > 0 ? (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[#8E98A7] font-medium mr-1">Problema:</span>
+            <span className="text-xs text-[#94A3B8] font-medium mr-1">Problema:</span>
             <button
               type="button"
               onClick={() => navigateIssue('prev')}
               disabled={currentIssueIdx === 0}
-              className="p-1.5 rounded-lg text-[#8E98A7] hover:text-white hover:bg-[#16202E] disabled:opacity-30 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-[#94A3B8] hover:text-white hover:bg-[#16202E] disabled:opacity-30 transition-colors cursor-pointer"
               title="Problema anterior"
             >
               <ChevronLeft className="w-4 h-4" />

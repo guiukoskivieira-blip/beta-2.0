@@ -43,7 +43,7 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
         {/* Card 1: Score & Classification */}
         <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">
               Índice de Conformidade
             </span>
             <Gauge className="w-5 h-5 text-[#007BFF]" />
@@ -56,7 +56,7 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
             >
               {scoreSummary.score}
             </span>
-            <span className="text-sm font-semibold text-[#8E98A7]">/ 100</span>
+            <span className="text-sm font-semibold text-[#94A3B8]">/ 100</span>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -76,7 +76,7 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
         {/* Card 2: Document Structure */}
         <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">
               Geometria & Páginas
             </span>
             <FileText className="w-5 h-5 text-[#00D18F]" />
@@ -84,22 +84,22 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
 
           <div className="my-3 space-y-1.5 text-xs text-[#C3CBD6]">
             <div className="flex justify-between py-0.5 border-b border-[#243244]/40">
-              <span className="text-[#8E98A7]">Páginas Totais:</span>
+              <span className="text-[#94A3B8]">Páginas Totais:</span>
               <span className="font-semibold text-white">{document.pageCount}</span>
             </div>
             <div className="flex justify-between py-0.5 border-b border-[#243244]/40">
-              <span className="text-[#8E98A7]">Formato Pág 1:</span>
+              <span className="text-[#94A3B8]">Formato Pág 1:</span>
               <span className="font-semibold text-white">
                 {document.pages[0]?.widthMm.toFixed(1)} × {document.pages[0]?.heightMm.toFixed(1)} mm
               </span>
             </div>
             <div className="flex justify-between py-0.5">
-              <span className="text-[#8E98A7]">Tamanho do Arquivo:</span>
+              <span className="text-[#94A3B8]">Tamanho do Arquivo:</span>
               <span className="font-semibold text-white">{formatBytes(analysis.fileSizeBytes)}</span>
             </div>
           </div>
 
-          <div className="text-[11px] text-[#8E98A7] flex items-center">
+          <div className="text-[11px] text-[#94A3B8] flex items-center">
             <ShieldCheck className="w-3.5 h-3.5 mr-1 text-[#00D18F]" />
             {document.pdfxInfo?.isDeclaredPdfX ? document.pdfxInfo.declaredVersion : 'PDF Padrão'}
           </div>
@@ -108,7 +108,7 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
         {/* Card 3: Color & Content summary */}
         <div className="bg-[#101722] border border-[#243244] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">
               Cores & Imagens
             </span>
             <Layers className="w-5 h-5 text-[#FFB800]" />
@@ -116,24 +116,24 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
 
           <div className="my-3 space-y-1.5 text-xs text-[#C3CBD6]">
             <div className="flex justify-between py-0.5 border-b border-[#243244]/40">
-              <span className="text-[#8E98A7]">Espaço de Cores:</span>
+              <span className="text-[#94A3B8]">Espaço de Cores:</span>
               <span className="font-semibold text-white">
                 {document.colorSummary.hasRgb ? 'RGB Detectado' : 'CMYK / Spot'}
               </span>
             </div>
             <div className="flex justify-between py-0.5 border-b border-[#243244]/40">
-              <span className="text-[#8E98A7]">Ocorrências Imagens:</span>
+              <span className="text-[#94A3B8]">Ocorrências Imagens:</span>
               <span className="font-semibold text-white">
                 {document.pages.reduce((acc, p) => acc + (p.imageOccurrences?.length || 0), 0)}
               </span>
             </div>
             <div className="flex justify-between py-0.5">
-              <span className="text-[#8E98A7]">Fontes Detectadas:</span>
+              <span className="text-[#94A3B8]">Fontes Detectadas:</span>
               <span className="font-semibold text-white">{document.fonts.length}</span>
             </div>
           </div>
 
-          <div className="text-[11px] text-[#8E98A7] flex items-center">
+          <div className="text-[11px] text-[#94A3B8] flex items-center">
             <span className="w-2 h-2 rounded-full bg-[#00D18F] mr-1.5"></span>
             {document.fonts.every((f) => f.isEmbedded !== 'no')
               ? '100% Fontes Incorporadas'
@@ -150,7 +150,7 @@ export const OperationalSummary: React.FC<OperationalSummaryProps> = ({ analysis
           </div>
           <div>
             <h4 className="text-xs font-semibold text-white">Relatório Técnico de Pré-Impressão</h4>
-            <p className="text-[11px] text-[#8E98A7]">
+            <p className="text-[11px] text-[#94A3B8]">
               Documento PDF estruturado com detalhamento de regras, conformidade e evidências.
             </p>
           </div>

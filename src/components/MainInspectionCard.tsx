@@ -389,46 +389,50 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
             )}
 
             {/* Controls Overlay: Page navigation & Zoom */}
-            <div className="absolute bottom-2 inset-x-2 flex items-center justify-between px-2 py-1 rounded-xl bg-black/60 backdrop-blur-xs text-white text-[11px] font-semibold">
-              <div className="flex items-center gap-1">
+            <div className="absolute bottom-2 inset-x-2 flex items-center justify-between px-1 py-0.5 rounded-xl bg-black/60 backdrop-blur-xs text-white text-[11px] font-semibold">
+              <div className="flex items-center gap-0.5">
                 <button
                   type="button"
                   disabled={currentPageNum <= 1}
                   onClick={() => setCurrentPageNum(p => Math.max(1, p - 1))}
-                  className="p-1 hover:text-[#38BDF8] disabled:opacity-30 cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:text-[#38BDF8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  aria-label="Página anterior"
                   title="Página anterior"
                 >
-                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span>{currentPageNum}/{totalPages}</span>
+                <span className="px-1">{currentPageNum}/{totalPages}</span>
                 <button
                   type="button"
                   disabled={currentPageNum >= totalPages}
                   onClick={() => setCurrentPageNum(p => Math.min(totalPages, p + 1))}
-                  className="p-1 hover:text-[#38BDF8] disabled:opacity-30 cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:text-[#38BDF8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  aria-label="Próxima página"
                   title="Próxima página"
                 >
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <button
                   type="button"
                   onClick={() => setZoomScale(z => Math.max(0.8, z - 0.2))}
-                  className="p-1 hover:text-[#38BDF8] cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:text-[#38BDF8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8] transition-colors cursor-pointer"
+                  aria-label="Reduzir zoom"
                   title="Reduzir zoom"
                 >
-                  <ZoomOut className="w-3.5 h-3.5" />
+                  <ZoomOut className="w-4 h-4" />
                 </button>
-                <span className="text-[10px] text-slate-300 font-mono">{Math.round(zoomScale * 100)}%</span>
+                <span className="text-[10px] text-slate-300 font-mono px-1">{Math.round(zoomScale * 100)}%</span>
                 <button
                   type="button"
                   onClick={() => setZoomScale(z => Math.min(2.0, z + 0.2))}
-                  className="p-1 hover:text-[#38BDF8] cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:text-[#38BDF8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8] transition-colors cursor-pointer"
+                  aria-label="Aumentar zoom"
                   title="Aumentar zoom"
                 >
-                  <ZoomIn className="w-3.5 h-3.5" />
+                  <ZoomIn className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -442,14 +446,14 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
           </div>
 
           {/* Dimensões */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Ruler className="w-4 h-4 text-[#64748B]" />
+              <Ruler className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Dimensões</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{formatValue}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 dimStatusText === 'OK' 
                   ? 'bg-[#ECFDF5] text-[#059669]' 
                   : (dimStatusText === 'Orientação' || dimStatusText === 'Atenção'
@@ -462,42 +466,42 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
           </div>
 
           {/* Sangria */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Crop className="w-4 h-4 text-[#64748B]" />
+              <Crop className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Sangria</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{bleedText}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 bleedStatusText === 'OK' ? 'bg-[#ECFDF5] text-[#059669]' : 'bg-[#FEF3C7] text-[#B45309]'
               }`}>{bleedStatusText}</span>
             </div>
           </div>
 
           {/* Resolução */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Eye className="w-4 h-4 text-[#64748B]" />
+              <Eye className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Resolução</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{dpiText}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 dpiStatusText === 'OK' ? 'bg-[#ECFDF5] text-[#059669]' : (dpiStatusText === 'Atenção' ? 'bg-[#FEF3C7] text-[#B45309]' : 'bg-[#FEE2E2] text-[#B91C1C]')
               }`}>{dpiStatusText}</span>
             </div>
           </div>
 
           {/* Cores */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Droplet className="w-4 h-4 text-[#64748B]" />
+              <Droplet className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Cores</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{colorText}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 colorStatusText === 'OK' 
                   ? 'bg-[#ECFDF5] text-[#059669]' 
                   : (colorStatusText === 'Ajustável' 
@@ -508,40 +512,40 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
           </div>
 
           {/* Fontes */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Type className="w-4 h-4 text-[#64748B]" />
+              <Type className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Fontes</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{fontText}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 fontStatusText === 'OK' ? 'bg-[#ECFDF5] text-[#059669]' : 'bg-[#FEE2E2] text-[#B91C1C]'
               }`}>{fontStatusText}</span>
             </div>
           </div>
 
           {/* Transparências */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <Layers className="w-4 h-4 text-[#64748B]" />
+              <Layers className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>Transparências</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{transpText}</span>
-              <span className="px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669] text-[10px] font-bold">OK</span>
+              <span className="px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669] text-[10px] font-bold shrink-0">OK</span>
             </div>
           </div>
 
           {/* PDF/X */}
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-1.5 py-1.5 px-3 rounded-xl hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2.5 text-xs text-[#475569] font-medium">
-              <ShieldCheck className="w-4 h-4 text-[#64748B]" />
+              <ShieldCheck className="w-4 h-4 text-[#64748B] shrink-0" />
               <span>PDF/X</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap justify-end">
               <span className="text-xs font-semibold text-[#0F172A]">{pdfxText}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
                 pdfxStatusText === 'OK' 
                   ? 'bg-[#ECFDF5] text-[#059669]' 
                   : (pdfxStatusText === 'Ajustável' 

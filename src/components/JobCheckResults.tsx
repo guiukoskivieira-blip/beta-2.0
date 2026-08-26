@@ -159,7 +159,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
             <h3 className="text-lg font-bold text-white">
               Pedido × Arquivo
             </h3>
-            <p className="text-xs text-[#8E98A7] mt-0.5">
+            <p className="text-xs text-[#94A3B8] mt-0.5">
               Verificação de compatibilidade do PDF com os dados do pedido
             </p>
           </div>
@@ -174,7 +174,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
       {/* Expected vs Found table */}
       {rows.length > 0 && (
         <div className="mt-5">
-          <h4 className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider mb-3">
+          <h4 className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider mb-3">
             Comparação Esperado × Encontrado
           </h4>
           <div className="space-y-0">
@@ -185,7 +185,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
                   row.finding ? 'bg-[#0B1018]/50' : ''
                 } ${idx > 0 ? 'mt-1' : ''}`}
               >
-                <div className="flex items-center text-[#8E98A7] font-medium">
+                <div className="flex items-center text-[#94A3B8] font-medium">
                   {row.label}
                 </div>
                 <div className="text-white">
@@ -207,7 +207,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
       {/* Findings */}
       {result.findings.length > 0 && (
         <div className="mt-5">
-          <h4 className="text-xs font-semibold text-[#8E98A7] uppercase tracking-wider mb-3">
+          <h4 className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider mb-3">
             Divergências Encontradas ({result.findings.length})
           </h4>
           <div className="space-y-2">
@@ -235,7 +235,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
                         <p className="text-xs text-[#A6B4C9] line-clamp-2 mt-0.5">{finding.evidence}</p>
                       </div>
                     </div>
-                    <button type="button" className="text-[#8E98A7] hover:text-white p-1 shrink-0">
+                    <button type="button" className="text-[#94A3B8] hover:text-white p-1 shrink-0">
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                   </div>
@@ -243,7 +243,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
                   {isExpanded && (
                     <div className="px-4 pb-3 pl-11 space-y-2 text-xs">
                       <div>
-                        <span className="text-[#8E98A7] font-medium block mb-0.5">Recomendação:</span>
+                        <span className="text-[#94A3B8] font-medium block mb-0.5">Recomendação:</span>
                         <p className="text-[#00D18F] font-medium">{finding.recommendation}</p>
                       </div>
                     </div>
@@ -272,7 +272,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
               <h4 className="text-sm font-bold text-white">
                 Gate Final de Produção
               </h4>
-              <p className="text-xs text-[#8E98A7] mt-0.5">
+              <p className="text-xs text-[#94A3B8] mt-0.5">
                 {result.gateReady
                   ? 'PDF e pedido compatíveis — pronto para produção'
                   : 'Não está pronto para produção'}
@@ -283,7 +283,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
           <div className="text-right text-xs space-y-0.5">
             <div className="flex items-center justify-end space-x-1.5">
               <ClipboardCheck className="w-3.5 h-3.5 text-[#6B778C]" />
-              <span className="text-[#8E98A7]">Motor 1:</span>
+              <span className="text-[#94A3B8]">Motor 1:</span>
               <span className={`font-semibold ${
                 preflightClassification === 'approved' ? 'text-[#00D18F]' :
                 preflightClassification === 'review' ? 'text-[#FFB800]' :
@@ -296,7 +296,7 @@ export const JobCheckResults: React.FC<JobCheckResultsProps> = ({
             </div>
             <div className="flex items-center justify-end space-x-1.5">
               <Package className="w-3.5 h-3.5 text-[#6B778C]" />
-              <span className="text-[#8E98A7]">Pedido:</span>
+              <span className="text-[#94A3B8]">Pedido:</span>
               <span className={`font-semibold ${cfg.color}`}>
                 {result.status === 'approved' ? 'Aprovado' : result.status === 'review' ? 'Revisão' : 'Bloqueado'}
               </span>

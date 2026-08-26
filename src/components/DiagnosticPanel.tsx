@@ -42,7 +42,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({ ruleResults })
       case 'undetermined':
       default:
         return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#8E98A7]/10 text-[#8E98A7] border border-[#8E98A7]/30">
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#94A3B8]/10 text-[#94A3B8] border border-[#94A3B8]/30">
             <HelpCircle className="w-3.5 h-3.5 mr-1" /> Indeterminado
           </span>
         );
@@ -57,7 +57,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({ ruleResults })
             <Sliders className="w-5 h-5 mr-2 text-[#007BFF]" />
             Diagnóstico das Regras Técnicas
           </h3>
-          <p className="text-xs text-[#8E98A7] mt-1">
+          <p className="text-xs text-[#94A3B8] mt-1">
             Perfil ativo: <span className="text-white font-medium">{ruleResults.profileUsed.name}</span>
           </p>
         </div>
@@ -68,7 +68,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({ ruleResults })
             type="button"
             onClick={() => setFilter('all')}
             className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
-              filter === 'all' ? 'bg-[#007BFF] text-white' : 'text-[#8E98A7] hover:text-white'
+              filter === 'all' ? 'bg-[#007BFF] text-white' : 'text-[#94A3B8] hover:text-white'
             }`}
           >
             Todas ({ruleResults.totalRules})
@@ -134,7 +134,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({ ruleResults })
 
                 <div className="flex items-center space-x-3 shrink-0">
                   {getStatusBadge(rule.status)}
-                  <button type="button" className="text-[#8E98A7] hover:text-white p-1">
+                  <button type="button" className="text-[#94A3B8] hover:text-white p-1">
                     {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 </div>
@@ -143,19 +143,19 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({ ruleResults })
               {isExpanded && (
                 <div className="mt-3 pl-4 border-l-2 border-[#243244] ml-2 space-y-2.5 text-xs">
                   <div>
-                    <span className="text-[#8E98A7] font-medium block mb-0.5">Explicação Técnica:</span>
+                    <span className="text-[#94A3B8] font-medium block mb-0.5">Explicação Técnica:</span>
                     <p className="text-[#C3CBD6]">{rule.explanation}</p>
                   </div>
                   <div>
-                    <span className="text-[#8E98A7] font-medium block mb-0.5">Recomendação Operacional:</span>
+                    <span className="text-[#94A3B8] font-medium block mb-0.5">Recomendação Operacional:</span>
                     <p className="text-[#00D18F] font-medium">{rule.recommendation}</p>
                   </div>
                   {rule.references && rule.references.length > 0 && (
                     <div>
-                      <span className="text-[#8E98A7] font-medium block mb-1">Ocorrências / Objetos:</span>
+                      <span className="text-[#94A3B8] font-medium block mb-1">Ocorrências / Objetos:</span>
                       <div className="space-y-1">
                         {rule.references.slice(0, 10).map((ref, idx) => (
-                          <div key={idx} className="bg-[#0B1018] px-2.5 py-1.5 rounded-lg border border-[#243244] text-[#8E98A7] flex items-center justify-between">
+                          <div key={idx} className="bg-[#0B1018] px-2.5 py-1.5 rounded-lg border border-[#243244] text-[#94A3B8] flex items-center justify-between">
                             <span>{ref.page ? `Página ${ref.page}` : 'Documento'}: {ref.details}</span>
                             <span className="text-[10px] text-[#6B778C] uppercase">{ref.objectType}</span>
                           </div>

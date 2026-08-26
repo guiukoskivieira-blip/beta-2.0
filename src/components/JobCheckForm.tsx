@@ -53,7 +53,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
               <h3 className="text-sm font-semibold text-white">
                 Conferir com dados do pedido
               </h3>
-              <p className="text-xs text-[#8E98A7] mt-0.5">
+              <p className="text-xs text-[#94A3B8] mt-0.5">
                 {enabled ? 'Ativado — verifique compatibilidade após análise' : 'Opcional — ative para comparar PDF com pedido'}
               </p>
             </div>
@@ -71,7 +71,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
             <button
               type="button"
               onClick={() => setExpanded(!expanded)}
-              className="w-full flex items-center justify-between px-5 py-2.5 text-xs text-[#8E98A7] hover:text-white transition-colors"
+              className="w-full flex items-center justify-between px-5 py-2.5 text-xs text-[#94A3B8] hover:text-white transition-colors"
             >
               <span className="font-medium">Especificações do pedido</span>
               {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -82,7 +82,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                 {/* Sidedness + Page count */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Frente / Verso</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Frente / Verso</label>
                     <div className="flex gap-2">
                       {([['single', 'Frente'], ['double', 'Frente e Verso']] as [JobSidedness, string][]).map(([val, label]) => (
                         <button
@@ -92,7 +92,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                           className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
                             spec.sidedness === val
                               ? 'bg-[#007BFF]/15 border-[#007BFF]/50 text-[#007BFF]'
-                              : 'bg-[#0B1018] border-[#243244] text-[#8E98A7] hover:text-white'
+                              : 'bg-[#0B1018] border-[#243244] text-[#94A3B8] hover:text-white'
                           }`}
                         >
                           {label}
@@ -102,7 +102,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Nº de páginas esperado</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Nº de páginas esperado</label>
                     <input
                       type="number"
                       min={1}
@@ -117,7 +117,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                 {/* Dimensions */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Largura (mm) — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Largura (mm) — opcional</label>
                     <input
                       type="number"
                       min={1}
@@ -128,7 +128,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Altura (mm) — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Altura (mm) — opcional</label>
                     <input
                       type="number"
                       min={1}
@@ -142,7 +142,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
 
                 {/* Color policy */}
                 <div>
-                  <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">CMYK obrigatório?</label>
+                  <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">CMYK obrigatório?</label>
                   <div className="flex gap-2">
                     {([['cmyk_only', 'Sim, CMYK exclusivo'], ['cmyk_or_spot', 'CMYK ou Spot'], ['rgb_allowed', 'RGB permitido']] as [JobColorPolicy, string][]).map(([val, label]) => (
                       <button
@@ -152,7 +152,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                         className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
                           spec.colorPolicy === val
                             ? 'bg-[#007BFF]/15 border-[#007BFF]/50 text-[#007BFF]'
-                            : 'bg-[#0B1018] border-[#243244] text-[#8E98A7] hover:text-white'
+                            : 'bg-[#0B1018] border-[#243244] text-[#94A3B8] hover:text-white'
                         }`}
                       >
                         {label}
@@ -164,7 +164,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                 {/* DPI + Bleed */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">DPI mínimo — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">DPI mínimo — opcional</label>
                     <input
                       type="number"
                       min={1}
@@ -175,7 +175,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Sangria (mm) — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Sangria (mm) — opcional</label>
                     <input
                       type="number"
                       min={0}
@@ -191,7 +191,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                 {/* Material + Acabamento + Quantidade */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Material — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Material — opcional</label>
                     <input
                       type="text"
                       value={spec.material ?? ''}
@@ -201,7 +201,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Acabamento — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Acabamento — opcional</label>
                     <input
                       type="text"
                       value={spec.acabamento ?? ''}
@@ -211,7 +211,7 @@ export const JobCheckForm: React.FC<JobCheckFormProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-[#8E98A7] mb-1.5 font-medium">Quantidade — opcional</label>
+                    <label className="block text-xs text-[#94A3B8] mb-1.5 font-medium">Quantidade — opcional</label>
                     <input
                       type="number"
                       min={1}
