@@ -180,31 +180,85 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
   };
 
   // Determine Checklist items status
-  const p1 = document.pages[0];
-  const hasValidTrimBox = Boolean(
-    p1?.trimBox &&
-    p1.trimBox.status === 'explicit' &&
-    typeof p1.trimBox.widthMm === 'number' &&
-    p1.trimBox.widthMm > 0 &&
-    typeof p1.trimBox.heightMm === 'number' &&
-    p1.trimBox.heightMm > 0
-  );
-  const isRotated = p1 ? (p1.rotation === 90 || p1.rotation === 270) : false;
-  let nominalW = hasValidTrimBox ? p1!.trimBox!.widthMm : (p1 ? (p1.visualWidthMm ?? p1.widthMm) : 210);
-  let nominalH = hasValidTrimBox ? p1!.trimBox!.heightMm : (p1 ? (p1.visualHeightMm ?? p1.heightMm) : 297);
-  if (hasValidTrimBox && isRotated) {
-    nominalW = p1!.trimBox!.heightMm;
-    nominalH = p1!.trimBox!.widthMm;
+  const pages = document.pages || [];
+  const getPageNominalDimensions = (p: typeof document.pages[0]) => {
+    const hasValidTrimBox = Boolean(
+      p.trimBox &&
+      p.trimBox.status === 'explicit' &&
+      typeof p.trimBox.widthMm === 'number' &&
+      p.trimBox.widthMm > 0 &&
+      typeof p.trimBox.heightMm === 'number' &&
+      p.trimBox.heightMm > 0
+    );
+    const isRotated = p.rotation === 90 || p.rotation === 270;
+    let w = hasValidTrimBox ? p.trimBox!.widthMm : (p.visualWidthMm ?? p.widthMm);
+    let h = hasValidTrimBox ? p.trimBox!.heightMm : (p.visualHeightMm ?? p.heightMm);
+    if (hasValidTrimBox && isRotated) {
+      w = p.trimBox!.heightMm;
+      h = p.trimBox!.widthMm;
+    }
+    return { w: Math.round(w), h: Math.round(h), exactW: w, exactH: h, hasValidTrimBox };
+  };
+
+  const pageDims = pages.map(getPageNominalDimensions);
+  const firstDim = pageDims[0];
+  const TOLERANCE_MM = 1.5;
+
+  // Check if all pages match firstDim (either direct or rotated physical equivalence)
+  const isHeterogeneous = pages.length > 1 && pageDims.some(d => {
+    const normalMatch = Math.abs(d.exactW - firstDim.exactW) <= TOLERANCE_MM && Math.abs(d.exactH - firstDim.exactH) <= TOLERANCE_MM;
+    const rotatedMatch = Math.abs(d.exactW - firstDim.exactH) <= TOLERANCE_MM && Math.abs(d.exactH - firstDim.exactW) <= TOLERANCE_MM;
+    return !normalMatch && !rotatedMatch;
+  });
+
+  let formatValue = '';
+  if (!isHeterogeneous) {
+    const w = firstDim ? firstDim.w : 210;
+    const h = firstDim ? firstDim.h : 297;
+    formatValue = `${w} × ${h} mm`;
+  } else {
+    // Collect unique dimensions (preserving order)
+    const uniqueDims: Array<{ w: number; h: number }> = [];
+    for (const d of pageDims) {
+      const exists = uniqueDims.some(u => 
+        (Math.abs(u.w - d.w) <= 1 && Math.abs(u.h - d.h) <= 1) ||
+        (Math.abs(u.w - d.h) <= 1 && Math.abs(u.h - d.w) <= 1)
+      );
+      if (!exists) {
+        uniqueDims.push({ w: d.w, h: d.h });
+      }
+    }
+
+    if (uniqueDims.length === 2) {
+      formatValue = `${uniqueDims[0].w} × ${uniqueDims[0].h} + ${uniqueDims[1].w} × ${uniqueDims[1].h} mm`;
+    } else if (uniqueDims.length > 2) {
+      formatValue = `Formatos diferentes (${uniqueDims.length} tamanhos)`;
+    } else {
+      formatValue = 'Formatos diferentes';
+    }
   }
-  const formatValue = `${Math.round(nominalW)} × ${Math.round(nominalH)} mm`;
-  
+
+  const p1 = document.pages[0];
+  const hasValidTrimBox = Boolean(firstDim?.hasValidTrimBox);
+
   // Dimensions status from Motor 1
   const dimRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-DIM-001');
+  const geomRule = ruleResults.results.find(r => r.ruleId === 'RULE-GEOM-001');
   const isGenericProfile = Boolean(!profile.expectedWidthMm || !profile.expectedHeightMm);
   const isRotatedWarning = Boolean(dimRule?.status === 'warning' && (dimRule?.evidence?.includes('invertida') || dimRule?.evidence?.includes('Orientação')));
-  const dimStatusText: 'OK' | 'Orientação' | 'Ajustável' = (isGenericProfile || dimRule?.status === 'approved')
-    ? 'OK' 
-    : (isRotatedWarning ? 'Orientação' : 'Ajustável');
+  const isBlockingError = Boolean(dimRule?.status === 'error' || geomRule?.status === 'error');
+  const isWarningOnly = Boolean(geomRule?.status === 'warning' && !isBlockingError);
+
+  const dimStatusText: 'OK' | 'Orientação' | 'Ajustável' | 'Manual' | 'Atenção' = 
+    (isGenericProfile && !isHeterogeneous) || (dimRule?.status === 'approved' && geomRule?.status === 'approved')
+      ? 'OK'
+      : (isRotatedWarning
+          ? 'Orientação'
+          : (isBlockingError
+              ? 'Manual'
+              : (isWarningOnly
+                  ? 'Atenção'
+                  : 'Ajustável')));
 
   // Bleed status matching Motor 1 geometry
   const bleedRule = ruleResults.results.find(r => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed');
@@ -382,7 +436,11 @@ export const MainInspectionCard: React.FC<MainInspectionCardProps> = ({
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                 dimStatusText === 'OK' 
                   ? 'bg-[#ECFDF5] text-[#059669]' 
-                  : (dimStatusText === 'Orientação' ? 'bg-[#FEF3C7] text-[#B45309]' : 'bg-[#EFF6FF] text-[#1D4ED8]')
+                  : (dimStatusText === 'Orientação' || dimStatusText === 'Atenção'
+                      ? 'bg-[#FEF3C7] text-[#B45309]' 
+                      : (dimStatusText === 'Manual'
+                          ? 'bg-[#FEE2E2] text-[#B91C1C]'
+                          : 'bg-[#EFF6FF] text-[#1D4ED8]'))
               }`}>{dimStatusText}</span>
             </div>
           </div>
