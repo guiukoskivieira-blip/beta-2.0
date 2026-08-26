@@ -7,6 +7,7 @@ import {
   deleteLocalCustomProfile,
   validateCustomProfile,
 } from '../utils/customProfilesStorage';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface CustomProfilesModalProps {
   isOpen: boolean;
@@ -19,6 +20,11 @@ export const CustomProfilesModal: React.FC<CustomProfilesModalProps> = ({
   onClose,
   onSelectProfile,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+  });
+
   const [profiles, setProfiles] = useState<StoredProductionProfile[]>(() => getLocalCustomProfiles());
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
@@ -75,16 +81,25 @@ export const CustomProfilesModal: React.FC<CustomProfilesModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="custom-profiles-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 w-full max-w-xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100 shrink-0">
               <Sliders className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+              <h3 id="custom-profiles-title" className="text-lg font-black text-[#0F172A] tracking-tight">
                 Perfis de Produção Personalizados
               </h3>
               <p className="text-xs text-[#64748B] font-medium">
@@ -93,6 +108,7 @@ export const CustomProfilesModal: React.FC<CustomProfilesModalProps> = ({
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"

@@ -15,6 +15,7 @@ import {
   type TransparencyValidationResult,
 } from '../services/transparencyFlattening.ts';
 import type { PreflightAnalysis } from '../types/index.ts';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 export interface TransparencyModalProps {
   isOpen: boolean;
@@ -34,6 +35,12 @@ export const TransparencyModal: React.FC<TransparencyModalProps> = ({
   const [isCheckingCapability, setIsCheckingCapability] = useState(true);
   const [ghostscriptAvailable, setGhostscriptAvailable] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+    isProcessing,
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [flattenedResult, setFlattenedResult] = useState<{
     fileName: string;
@@ -145,23 +152,35 @@ export const TransparencyModal: React.FC<TransparencyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="transparency-modal-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-violet-50 text-violet-600">
+            <div className="p-2.5 rounded-xl bg-violet-50 text-violet-600 shrink-0">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-[#0F172A]">Achatar Transparências</h3>
+              <h3 id="transparency-modal-title" className="text-base font-black text-[#0F172A]">Achatar Transparências</h3>
               <p className="text-xs text-[#64748B]">Processamento determinístico para PDF/X-1a (PDF 1.3)</p>
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            disabled={isProcessing}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+            aria-label="Fechar"
           >
             <X className="w-5 h-5" />
           </button>

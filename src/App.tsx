@@ -1311,7 +1311,7 @@ export const App: React.FC = () => {
         />
 
         {/* Center Main Stage */}
-        <main className="flex-1 min-w-0 px-4 sm:px-8 py-6 max-w-6xl mx-auto w-full">
+        <main className="flex-1 min-w-0 px-4 sm:px-8 pt-6 pb-24 md:py-6 max-w-6xl mx-auto w-full">
           {processingStatus !== 'idle' ? (
             <ProcessingState
               status={processingStatus}

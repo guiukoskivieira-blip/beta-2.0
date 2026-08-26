@@ -1,5 +1,6 @@
 import React from 'react';
-import { RotateCcw, X, AlertTriangle, ArrowRight, Loader2, Check } from 'lucide-react';
+import { RotateCcw, X, Check, Loader2 } from 'lucide-react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface RotateConfirmationModalProps {
   isOpen: boolean;
@@ -22,14 +23,29 @@ export const RotateConfirmationModal: React.FC<RotateConfirmationModalProps> = (
   targetWidthMm,
   targetHeightMm,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+    isProcessing: isFixingInProgress,
+  });
+
   if (!isOpen) return null;
 
   const sourceOrientation = sourceWidthMm > sourceHeightMm ? 'Horizontal' : 'Vertical';
   const targetOrientation = targetWidthMm > targetHeightMm ? 'Horizontal' : 'Vertical';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rotate-confirmation-title"
+    >
+      <div
+        className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-amber-50/50 to-white">
           <div className="flex items-center gap-3">
@@ -37,15 +53,19 @@ export const RotateConfirmationModal: React.FC<RotateConfirmationModalProps> = (
               <RotateCcw className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Girar página 90°?</h2>
+              <h2 id="rotate-confirmation-title" className="text-base font-bold text-slate-900">
+                Girar página 90°?
+              </h2>
               <p className="text-xs text-slate-500">Ajuste de orientação geométrica do documento</p>
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             disabled={isFixingInProgress}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+            aria-label="Fechar"
           >
             <X className="w-5 h-5" />
           </button>

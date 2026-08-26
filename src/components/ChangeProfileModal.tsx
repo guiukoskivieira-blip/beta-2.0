@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sliders, ArrowRight, AlertTriangle, ShieldCheck, Check } from 'lucide-react';
+import { X, Sliders, ArrowRight, ShieldCheck } from 'lucide-react';
 import type { ProductionProfile } from '../utils/productionProfiles';
 import { STANDARD_PROFILES, COMMERCIAL_PRINT_300DPI_PROFILE } from '../utils/productionProfiles';
 import { getLocalCustomProfiles } from '../utils/customProfilesStorage';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface ChangeProfileModalProps {
   isOpen: boolean;
@@ -20,6 +21,11 @@ export const ChangeProfileModal: React.FC<ChangeProfileModalProps> = ({
   onOpenFullLibrary,
 }) => {
   const [selectedNewProfile, setSelectedNewProfile] = useState<ProductionProfile>(currentProfile);
+
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -58,16 +64,25 @@ export const ChangeProfileModal: React.FC<ChangeProfileModalProps> = ({
   const isSame = selectedNewProfile.id === currentProfile.id;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none animate-in fade-in duration-200"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="change-profile-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="p-6 bg-gradient-to-br from-indigo-50/70 via-slate-50 to-white border-b border-slate-100 flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-3 rounded-2xl bg-[#4F46E5] text-white shadow-md shadow-indigo-500/20">
+            <div className="p-3 rounded-2xl bg-[#4F46E5] text-white shadow-md shadow-indigo-500/20 shrink-0">
               <Sliders className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+              <h3 id="change-profile-title" className="text-lg font-black text-[#0F172A] tracking-tight">
                 Alterar Perfil da Análise
               </h3>
               <p className="text-xs text-[#64748B] font-medium mt-0.5">
@@ -76,9 +91,11 @@ export const ChangeProfileModal: React.FC<ChangeProfileModalProps> = ({
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            aria-label="Fechar"
           >
             <X className="w-5 h-5" />
           </button>
@@ -106,7 +123,7 @@ export const ChangeProfileModal: React.FC<ChangeProfileModalProps> = ({
           {/* New Profile Selection */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-[#0F172A]">
+              <label htmlFor="select-new-profile" className="text-xs font-bold text-[#0F172A]">
                 Selecione o Novo Perfil de Produção:
               </label>
               <button
@@ -122,6 +139,7 @@ export const ChangeProfileModal: React.FC<ChangeProfileModalProps> = ({
             </div>
 
             <select
+              id="select-new-profile"
               value={selectedNewProfile.id}
               onChange={(e) => {
                 const found = allAvailableProfiles.find((p) => p.id === e.target.value);

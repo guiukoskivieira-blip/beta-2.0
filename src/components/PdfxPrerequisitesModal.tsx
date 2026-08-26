@@ -1,12 +1,9 @@
 import React from 'react';
 import {
   FileCode,
-  CheckCircle2,
   AlertTriangle,
   X,
   Zap,
-  ArrowRight,
-  ShieldAlert,
   Crop,
   Palette,
   Loader2,
@@ -14,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { PreflightAnalysis } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 export interface PdfxPrerequisitesModalProps {
   isOpen: boolean;
@@ -40,21 +38,36 @@ export const PdfxPrerequisitesModal: React.FC<PdfxPrerequisitesModalProps> = ({
   onFixAllAndFinalize,
   isProcessing = false,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+    isProcessing,
+  });
+
   if (!isOpen || !analysis) return null;
 
   const hasAnyPending = hasRgbPending || hasBoxesPending;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pdfx-prerequisites-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="p-6 bg-gradient-to-br from-[#7C3AED]/10 via-purple-50/50 to-white border-b border-purple-100 flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-3 rounded-2xl bg-[#7C3AED] text-white shadow-md shadow-purple-500/20">
+            <div className="p-3 rounded-2xl bg-[#7C3AED] text-white shadow-md shadow-purple-500/20 shrink-0">
               <FileCode className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+              <h3 id="pdfx-prerequisites-title" className="text-lg font-black text-[#0F172A] tracking-tight">
                 Finalizar Norma PDF/X-4 (ISO 15930-7)
               </h3>
               <p className="text-xs text-[#64748B] font-medium mt-0.5">
@@ -63,10 +76,12 @@ export const PdfxPrerequisitesModal: React.FC<PdfxPrerequisitesModalProps> = ({
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             disabled={isProcessing}
             className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer disabled:opacity-50"
+            aria-label="Fechar"
           >
             <X className="w-5 h-5" />
           </button>
@@ -191,10 +206,10 @@ export const PdfxPrerequisitesModal: React.FC<PdfxPrerequisitesModalProps> = ({
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-2xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold shadow-md shadow-purple-500/25 transition-all cursor-pointer disabled:opacity-50"
           >
             {isProcessing ? (
-              <>
+              <div className="flex items-center gap-2" aria-live="polite">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span>Processando...</span>
-              </>
+              </div>
             ) : hasAnyPending ? (
               <>
                 <Zap className="w-4 h-4" />

@@ -25,6 +25,7 @@ import type { ProductionProfile } from '../utils/productionProfiles';
 import { formatBytes } from '../../server/pdfExtractor';
 import { buildTechnicalReport, createAnalysisSnapshot } from '../services/technicalReport';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from '../services/reportPdfGenerator';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface TechnicalReportModalProps {
   appliedCorrections?: Array<{ id: string; label: string; appliedAt: number }>;
@@ -41,6 +42,11 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
   analysis,
   profile,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+  });
+
   const [activeTab, setActiveTab] = useState<'overview' | 'images' | 'colors' | 'fonts' | 'boxes' | 'pdfx' | 'rules'>('overview');
   const [isExporting, setIsExporting] = useState(false);
 
@@ -85,17 +91,26 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
       : 'bg-rose-50 text-rose-700 border-rose-200';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="technical-report-modal-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={handleContentClick}
+      >
         {/* Top Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100 shrink-0">
               <FileCheck2 className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-black text-[#0F172A] tracking-tight">
+                <h2 id="technical-report-modal-title" className="text-lg font-black text-[#0F172A] tracking-tight">
                   Relatório Técnico de Pré-impressão
                 </h2>
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusBg}`}>
@@ -128,6 +143,7 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
               )}
             </button>
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={onClose}
               className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"

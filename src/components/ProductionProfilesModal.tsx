@@ -30,6 +30,7 @@ import {
   deleteLocalCustomProfile,
   validateCustomProfile,
 } from '../utils/customProfilesStorage';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface ProductionProfilesModalProps {
   initialDimensions?: { widthMm: number; heightMm: number } | null;
@@ -48,6 +49,11 @@ export const ProductionProfilesModal: React.FC<ProductionProfilesModalProps> = (
   onSelectProfile,
   initialDimensions,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+  });
+
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('popular');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreatingCustom, setIsCreatingCustom] = useState(false);
@@ -233,16 +239,25 @@ export const ProductionProfilesModal: React.FC<ProductionProfilesModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="production-profiles-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={handleContentClick}
+      >
         {/* Header */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100 shrink-0">
               <Sliders className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-black text-[#0F172A] tracking-tight">
+              <h2 id="production-profiles-title" className="text-xl font-black text-[#0F172A] tracking-tight">
                 Biblioteca de Perfis de Produção
               </h2>
               <p className="text-xs text-[#64748B] font-medium">
@@ -251,6 +266,7 @@ export const ProductionProfilesModal: React.FC<ProductionProfilesModalProps> = (
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"

@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Info, ShieldCheck, Cpu } from 'lucide-react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface AboutBetaModalProps {
   isOpen: boolean;
@@ -7,25 +8,41 @@ interface AboutBetaModalProps {
 }
 
 export const AboutBetaModal: React.FC<AboutBetaModalProps> = ({ isOpen, onClose }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+  });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-lg p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="about-beta-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 w-full max-w-lg p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150"
+        onClick={handleContentClick}
+      >
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+          aria-label="Fechar"
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="mb-5 flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100">
+          <div className="p-2.5 rounded-2xl bg-indigo-50 text-[#4F46E5] border border-indigo-100 shrink-0">
             <Info className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-black text-[#0F172A] tracking-tight">
+            <h3 id="about-beta-title" className="text-lg font-black text-[#0F172A] tracking-tight">
               Sobre o ArteCheck IA
             </h3>
             <p className="text-xs text-[#64748B] font-medium mt-0.5">

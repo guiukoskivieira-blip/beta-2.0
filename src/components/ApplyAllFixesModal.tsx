@@ -1,5 +1,6 @@
 import React from 'react';
-import { Sparkles, X, CheckCircle2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Zap } from 'lucide-react';
+import { Sparkles, X, AlertTriangle, ShieldCheck, Loader2, Zap } from 'lucide-react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 export interface PlannedFix {
   id: string;
@@ -32,11 +33,26 @@ export const ApplyAllFixesModal: React.FC<ApplyAllFixesModalProps> = ({
   plannedFixes,
   manualWarnings,
 }) => {
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+    isProcessing: isApplying,
+  });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none animate-in fade-in duration-200"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="apply-all-fixes-title"
+    >
+      <div
+        className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]"
+        onClick={handleContentClick}
+      >
         {/* Modal Header */}
         <div className="p-5 sm:p-6 bg-gradient-to-r from-violet-700 via-indigo-700 to-blue-700 text-white flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -44,7 +60,9 @@ export const ApplyAllFixesModal: React.FC<ApplyAllFixesModalProps> = ({
               <Zap className="w-6 h-6 stroke-[2.5]" />
             </div>
             <div>
-              <h3 className="text-lg font-black tracking-tight">Ajustar Tudo Automaticamente</h3>
+              <h3 id="apply-all-fixes-title" className="text-lg font-black tracking-tight">
+                Ajustar Tudo Automaticamente
+              </h3>
               <p className="text-xs text-white/85 mt-0.5 font-medium">
                 Execução sequencial e determinística no arquivo de trabalho
               </p>
@@ -52,9 +70,11 @@ export const ApplyAllFixesModal: React.FC<ApplyAllFixesModalProps> = ({
           </div>
           {!isApplying && (
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={onClose}
               className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              aria-label="Fechar"
             >
               <X className="w-5 h-5" />
             </button>
@@ -65,7 +85,7 @@ export const ApplyAllFixesModal: React.FC<ApplyAllFixesModalProps> = ({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs text-[#334155]">
           {isApplying && progress ? (
             /* Live Progress State */
-            <div className="py-8 text-center space-y-4">
+            <div className="py-8 text-center space-y-4" aria-live="polite">
               <div className="w-16 h-16 rounded-full bg-indigo-50 border-2 border-indigo-200 flex items-center justify-center mx-auto animate-pulse">
                 <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
               </div>

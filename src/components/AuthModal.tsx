@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Mail, Lock, User, ArrowRight, Loader2, Sparkles } from 'lucide-react';
 import { auth } from '../auth';
 import type { BetaUser } from '../domain/beta';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -16,6 +17,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
+    isOpen,
+    onClose,
+    isProcessing: loading,
+  });
 
   if (!isOpen) return null;
 
@@ -47,12 +54,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+    >
+      <div
+        className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150"
+        onClick={handleContentClick}
+      >
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+          disabled={loading}
+          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-50 cursor-pointer"
           aria-label="Fechar"
         >
           <X className="w-5 h-5" />
@@ -63,7 +81,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <Sparkles className="w-3.5 h-3.5" />
             <span>Acesso Seguro</span>
           </div>
-          <h3 className="text-xl font-black text-[#0F172A] tracking-tight">
+          <h3 id="auth-modal-title" className="text-xl font-black text-[#0F172A] tracking-tight">
             {mode === 'login' ? 'Entrar no ArteCheck' : 'Criar Nova Conta'}
           </h3>
           <p className="text-xs text-[#64748B] font-medium">
@@ -74,7 +92,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         </div>
 
         {error && (
-          <div className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl">
+          <div className="mb-4 text-xs text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-xl" role="alert">
             {error}
           </div>
         )}
@@ -82,10 +100,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <form onSubmit={handleSubmit} className="space-y-4 text-xs font-medium">
           {mode === 'register' && (
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Nome Completo / Empresa</label>
+              <label htmlFor="auth-name" className="block text-slate-700 font-bold mb-1">Nome Completo / Empresa</label>
               <div className="relative">
                 <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
+                  id="auth-name"
                   type="text"
                   required
                   placeholder="Ex: Gráfica Express"
@@ -98,10 +117,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           )}
 
           <div>
-            <label className="block text-slate-700 font-bold mb-1">E-mail Profissional</label>
+            <label htmlFor="auth-email" className="block text-slate-700 font-bold mb-1">E-mail Profissional</label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
+                id="auth-email"
                 type="email"
                 required
                 placeholder="operacao@grafica.com.br"
@@ -113,10 +133,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           </div>
 
           <div>
-            <label className="block text-slate-700 font-bold mb-1">Senha de Acesso</label>
+            <label htmlFor="auth-password" className="block text-slate-700 font-bold mb-1">Senha de Acesso</label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
+                id="auth-password"
                 type="password"
                 required
                 placeholder="••••••••"
@@ -130,42 +151,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-[#0066FF] via-[#5B21B6] to-[#7C3AED] hover:opacity-95 shadow-md shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 text-white font-bold text-xs shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <>
-                <span>{mode === 'login' ? 'Entrar na Plataforma' : 'Criar Minha Conta'}</span>
+                <span>{mode === 'login' ? 'Acessar Painel' : 'Concluir Cadastro'}</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </form>
 
-        <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-[#64748B]">
+        <div className="mt-6 pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
           {mode === 'login' ? (
-            <span>
-              Ainda não possui conta?{' '}
+            <p>
+              Não possui uma conta?{' '}
               <button
                 type="button"
                 onClick={() => setMode('register')}
-                className="text-[#2563EB] font-bold hover:underline ml-1"
+                className="text-indigo-600 font-bold hover:underline cursor-pointer"
               >
-                Cadastre-se grátis
+                Cadastre sua gráfica
               </button>
-            </span>
+            </p>
           ) : (
-            <span>
-              Já possui conta?{' '}
+            <p>
+              Já tem uma conta cadastrada?{' '}
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                className="text-[#2563EB] font-bold hover:underline ml-1"
+                className="text-indigo-600 font-bold hover:underline cursor-pointer"
               >
                 Fazer login
               </button>
-            </span>
+            </p>
           )}
         </div>
       </div>

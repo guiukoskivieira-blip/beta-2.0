@@ -11,6 +11,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelected, disabled
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastProcessedRef = useRef<{ name: string; size: number; timestamp: number } | null>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -33,6 +34,19 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelected, disabled
       setErrorMsg(`O arquivo excede o limite máximo permitido de ${LIMITS.MAX_UPLOAD_MB} MB.`);
       return;
     }
+
+    // Prevent rapid duplicate file submissions
+    const now = Date.now();
+    if (
+      lastProcessedRef.current &&
+      lastProcessedRef.current.name === file.name &&
+      lastProcessedRef.current.size === file.size &&
+      now - lastProcessedRef.current.timestamp < 1000
+    ) {
+      return;
+    }
+    lastProcessedRef.current = { name: file.name, size: file.size, timestamp: now };
+
     onFileSelected(file);
   };
 
@@ -48,29 +62,35 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelected, disabled
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       validateAndSelect(e.target.files[0]);
+      // Reset input value to allow re-selecting the same file if needed
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto my-8 px-4 select-none">
-      <div
+      <label
+        htmlFor="pdf-upload-input"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => !disabled && fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-3xl p-10 sm:p-14 text-center cursor-pointer transition-all duration-200 ${
+        className={`relative block border-2 border-dashed rounded-3xl p-10 sm:p-14 text-center cursor-pointer transition-all duration-200 focus-within:ring-2 focus-within:ring-[#2563EB] focus-within:ring-offset-2 focus-within:border-[#2563EB] ${
           isDragOver
             ? 'border-[#2563EB] bg-[#EFF6FF] scale-[1.01]'
             : 'border-slate-300 bg-white hover:border-[#2563EB]/60 hover:bg-slate-50/50'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} shadow-xs`}
+        } ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''} shadow-xs`}
       >
         <input
+          id="pdf-upload-input"
           ref={fileInputRef}
           type="file"
           accept=".pdf,application/pdf"
           onChange={handleFileInputChange}
           disabled={disabled}
-          className="hidden"
+          aria-label="Selecionar arquivo PDF para análise"
+          className="sr-only"
         />
 
         <div className="flex flex-col items-center justify-center space-y-4">
@@ -106,7 +126,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelected, disabled
             </div>
           )}
         </div>
-      </div>
+      </label>
     </div>
   );
 };
