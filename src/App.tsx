@@ -24,6 +24,7 @@ import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesM
 import { PdfxPrerequisitesModal } from './components/PdfxPrerequisitesModal';
 import { ChangeProfileModal } from './components/ChangeProfileModal';
 import { RotateConfirmationModal } from './components/RotateConfirmationModal';
+import { TransparencyModal } from './components/TransparencyModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
@@ -94,6 +95,7 @@ export const App: React.FC = () => {
   const [isProfilesOpen, setIsProfilesOpen] = useState(false);
   const [isChangeProfileOpen, setIsChangeProfileOpen] = useState(false);
   const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
+  const [isTransparencyModalOpen, setIsTransparencyModalOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -1370,6 +1372,7 @@ export const App: React.FC = () => {
                 onRequestDimensionFix={handleRequestDimensionFix}
                 onRequestPdfxFinalize={handleOpenPdfxFlow}
                 onOpenPdfxModal={handleOpenPdfxFlow}
+                onOpenTransparencyModal={() => setIsTransparencyModalOpen(true)}
                 isFixingInProgress={isFixingInProgress}
                 pdfxVerifiedState={pdfxVerifiedState}
               />
@@ -1469,6 +1472,26 @@ export const App: React.FC = () => {
         plannedFixes={plannedFixes}
         manualWarnings={manualWarnings}
       />
+      {currentAnalysis && (
+        <TransparencyModal
+          isOpen={isTransparencyModalOpen}
+          onClose={() => setIsTransparencyModalOpen(false)}
+          analysis={currentAnalysis}
+          workingFile={workingFile || originalFile}
+          onApplyFlattenedPdf={async (bytes, fileName) => {
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            await handleFixApplied(
+              blob,
+              'transparency_flatten',
+              'Transparências achatadas via Ghostscript',
+              false,
+              {
+                summary: 'Achatamento determinístico de transparências (PDF 1.3)',
+              }
+            );
+          }}
+        />
+      )}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}

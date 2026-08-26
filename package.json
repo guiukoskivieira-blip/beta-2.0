@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && cp node_modules/lcms-wasm/dist/lcms.wasm dist/lcms.wasm && mkdir -p dist/iccs && cp server/iccs/*.icc dist/iccs/",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node scripts/copy-assets.mjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "check": "npm run test && npm run lint && npm run build",
     "smoke": "node scripts/smoke.mjs",
-    "test": "tsx tests/pdfExtractor.test.ts && tsx tests/supabaseSaaS.test.ts && tsx tests/billing.test.ts && tsx tests/assistantSubordination.test.ts && tsx tests/regressionPdfParser.test.ts && tsx tests/regressionApi.test.ts && tsx tests/regressionOrchestration.test.ts && tsx tests/regressionBilling.test.ts && tsx tests/regressionAssistant.test.ts && tsx tests/jobCheck.test.ts && tsx tests/jobCheckUi.test.ts && tsx tests/visualMarkers.test.ts && tsx tests/fixEngine.test.ts && tsx tests/trimBleedFix.test.ts && tsx tests/trimBleedFixUi.test.ts && tsx tests/technicalReport.test.ts && tsx tests/outputIntentFix.test.ts && tsx tests/colorTransformCmm.test.ts && tsx tests/imageColorFix.test.ts && tsx tests/imageColorFixUi.test.ts && tsx tests/cors.test.ts && tsx tests/freeQuotaBilling.test.ts && tsx tests/plansModalAuth.test.ts && tsx tests/supabaseAuthProvider.test.ts && tsx tests/pdfxEligibility.test.ts && tsx tests/pdfxPreparation.test.ts && tsx tests/pdfxFinalize.test.ts && tsx tests/pdfxPreparationUi.test.ts",
+    "test": "tsx tests/pdfExtractor.test.ts && tsx tests/supabaseSaaS.test.ts && tsx tests/billing.test.ts && tsx tests/assistantSubordination.test.ts && tsx tests/regressionPdfParser.test.ts && tsx tests/regressionApi.test.ts && tsx tests/regressionOrchestration.test.ts && tsx tests/regressionBilling.test.ts && tsx tests/regressionAssistant.test.ts && tsx tests/jobCheck.test.ts && tsx tests/jobCheckUi.test.ts && tsx tests/visualMarkers.test.ts && tsx tests/fixEngine.test.ts && tsx tests/trimBleedFix.test.ts && tsx tests/trimBleedFixUi.test.ts && tsx tests/technicalReport.test.ts && tsx tests/outputIntentFix.test.ts && tsx tests/colorTransformCmm.test.ts && tsx tests/imageColorFix.test.ts && tsx tests/imageColorFixUi.test.ts && tsx tests/cors.test.ts && tsx tests/freeQuotaBilling.test.ts && tsx tests/plansModalAuth.test.ts && tsx tests/supabaseAuthProvider.test.ts && tsx tests/pdfxEligibility.test.ts && tsx tests/pdfxPreparation.test.ts && tsx tests/pdfxFinalize.test.ts && tsx tests/pdfxPreparationUi.test.ts && tsx tests/transparencyFlattening.test.ts",
     "test:saas": "tsx tests/supabaseSaaS.test.ts",
     "test:regression": "tsx tests/regressionPdfParser.test.ts && tsx tests/regressionApi.test.ts && tsx tests/regressionOrchestration.test.ts && tsx tests/regressionBilling.test.ts && tsx tests/regressionAssistant.test.ts"
   },

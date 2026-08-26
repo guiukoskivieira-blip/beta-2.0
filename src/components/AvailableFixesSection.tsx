@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap, Loader2, Maximize2, RotateCcw } from 'lucide-react';
+import { Sparkles, ChevronDown, Wand2, ShieldCheck, Crop, Droplet, FileCheck2, AlertTriangle, CheckCircle2, Zap, Loader2, Maximize2, RotateCcw, Layers } from 'lucide-react';
 import type { PreflightAnalysis } from '../types';
 import type { ProductionProfile } from '../utils/productionProfiles';
 import { ImageColorFixPanel } from './ImageColorFixPanel';
@@ -20,6 +20,7 @@ interface AvailableFixesSectionProps {
   onRequestDimensionFix?: (action?: 'scale_uniform' | 'rotate_90') => void;
   onRequestPdfxFinalize?: () => void;
   onOpenPdfxModal?: () => void;
+  onOpenTransparencyModal?: () => void;
   isFixingInProgress?: boolean;
   pdfxVerifiedState?: 'not_verified' | 'verified' | 'needs_revalidation';
   onAnalysisUpdated?: (updated: PreflightAnalysis) => void;
@@ -35,6 +36,7 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   onRequestDimensionFix,
   onRequestPdfxFinalize,
   onOpenPdfxModal,
+  onOpenTransparencyModal,
   isFixingInProgress = false,
   pdfxVerifiedState = 'not_verified',
 }) => {
@@ -434,6 +436,40 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
             validationText="Revalidado pelo Motor 1"
           />
         ) : null}
+
+        {/* Fix 4: Transparências */}
+        {analysis.document.pages?.some(p => p.hasTransparency) && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-violet-50/70 to-white border border-violet-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-[#F5F3FF] text-[#7C3AED] shrink-0 mt-0.5">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-[#0F172A]">TRANSPARÊNCIAS NO DOCUMENTO</span>
+                  <span className="px-2 py-0.5 rounded-md bg-[#EDE9FE] text-[#6D28D9] text-[10px] font-bold">Transparência</span>
+                </div>
+                <p className="text-xs text-[#475569] leading-relaxed">
+                  <strong>O que foi encontrado:</strong> O documento possui transparências ativas em {analysis.document.pages.filter(p => p.hasTransparency).length} página(s).<br />
+                  <strong>Compatibilidade PDF/X-4:</strong> O PDF/X-4 aceita transparências. Nenhuma correção é necessária para este padrão.<br />
+                  <span className="text-slate-500">Para fluxos que exigem PDF/X-1a (PDF 1.3), o achatamento determinístico pode ser processado.</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-end">
+              <button
+                type="button"
+                disabled={isFixingInProgress}
+                onClick={onOpenTransparencyModal}
+                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Achatar Transparências</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* All automatic fixes applied banner */}
         {appliedCorrections.length > 0 && autoFixesCount === 0 && (

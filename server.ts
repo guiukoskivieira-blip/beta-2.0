@@ -13,6 +13,7 @@ import { applyImageColorFix } from "./src/services/imageColorFix";
 import { preparePdfForPdfx4 } from "./src/services/pdfxPreparation";
 import { finalizePdfx4Document } from "./src/services/pdfxFinalize";
 import { applyDimensionFix } from "./src/services/dimensionFix";
+import { isGhostscriptAvailable, flattenPdfTransparency } from "./server/transparencyService";
 import { COMMERCIAL_PRINT_300DPI_PROFILE, A4_COMMERCIAL_FLYER_PROFILE, LARGE_FORMAT_BANNER_PROFILE, STANDARD_PROFILES } from "./src/utils/productionProfiles";
 import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
@@ -1286,6 +1287,87 @@ async function startServer() {
       });
     }
   });
+
+  // GET /api/transparency-capability - Verifies if Ghostscript is available for flattening
+  app.get("/api/transparency-capability", (req: Request, res: Response) => {
+    return res.json({
+      success: true,
+      ghostscriptAvailable: isGhostscriptAvailable(),
+    });
+  });
+
+  // POST /api/flatten-transparency - Deterministic PDF transparency flattening via Ghostscript
+  app.post(
+    "/api/flatten-transparency",
+    async (req: Request, res: Response, next: NextFunction) => {
+      if (!isBillingEnforced()) return next();
+      const userId = (req as any).authUser?.id;
+      if (!userId) return res.status(401).json({ success: false, error: 'Faça login para continuar.' });
+
+      let state;
+      try {
+        state = await getSubscriptionUsage(userId);
+      } catch (err: any) {
+        console.error('Erro de infraestrutura ao validar quota:', err);
+        return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota.' });
+      }
+
+      if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
+        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para processar arquivos.' });
+      }
+      if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {
+        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_EXPIRED', error: 'Sua assinatura expirou. Escolha um plano para continuar.' });
+      }
+      if (state.remaining <= 0) {
+        return res.status(429).json({ success: false, code: 'PLAN_LIMIT_REACHED', error: 'Você atingiu o limite do seu plano.' });
+      }
+      next();
+    },
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: "Nenhum PDF enviado." });
+      }
+
+      if (!req.file.buffer.subarray(0, Math.min(req.file.buffer.length, 1024)).includes(Buffer.from("%PDF-"))) {
+        return res.status(400).json({
+          success: false,
+          error: "INVALID_PDF",
+          message: "Arquivo sem assinatura PDF válida.",
+        });
+      }
+
+      if (!isGhostscriptAvailable()) {
+        return res.status(501).json({
+          success: false,
+          error: "GHOSTSCRIPT_UNAVAILABLE",
+          message: "Ghostscript não está instalado ou disponível no ambiente do servidor para executar o achatamento de transparências.",
+        });
+      }
+
+      try {
+        const result = await flattenPdfTransparency(req.file.buffer, req.file.originalname || "documento.pdf");
+        return res.json({
+          success: true,
+          fileName: result.outputFileName,
+          base64: result.flattenedPdfBytes.toString("base64"),
+          validation: result.validation,
+          durationMs: result.processingDurationMs,
+        });
+      } catch (error: any) {
+        let statusCode = 422;
+        if (error.code === "GHOSTSCRIPT_UNAVAILABLE") statusCode = 501;
+        else if (error.code === "CONCURRENCY_LIMIT_REACHED") statusCode = 429;
+
+        return res.status(statusCode).json({
+          success: false,
+          error: error.code || "FLATTENING_FAILED",
+          message: error.message || "Falha ao achatar transparências.",
+          validation: error.validation,
+        });
+      }
+    }
+  );
 
   // POST /api/assistant - Grounded Gemini explanation layer strictly subordinate to preflight engine
   app.post("/api/assistant", async (req: Request, res: Response) => {
