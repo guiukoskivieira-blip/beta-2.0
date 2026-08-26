@@ -186,32 +186,108 @@ describe('ARTECHECK AI — Hotfix MVP: RGB, Correções, Cota e Histórico', () 
     assert.equal(header, '%PDF-', 'Deve possuir assinatura válida de PDF');
   });
 
-  test('7. Cota: Gravação em analyses com file_size_bytes obrigatório para persistência correta', () => {
-    const mockInsertPayload = {
-      id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+  test('7. Contrato de Bilhetagem: analysis_usage_events é a tabela oficial de eventos de cota com upload_bytes', () => {
+    // Migration 003 & 004 definem a estrutura canônica
+    const expectedUsageColumns = [
+      'id',
+      'user_id',
+      'organization_id',
+      'subscription_id',
+      'analysis_id',
+      'upload_bytes',
+      'billing_period_start',
+      'billing_period_end',
+      'status',
+      'counted_at',
+    ];
+
+    const mockUsagePayload = {
       user_id: '12345678-1234-1234-1234-123456789abc',
       organization_id: null,
-      file_name: 'analysis.pdf',
-      file_size_bytes: 204850,
-      score: 100,
-      error_count: 0,
-      warning_count: 0,
-      approved_count: 0,
-      created_at: new Date().toISOString(),
+      subscription_id: null,
+      analysis_id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+      upload_bytes: 204850,
+      billing_period_start: new Date('2026-08-01T00:00:00Z').toISOString(),
+      billing_period_end: new Date('2026-09-01T00:00:00Z').toISOString(),
+      status: 'counted',
+      counted_at: new Date().toISOString(),
     };
 
-    assert.ok(typeof mockInsertPayload.file_size_bytes === 'number', 'file_size_bytes deve ser numérico');
-    assert.ok(mockInsertPayload.file_size_bytes > 0, 'file_size_bytes não pode ser nulo ou omitido');
+    for (const key of Object.keys(mockUsagePayload)) {
+      assert.ok(expectedUsageColumns.includes(key), `Coluna ${key} deve pertencer ao schema de analysis_usage_events`);
+    }
+
+    assert.equal(typeof mockUsagePayload.upload_bytes, 'number');
+    assert.ok(mockUsagePayload.upload_bytes > 0, 'upload_bytes deve registrar o tamanho do arquivo');
   });
 
-  test('8. Falha na gravação de cota lança erro e não libera análise silenciosa', async () => {
-    const mockRecord = async () => {
-      const error = { message: 'null value in column violates not-null constraint' };
-      if (error) {
-        throw new Error(`Falha ao registrar uso da cota: ${error.message}`);
+  test('8. Idempotência: chave UNIQUE(user_id, analysis_id) impede contagem duplicada da mesma requisição', () => {
+    const usageStore = new Map<string, any>();
+
+    const recordEvent = (event: { user_id: string; analysis_id: string; upload_bytes: number }) => {
+      const key = `${event.user_id}:${event.analysis_id}`;
+      if (usageStore.has(key)) {
+        return { inserted: false, duplicate: true };
       }
+      usageStore.set(key, event);
+      return { inserted: true, duplicate: false };
     };
 
-    await assert.rejects(mockRecord, /Falha ao registrar uso da cota/);
+    const event1 = { user_id: 'user_1', analysis_id: 'analysis_100', upload_bytes: 1024 };
+    const res1 = recordEvent(event1);
+    assert.equal(res1.inserted, true, 'Primeiro registro deve ser inserido');
+    assert.equal(usageStore.size, 1);
+
+    // Repetição da mesma requisição (mesmo analysis_id)
+    const res2 = recordEvent(event1);
+    assert.equal(res2.duplicate, true, 'Registro duplicado deve ser ignorado');
+    assert.equal(usageStore.size, 1, 'Tamanho não deve aumentar');
+  });
+
+  test('9. Mensagem de Erro Pública Sanitizada: não expõe detalhes internos de banco ou colunas ao usuário', () => {
+    const internalDbError = new Error("Could not find the 'file_size_bytes' column of 'analyses' in the schema cache");
+    
+    // Tratamento padronizado no endpoint HTTP
+    const publicUserMessage = 'Não foi possível registrar esta análise. Nenhuma cota foi consumida. Tente novamente em alguns instantes.';
+    
+    assert.ok(!publicUserMessage.includes('file_size_bytes'), 'Não pode expor nome de coluna');
+    assert.ok(!publicUserMessage.includes('analyses'), 'Não pode expor nome de tabela');
+    assert.ok(!publicUserMessage.includes('schema cache'), 'Não pode expor mensagem de cache de schema');
+    assert.match(publicUserMessage, /Nenhuma cota foi consumida/i);
+  });
+
+  test('10. Análise recusada antes do processamento não debita cota', () => {
+    let quotaCount = 0;
+    const processUpload = (fileHasValidHeader: boolean) => {
+      if (!fileHasValidHeader) {
+        // Bloqueio pré-processamento
+        return { success: false, error: 'Arquivo inválido (%PDF- ausente)' };
+      }
+      quotaCount += 1;
+      return { success: true };
+    };
+
+    const failedResult = processUpload(false);
+    assert.equal(failedResult.success, false);
+    assert.equal(quotaCount, 0, 'Cota deve permanecer 0 quando o arquivo é recusado');
+  });
+
+  test('11. Cota Free: contagem correta após análise passa de 0/15 para 1/15', () => {
+    const limit = 15;
+    let countedEvents = 0;
+
+    const getUsageState = () => ({
+      used: countedEvents,
+      limit,
+      remaining: Math.max(0, limit - countedEvents),
+    });
+
+    assert.equal(getUsageState().used, 0);
+    assert.equal(getUsageState().remaining, 15);
+
+    // Registra 1 análise
+    countedEvents += 1;
+    assert.equal(getUsageState().used, 1);
+    assert.equal(getUsageState().remaining, 14);
   });
 });

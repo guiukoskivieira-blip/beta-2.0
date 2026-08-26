@@ -174,24 +174,43 @@ async function getSubscriptionUsage(userId: string) {
 
   const limit = BILLING_PLAN_LIMITS.free || 15;
 
-  let count: number | null = null;
-  let usageError: any = null;
+  let count = 0;
+  let hasFoundEvents = false;
+
+  // Consulta canônica em analysis_usage_events (tabela oficial de eventos de cota)
   try {
-    const aRes = await admin
-      .from('analyses')
+    const usageRes = await admin
+      .from('analysis_usage_events')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .gte('created_at', periodStart)
-      .lt('created_at', periodEnd);
-    count = aRes.count;
-    usageError = aRes.error;
+      .eq('status', 'counted')
+      .gte('counted_at', periodStart)
+      .lt('counted_at', periodEnd);
+
+    if (!usageRes.error && typeof usageRes.count === 'number') {
+      count = usageRes.count;
+      hasFoundEvents = true;
+    }
   } catch (err: any) {
-    console.error('Erro ao consultar análises do plano gratuito:', err?.message || err);
-    throw new Error(`Erro ao consultar uso do plano gratuito: ${err?.message || err}`);
+    console.warn(`[Billing] Consulta primária em analysis_usage_events para free user ${userId}:`, err?.message || err);
   }
 
-  if (usageError) {
-    throw new Error(`Erro ao consultar uso do plano gratuito: ${usageError.message}`);
+  // Fallback / histórico legado na tabela analyses
+  if (!hasFoundEvents || count === 0) {
+    try {
+      const aRes = await admin
+        .from('analyses')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('created_at', periodStart)
+        .lt('created_at', periodEnd);
+
+      if (!aRes.error && typeof aRes.count === 'number' && aRes.count > 0) {
+        count = aRes.count;
+      }
+    } catch (err: any) {
+      console.warn(`[Billing] Consulta fallback em analyses para ${userId}:`, err?.message || err);
+    }
   }
 
   const used = count || 0;
@@ -218,7 +237,12 @@ async function getSubscriptionUsage(userId: string) {
   };
 }
 
-async function recordSuccessfulAnalysis(userId: string, analysisId: string, uploadBytes: number) {
+async function recordSuccessfulAnalysis(
+  userId: string,
+  analysisId: string,
+  uploadBytes: number,
+  correlationId?: string
+) {
   if (!isBillingEnforced()) return;
   if (!isValidUuid(userId)) return;
 
@@ -232,24 +256,55 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
     throw new Error('Limite de análises atingido para este ciclo.');
   }
 
-  if (state.isFree) {
-    // Para plano Free sem subscription física, registra na tabela base analyses com file_size_bytes
-    const { error } = await admin.from('analyses').insert({
-      id: analysisId,
-      user_id: userId,
-      organization_id: state.subscription.organization_id || null,
-      file_name: 'analysis.pdf',
-      file_size_bytes: Math.max(0, uploadBytes || 0),
-      score: 100,
-      error_count: 0,
-      warning_count: 0,
-      approved_count: 0,
-      created_at: new Date().toISOString(),
-    });
+  const nowIso = new Date().toISOString();
+  const safeBytes = Math.max(0, Number(uploadBytes) || 0);
 
-    if (error) {
-      console.error(`[Billing] Falha ao registrar evento de uso free para análise ${analysisId}:`, error.message);
-      throw new Error(`Falha ao registrar uso da cota: ${error.message}`);
+  if (state.isFree) {
+    // 1. Tenta gravar na tabela canônica oficial analysis_usage_events (com subscription_id = null)
+    let recorded = false;
+    try {
+      const { error: usageErr } = await admin.from('analysis_usage_events').upsert({
+        user_id: userId,
+        organization_id: state.subscription.organization_id || null,
+        subscription_id: null,
+        analysis_id: analysisId,
+        upload_bytes: safeBytes,
+        billing_period_start: state.subscription.current_period_start,
+        billing_period_end: state.subscription.current_period_end,
+        status: 'counted',
+        counted_at: nowIso,
+      }, {
+        onConflict: 'user_id,analysis_id',
+        ignoreDuplicates: true,
+      });
+
+      if (!usageErr) {
+        recorded = true;
+      } else {
+        console.warn(`[Billing:${correlationId || analysisId}] analysis_usage_events (null sub) retornou: ${usageErr.message}. Tentando fallback em analyses.`);
+      }
+    } catch (err: any) {
+      console.warn(`[Billing:${correlationId || analysisId}] Exceção ao gravar em analysis_usage_events:`, err?.message || err);
+    }
+
+    // 2. Se analysis_usage_events falhou (ex: restrição NOT NULL em banco pré-migração 004), grava na tabela base analyses com colunas canônicas
+    if (!recorded) {
+      const { error: analysesErr } = await admin.from('analyses').insert({
+        id: isValidUuid(analysisId) ? analysisId : undefined,
+        user_id: userId,
+        organization_id: state.subscription.organization_id || null,
+        file_name: 'analysis.pdf',
+        score: 100,
+        error_count: 0,
+        warning_count: 0,
+        approved_count: 0,
+        created_at: nowIso,
+      });
+
+      if (analysesErr) {
+        console.error(`[Billing:${correlationId || analysisId}] Falha ao persistir uso em analyses para user ${userId}:`, analysesErr.message);
+        throw new Error('Falha de persistência ao registrar evento de uso.');
+      }
     }
   } else {
     // Plano pago: registra em analysis_usage_events com subscription_id física válida
@@ -258,19 +313,19 @@ async function recordSuccessfulAnalysis(userId: string, analysisId: string, uplo
       organization_id: state.subscription.organization_id || null,
       subscription_id: state.subscription.id,
       analysis_id: analysisId,
-      upload_bytes: Math.max(0, uploadBytes || 0),
+      upload_bytes: safeBytes,
       billing_period_start: state.subscription.current_period_start,
       billing_period_end: state.subscription.current_period_end,
       status: 'counted',
-      counted_at: new Date().toISOString(),
+      counted_at: nowIso,
     }, {
       onConflict: 'user_id,analysis_id',
       ignoreDuplicates: true,
     });
 
     if (error) {
-      console.error(`[Billing] Falha ao registrar evento de uso pago para análise ${analysisId}:`, error.message);
-      throw new Error(`Falha ao registrar uso da cota: ${error.message}`);
+      console.error(`[Billing:${correlationId || analysisId}] Falha ao registrar evento de uso pago para análise ${analysisId}:`, error.message);
+      throw new Error('Falha de persistência ao registrar evento de uso.');
     }
   }
 }
@@ -981,7 +1036,18 @@ async function startServer() {
 
         const analysisId = randomUUID();
         const billingUserId = (req as any).billingUserId as string | undefined;
-        if (billingUserId) await recordSuccessfulAnalysis(billingUserId, analysisId, file.size);
+        if (billingUserId) {
+          try {
+            await recordSuccessfulAnalysis(billingUserId, analysisId, file.size, requestId);
+          } catch (billingErr: any) {
+            console.error(`[SERVER:${requestId}] Falha ao registrar bilhetagem para ${billingUserId}:`, billingErr?.message || billingErr);
+            return res.status(500).json({
+              success: false,
+              code: 'USAGE_RECORDING_FAILED',
+              error: 'Não foi possível registrar esta análise. Nenhuma cota foi consumida. Tente novamente em alguns instantes.',
+            });
+          }
+        }
 
         console.log(`[SERVER:${requestId}] response started`);
         return res.status(200).json({
@@ -1017,12 +1083,10 @@ async function startServer() {
             message: 'Este PDF está protegido por senha ou criptografia. Remova a proteção no software de origem e envie novamente.',
           });
         }
-        console.error("PDF Structure Extraction Error:", extractError.message || extractError);
+        console.error(`[SERVER:${requestId}] PDF Structure Extraction Error:`, extractError.message || extractError);
         return res.status(400).json({
           success: false,
-          error:
-            extractError.message ||
-            "Não foi possível interpretar a estrutura do arquivo PDF. O arquivo pode estar corrompido.",
+          error: "Não foi possível interpretar a estrutura do arquivo PDF. O arquivo pode estar corrompido.",
         });
       }
     }
