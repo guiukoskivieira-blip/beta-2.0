@@ -33,17 +33,19 @@ function test(name: string, fn: () => void) {
 }
 
 function makePage(overrides: Partial<PdfPageStructure> = {}): PdfPageStructure {
+  const widthMm = overrides.widthMm ?? 210;
+  const heightMm = overrides.heightMm ?? 297;
   return {
     page: 1,
     widthPt: 595.28,
     heightPt: 841.89,
-    widthMm: 210,
-    heightMm: 297,
-    visualWidthMm: 210,
-    visualHeightMm: 297,
+    widthMm,
+    heightMm,
+    visualWidthMm: overrides.visualWidthMm ?? widthMm,
+    visualHeightMm: overrides.visualHeightMm ?? heightMm,
     orientation: 'portrait',
     rotation: 0,
-    mediaBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, xMm: 0, yMm: 0, widthMm: 210, heightMm: 297 },
+    mediaBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 595.28, heightPt: 841.89, xMm: 0, yMm: 0, widthMm, heightMm },
     trimBox: { status: 'explicit', xPt: 8.5, yPt: 8.5, widthPt: 595.28, heightPt: 841.89, xMm: 3, yMm: 3, widthMm: 210, heightMm: 297 },
     bleedBox: { status: 'explicit', xPt: 0, yPt: 0, widthPt: 612.28, heightPt: 858.89, xMm: 0, yMm: 0, widthMm: 216, heightMm: 303 },
     hasTransparency: false,

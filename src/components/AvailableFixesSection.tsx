@@ -98,7 +98,7 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
   const canFixPdfx = Boolean((!isDeclaredPdfX || !hasOutputIntent || pdfxVerifiedState === 'needs_revalidation') && pdfxVerifiedState !== 'verified');
 
   const autoFixesCount = (canFixDimensions ? 1 : 0) + (canFixRgb ? 1 : 0) + (canFixBoxes ? 1 : 0) + (canFixPdfx ? 1 : 0);
-  const hasAnyFixes = canFixDimensions || dimensionConfirmationRequired || hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || appliedCorrections.length > 0;
+  const hasAnyFixes = canFixDimensions || dimensionConfirmationRequired || hasRgb || !isDeclaredPdfX || !hasOutputIntent || needsTrimBleed || (bleedRule && bleedRule.status !== 'approved') || appliedCorrections.length > 0;
   const hasPdfxPrereqs = Boolean(canFixDimensions || canFixRgb || canFixBoxes);
 
   // Detect manual issues that cannot be auto-fixed
@@ -114,6 +114,13 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
 
   if (dpiRule) manualIssues.push('Resolução de imagem baixa — Requer imagens originais em 300 DPI no software de criação.');
   if (fontRule) manualIssues.push('Fontes não incorporadas — Requer converter textos em curvas ou incorporar as fontes.');
+
+  // Bleed: Motor 1 flagged but auto-fix not eligible (MediaBox too small to contain bleed area)
+  const bleedNotApproved = Boolean(bleedRule && bleedRule.status !== 'approved');
+  const bleedManualRequired = Boolean(bleedNotApproved && profileHasDimensions && !isBleedEligible && !hasBoxesApplied);
+  if (bleedManualRequired) {
+    manualIssues.push(`Sangria insuficiente — O perfil "${profile.name}" exige ${profile.expectedBleedMm} mm de sangria, mas a área da página (MediaBox) não é grande o suficiente para conter o formato final mais sangria. Exporte o PDF com sangria de ${profile.expectedBleedMm} mm no software de criação.`);
+  }
 
   return (
     <div id="correcoes-disponiveis" className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-5 sm:p-6 mb-6 select-none">

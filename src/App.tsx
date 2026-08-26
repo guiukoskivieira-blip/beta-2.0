@@ -547,8 +547,23 @@ export const App: React.FC = () => {
     );
     if (dpiRule) list.push('Resolução de imagem baixa — Requer arquivo com imagens em 300 DPI no software de criação.');
     if (fontRule) list.push('Fontes não incorporadas — Requer converter textos em curvas no software gráfico de origem.');
+
+    // Bleed: Motor 1 flagged but auto-fix not eligible
+    const bleedRule = currentAnalysis.ruleResults.results.find(
+      (r) => r.ruleId === 'RULE-PROF-BLD-001' || r.category === 'bleed'
+    );
+    const profileHasDims = Boolean(
+      selectedProfile.expectedBleedMm && selectedProfile.expectedBleedMm > 0 &&
+      selectedProfile.expectedWidthMm && selectedProfile.expectedHeightMm
+    );
+    const bleedNotApproved = Boolean(bleedRule && bleedRule.status !== 'approved');
+    const hasBoxesApplied = appliedCorrections.some((c) => c.id === 'trim_bleed');
+    if (bleedNotApproved && profileHasDims && !canFixBoxes && !hasBoxesApplied) {
+      list.push(`Sangria insuficiente — O perfil exige ${selectedProfile.expectedBleedMm} mm de sangria, mas a área da página não é grande o suficiente. Exporte o PDF com sangria no software de criação.`);
+    }
+
     return list;
-  }, [currentAnalysis, dimEligibility]);
+  }, [currentAnalysis, dimEligibility, canFixBoxes, appliedCorrections, selectedProfile]);
 
   // Orchestrator for Batch "Ajustar Tudo Automaticamente"
   const handleExecuteApplyAllFixes = async () => {
