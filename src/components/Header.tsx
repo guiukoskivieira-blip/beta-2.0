@@ -1,6 +1,5 @@
 import React from 'react';
-import { Plus, Sliders } from 'lucide-react';
-import { LogoWordmark } from './BrandLogos';
+import { Plus, ShieldCheck, Sliders } from 'lucide-react';
 import type { ProductionProfile } from '../utils/productionProfiles';
 
 interface HeaderProps {
@@ -13,121 +12,21 @@ interface HeaderProps {
   hasActiveAnalysis?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ 
-  onReset, 
-  canReset,
-  viewMode = 'operational',
-  onToggleViewMode,
-  selectedProfile,
-  onOpenChangeProfile,
-  hasActiveAnalysis = false,
-}) => {
-  const isGeneric = Boolean(
-    selectedProfile?.isGeneric ||
-    (!selectedProfile?.expectedWidthMm && !selectedProfile?.expectedHeightMm)
-  );
-
-  const profileDisplayName = selectedProfile
-    ? selectedProfile.name.split('—')[0].trim()
-    : 'Impressão Comercial';
-
-  const profileDimensions = selectedProfile
-    ? isGeneric
-      ? 'Formato Livre'
-      : `${selectedProfile.expectedWidthMm} × ${selectedProfile.expectedHeightMm} mm`
-    : '';
-
-  const fullProfileLabel = `Perfil de produção: ${profileDisplayName}${profileDimensions ? ` (${profileDimensions})` : ''}. Clique para alterar.`;
-
-  return (
-    <header className="sticky top-0 z-20 w-full bg-white/95 backdrop-blur-xs border-b border-slate-200/80 px-3 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between shadow-2xs select-none">
-      {/* Left: Brand & Contract Indicator */}
-      <div className="flex items-center gap-2 sm:gap-5 min-w-0">
-        <LogoWordmark height={24} />
-
-        {/* Profile Contract Badge — Desktop / Tablet Full View */}
-        {selectedProfile && onOpenChangeProfile && hasActiveAnalysis && (
-          <>
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden md:inline">
-                  Contrato:
-                </span>
-                <span className="text-xs font-black text-[#0F172A] truncate max-w-[120px] md:max-w-[220px]">
-                  {profileDisplayName}
-                </span>
-                {profileDimensions && (
-                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100 hidden sm:inline shrink-0">
-                    {profileDimensions}
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={onOpenChangeProfile}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-[11px] font-bold text-indigo-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                title={fullProfileLabel}
-                aria-label={fullProfileLabel}
-              >
-                <Sliders className="w-3 h-3 text-indigo-600" />
-                <span>Alterar</span>
-              </button>
-            </div>
-
-            {/* Profile Contract Badge — Mobile Compact Button */}
-            <button
-              type="button"
-              onClick={onOpenChangeProfile}
-              className="flex sm:hidden items-center justify-center p-2 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-indigo-700 transition-all cursor-pointer shadow-2xs shrink-0 min-w-[36px] min-h-[36px]"
-              title={fullProfileLabel}
-              aria-label={fullProfileLabel}
-            >
-              <Sliders className="w-4 h-4 text-indigo-600" />
-            </button>
-          </>
-        )}
+export const Header: React.FC<HeaderProps> = ({ onReset, selectedProfile, onOpenChangeProfile, hasActiveAnalysis = false }) => (
+  <header className="sticky top-0 z-40 flex min-h-[72px] w-full items-center justify-between bg-[#03132e] px-4 text-white shadow-lg shadow-slate-950/10 sm:px-7">
+    <div className="flex min-w-0 items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2.5 pr-3 sm:border-r sm:border-white/20 sm:pr-5">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-lg shadow-blue-500/20"><span className="text-lg font-black">P</span></div>
+        <span className="hidden text-xl font-black tracking-tight sm:inline">pre<span className="text-cyan-400">x</span>yon</span>
       </div>
-
-      {/* Center: Operational vs Technical View Switch */}
-      {onToggleViewMode && hasActiveAnalysis && (
-        <div className="hidden md:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80">
-          <button
-            type="button"
-            onClick={() => onToggleViewMode('operational')}
-            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              viewMode === 'operational'
-                ? 'bg-white text-[#2563EB] shadow-2xs'
-                : 'text-[#64748B] hover:text-[#0F172A]'
-            }`}
-          >
-            Operacional
-          </button>
-          <button
-            type="button"
-            onClick={() => onToggleViewMode('technical')}
-            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              viewMode === 'technical'
-                ? 'bg-white text-[#7C3AED] shadow-2xs'
-                : 'text-[#64748B] hover:text-[#0F172A]'
-            }`}
-          >
-            Técnico
-          </button>
-        </div>
-      )}
-
-      {/* Right Actions: Primary "+ Novo Arquivo" */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-        <button
-          type="button"
-          onClick={onReset}
-          className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0066FF] via-[#5B21B6] to-[#7C3AED] hover:opacity-95 shadow-md shadow-indigo-500/20 active:scale-[0.98] transition-all cursor-pointer select-none shrink-0"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>Novo Arquivo</span>
-        </button>
+      <div className="flex min-h-11 items-center gap-3 rounded-xl border border-white/20 bg-white/[0.03] px-3 text-sm font-semibold sm:px-4">
+        <ShieldCheck className="h-5 w-5 text-violet-400" /><span>ArteCheck</span>
       </div>
-    </header>
-  );
-};
+      <span className="hidden rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-[11px] font-bold text-amber-100 md:inline">Integração Prexyon pendente</span>
+    </div>
+    <div className="flex items-center gap-2">
+      {hasActiveAnalysis && selectedProfile && onOpenChangeProfile && <button type="button" onClick={onOpenChangeProfile} className="hidden min-h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/10 lg:flex"><Sliders className="h-4 w-4 text-violet-400" />{selectedProfile.name.split('—')[0].trim()}</button>}
+      <button type="button" onClick={onReset} aria-label="Nova análise" className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 text-xs font-bold shadow-lg shadow-violet-900/30 transition hover:bg-violet-500 sm:px-4"><Plus className="h-4 w-4" /><span className="hidden sm:inline">Nova análise</span></button>
+    </div>
+  </header>
+);

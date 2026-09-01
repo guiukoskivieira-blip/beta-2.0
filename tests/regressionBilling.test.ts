@@ -76,7 +76,7 @@ test('Registro de uso ocorre APÓS extração bem-sucedida, não antes', () => {
 });
 
 test('recordSuccessfulAnalysis verifica remaining > 0 antes de registrar', () => {
-  assert.match(serverSrc, /state\.remaining\s*<=\s*0.*return/);
+  assert.match(serverSrc, /state\.remaining\s*<=\s*0[\s\S]{0,160}throw new Error\(['"]Limite de análises atingido/);
 });
 
 test('recordSuccessfulAnalysis só executa se billing estiver enforced', () => {

@@ -28,6 +28,7 @@ export function checkReportExportEligibility(item: AnalysisRecordSummary | null 
 export interface HistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
   onSelectAnalysis?: (id: string) => void;
   onExportReport?: (item: AnalysisRecordSummary) => Promise<void> | void;
 }
@@ -37,6 +38,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
   onClose,
   onSelectAnalysis,
   onExportReport,
+  embedded = false,
 }) => {
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
   const [exportingId, setExportingId] = useState<string | null>(null);
@@ -127,8 +129,8 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-3xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className={embedded ? "w-full select-none" : "fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"}>
+      <div className={embedded ? "bg-white rounded-3xl border border-slate-200 w-full p-6 shadow-sm flex flex-col min-h-[60vh] overflow-hidden" : "bg-white rounded-3xl border border-slate-200 w-full max-w-3xl p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"}>
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
@@ -144,14 +146,14 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          {!embedded && <button
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
             aria-label="Fechar"
           >
             <X className="w-5 h-5" />
-          </button>
+          </button>}
         </div>
 
         {exportError && (

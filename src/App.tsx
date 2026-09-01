@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { UploadZone } from './components/UploadZone';
+import { DashboardOverview } from './components/DashboardOverview';
 import { FileSelected } from './components/FileSelected';
 import { ProcessingState } from './components/ProcessingState';
 import { OperationalVerdictBanner } from './components/OperationalVerdictBanner';
@@ -14,20 +14,13 @@ import { FilesManagementView } from './components/FilesManagementView';
 import { VerificationsView } from './components/VerificationsView';
 import { JobCheckForm, EMPTY_SPEC } from './components/JobCheckForm';
 import { JobCheckResults } from './components/JobCheckResults';
-import { AuthModal } from './components/AuthModal';
 import { ProductionProfilesModal } from './components/ProductionProfilesModal';
 import { HistoryModal } from './components/HistoryModal';
-import { AboutBetaModal } from './components/AboutBetaModal';
-import { PlansModal } from './components/PlansModal';
 import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesModal';
 import { PdfxPrerequisitesModal } from './components/PdfxPrerequisitesModal';
-import { ChangeProfileModal } from './components/ChangeProfileModal';
-import { RotateConfirmationModal } from './components/RotateConfirmationModal';
 import { TransparencyModal } from './components/TransparencyModal';
 import { Footer } from './components/Footer';
-import { LogoWordmark } from './components/BrandLogos';
-import { Loader2 } from 'lucide-react';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
 import { getLocalCustomProfiles } from './utils/customProfilesStorage';
@@ -35,15 +28,12 @@ import { runDeterministicRuleEngine } from './utils/ruleEngine';
 import { runJobCheck, type JobCheckSpec, type JobCheckResult } from './services/jobCheck';
 import { createAnalysisSnapshot, buildTechnicalReport } from './services/technicalReport';
 import { LocalStorageProvider } from './storage/LocalStorageProvider';
-import type { BetaUser, AnalysisRecordSummary } from './domain/beta';
+import type { AnalysisRecordSummary } from './domain/beta';
 import type { PreflightAnalysis } from './types';
 import { uploadPdfForExtraction, applyImageColorFixViaApi, applyTrimBleedFixViaApi, applyDimensionFixViaApi, finalizePdfx4ViaApi, preparePdfx4ViaApi, executePdfxFinalizeViaApi } from './services/api';
 import { checkTrimBleedEligibility } from './services/trimBleedFix';
 import { checkDimensionFixEligibility } from './services/dimensionFix';
 import { apiUrl } from './config/api';
-import { auth } from './auth';
-import { getBillingStatus } from './services/billing';
-import type { BillingStatus } from './domain/billing';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
 import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X, Zap } from 'lucide-react';
 
@@ -70,7 +60,6 @@ export const App: React.FC = () => {
   const [currentAnalysis, setCurrentAnalysis] = useState<PreflightAnalysis | null>(null);
   const [processingStatus, setProcessingStatus] = useState<'idle' | 'uploading' | 'extracting' | 'analyzing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [limitReached, setLimitReached] = useState(false);
 
   // Profile recommendation state & feedback toast
   const [dismissedRecommendation, setDismissedRecommendation] = useState(false);
@@ -93,21 +82,8 @@ export const App: React.FC = () => {
   const [jobCheckResult, setJobCheckResult] = useState<JobCheckResult | null>(null);
 
   // Modals
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isProfilesOpen, setIsProfilesOpen] = useState(false);
-  const [isChangeProfileOpen, setIsChangeProfileOpen] = useState(false);
-  const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
   const [isTransparencyModalOpen, setIsTransparencyModalOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const [isPlansOpen, setIsPlansOpen] = useState(false);
-  const [isReportOpen, setIsReportOpen] = useState(false);
-
-  // User & Billing states
-  const [currentUser, setCurrentUser] = useState<BetaUser | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
 
   const storage = new LocalStorageProvider();
@@ -117,48 +93,8 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
     loadHistory();
-
-    auth.getCurrentUser()
-      .then((u) => {
-        if (isMounted) {
-          setCurrentUser(u);
-          setIsAuthLoading(false);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setCurrentUser(null);
-          setIsAuthLoading(false);
-        }
-      });
-
-    if (auth.onAuthStateChange) {
-      const unsubscribe = auth.onAuthStateChange((session) => {
-        if (isMounted) {
-          setCurrentUser(session?.user || null);
-          setIsAuthLoading(false);
-        }
-      });
-      return () => {
-        isMounted = false;
-        unsubscribe();
-      };
-    } else {
-      setIsAuthLoading(false);
-    }
   }, [loadHistory]);
-
-  useEffect(() => {
-    if (currentUser) {
-      getBillingStatus()
-        .then((s) => setBillingStatus(s))
-        .catch(() => setBillingStatus(null));
-    } else {
-      setBillingStatus(null);
-    }
-  }, [currentUser]);
 
   // Compute matched profiles for active document
   const matchingProfileData = useMemo(() => {
@@ -177,7 +113,7 @@ export const App: React.FC = () => {
       recommendsPdfX: true,
     }));
     return detectMatchingProfilesFromPage(currentAnalysis.document.pages[0], customProfiles);
-  }, [currentAnalysis, isProfilesOpen]);
+  }, [currentAnalysis, activeTab]);
 
   const handleFileSelected = (file: File) => {
     setOriginalFile(file);
@@ -198,14 +134,8 @@ export const App: React.FC = () => {
   const handleStartAnalysis = async () => {
     if (!workingFile) return;
 
-    if (!currentUser) {
-      setIsAuthOpen(true);
-      return;
-    }
-
     setProcessingStatus('uploading');
     setErrorMessage(null);
-    setLimitReached(false);
     setDismissedRecommendation(false);
 
     try {
@@ -260,10 +190,6 @@ export const App: React.FC = () => {
       setCurrentAnalysis(analysis);
       loadHistory();
 
-      if (currentUser) {
-        getBillingStatus().then(setBillingStatus).catch(() => {});
-      }
-
       if (jobCheckEnabled) {
         const jcResult = runJobCheck(jobCheckSpec, analysis);
         setJobCheckResult(jcResult);
@@ -278,10 +204,6 @@ export const App: React.FC = () => {
       setProcessingStatus('error');
       const msg = err?.message || 'Erro inesperado ao analisar o documento.';
       setErrorMessage(msg);
-      setLimitReached(msg.includes('limite') || msg.includes('upgrade') || msg.includes('atingiu'));
-      if (msg.toLowerCase().includes('login') || msg.toLowerCase().includes('autenticação') || msg.toLowerCase().includes('401')) {
-        setIsAuthOpen(true);
-      }
     }
   };
 
@@ -877,13 +799,10 @@ export const App: React.FC = () => {
     }
   };
 
-  // Dimension fix request dispatcher: if action requires confirmation (rotate_90), open modal; otherwise execute
+  // Rotação automática permanece desativada; somente escala uniforme é executável.
   const handleRequestDimensionFix = (action: 'scale_uniform' | 'rotate_90' = 'scale_uniform') => {
-    if (action === 'rotate_90') {
-      setIsRotateModalOpen(true);
-    } else {
-      handleFixDimensions('scale_uniform');
-    }
+    if (action === 'rotate_90') return;
+    handleFixDimensions('scale_uniform');
   };
 
   // Individual Dimension Fix Handler (scale_uniform or rotate_90)
@@ -924,7 +843,6 @@ export const App: React.FC = () => {
         }
       );
 
-      setIsRotateModalOpen(false);
     } catch (err: any) {
       console.error('Erro no ajuste de dimensões:', err);
       setErrorMessage(err?.message || 'Falha ao ajustar dimensões.');
@@ -1207,7 +1125,6 @@ export const App: React.FC = () => {
     setJobCheckResult(null);
     setProcessingStatus('idle');
     setErrorMessage(null);
-    setLimitReached(false);
     setDismissedRecommendation(false);
     setProfileChangeFeedback(null);
     setActiveTab('dashboard');
@@ -1254,24 +1171,7 @@ export const App: React.FC = () => {
 
   const handleSidebarTabSelect = (tab: string) => {
     setActiveTab(tab);
-    if (tab === 'history' || tab === 'reports') {
-      setIsHistoryOpen(true);
-    } else if (tab === 'profiles' || tab === 'settings') {
-      setIsProfilesOpen(true);
-    }
   };
-
-  if (isAuthLoading) {
-    return (
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6 select-none">
-        <LogoWordmark height={36} />
-        <div className="flex items-center gap-2.5 text-xs text-slate-500 font-bold mt-6 bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-2xs">
-          <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-          <span>Verificando sessão segura...</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
@@ -1282,7 +1182,7 @@ export const App: React.FC = () => {
         viewMode={viewMode}
         onToggleViewMode={(mode) => setViewMode(mode)}
         selectedProfile={selectedProfile}
-        onOpenChangeProfile={() => setIsChangeProfileOpen(true)}
+        onOpenChangeProfile={() => setActiveTab('profiles')}
         hasActiveAnalysis={Boolean(currentAnalysis)}
       />
 
@@ -1292,35 +1192,36 @@ export const App: React.FC = () => {
         <Sidebar
           activeTab={activeTab}
           onSelectTab={handleSidebarTabSelect}
-          billingStatus={{
-            planCode: billingStatus?.plan || 'free',
-            used: billingStatus?.usedAnalyses || 0,
-            limit: billingStatus?.limitAnalyses || 15,
-            remaining: Math.max(0, (billingStatus?.limitAnalyses || 15) - (billingStatus?.usedAnalyses || 0)),
-          }}
-          currentUser={currentUser}
-          onOpenUpgradeModal={() => setIsPlansOpen(true)}
-          onOpenLogin={() => setIsAuthOpen(true)}
-          onLogout={async () => {
-            await auth.signOut();
-            setCurrentUser(null);
-            setBillingStatus(null);
-            handleReset();
-            setIsAuthOpen(true);
-          }}
         />
 
         {/* Center Main Stage */}
-        <main className="flex-1 min-w-0 px-4 sm:px-8 pt-6 pb-24 md:py-6 max-w-6xl mx-auto w-full">
+        <main className="min-w-0 flex-1 bg-[#f8f9fd] px-4 pb-24 pt-7 sm:px-8 md:py-10 xl:px-12">
           {processingStatus !== 'idle' ? (
             <ProcessingState
               status={processingStatus}
               errorMessage={errorMessage || undefined}
               onRetry={handleStartAnalysis}
               onBack={() => setProcessingStatus('idle')}
-              onLogin={() => setIsAuthOpen(true)}
-              onUpgrade={limitReached ? () => setIsPlansOpen(true) : undefined}
+              onLogin={undefined}
+              onUpgrade={undefined}
             />
+          ) : activeTab === 'history' ? (
+            <HistoryModal isOpen embedded onClose={() => setActiveTab('dashboard')} onExportReport={handleExportHistoryReport} />
+          ) : activeTab === 'profiles' ? (
+            <ProductionProfilesModal
+              isOpen
+              embedded
+              onClose={() => setActiveTab('dashboard')}
+              selectedProfile={selectedProfile}
+              onSelectProfile={handleSelectProfile}
+              initialDimensions={customInitDimensions}
+            />
+          ) : activeTab === 'report' ? (
+            currentAnalysis ? (
+              <TechnicalReportModal isOpen embedded onClose={() => setActiveTab('dashboard')} analysis={currentAnalysis} profile={selectedProfile} appliedCorrections={appliedCorrections} />
+            ) : (
+              <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Analise um arquivo para visualizar o relatório técnico.</div>
+            )
           ) : activeTab === 'files' ? (
             <FilesManagementView
               currentAnalysis={currentAnalysis}
@@ -1331,13 +1232,13 @@ export const App: React.FC = () => {
               onGoToDashboard={() => setActiveTab('dashboard')}
               onDownloadWorkingPdf={handleDownloadWorkingPdf}
               onRestoreOriginal={handleRestoreOriginal}
-              onOpenReportModal={() => setIsReportOpen(true)}
+              onOpenReportModal={() => setActiveTab('report')}
               onReset={handleReset}
               historyList={historyList}
               onSelectHistoryItem={(id) => {
                 const item = historyList.find(h => h.id === id);
                 if (item) {
-                  setIsHistoryOpen(true);
+                  setActiveTab('history');
                 }
               }}
               onDeleteHistoryItem={async (id) => {
@@ -1352,7 +1253,7 @@ export const App: React.FC = () => {
               profile={selectedProfile}
               onGoToDashboard={() => setActiveTab('dashboard')}
               onScrollToFixes={scrollToFixes}
-              onOpenReportModal={() => setIsReportOpen(true)}
+              onOpenReportModal={() => setActiveTab('report')}
               onReset={handleReset}
             />
           ) : currentAnalysis ? (
@@ -1412,11 +1313,11 @@ export const App: React.FC = () => {
                   onSelectProfile={handleSelectProfile}
                   onOpenProfilesModal={() => {
                     setCustomInitDimensions(null);
-                    setIsProfilesOpen(true);
+                    setActiveTab('profiles');
                   }}
                   onCreateCustomWithDimensions={(w, h) => {
                     setCustomInitDimensions({ widthMm: w, heightMm: h });
-                    setIsProfilesOpen(true);
+                    setActiveTab('profiles');
                   }}
                   onDismiss={() => setDismissedRecommendation(true)}
                 />
@@ -1476,12 +1377,12 @@ export const App: React.FC = () => {
                 analysis={currentAnalysis}
                 profile={selectedProfile}
                 file={workingFile || originalFile}
-                onOpenReportModal={() => setIsReportOpen(true)}
+                onOpenReportModal={() => setActiveTab('report')}
                 onOpenProfiles={() => {
                   setCustomInitDimensions(null);
-                  setIsProfilesOpen(true);
+                  setActiveTab('profiles');
                 }}
-                userName={currentUser?.name}
+                userName={undefined}
               />
 
               {/* Job Check Results if enabled */}
@@ -1532,23 +1433,13 @@ export const App: React.FC = () => {
                 selectedProfile={selectedProfile}
                 onOpenProfilesModal={() => {
                   setCustomInitDimensions(null);
-                  setIsProfilesOpen(true);
+                  setActiveTab('profiles');
                 }}
                 onSelectProfile={handleSelectProfile}
               />
             </div>
           ) : (
-            <div className="py-8">
-              <div className="text-center max-w-xl mx-auto mb-6">
-                <h1 className="text-2xl sm:text-3xl font-black text-[#0F172A] tracking-tight">
-                  Inspeção e Pré-impressão de Arquivos PDF
-                </h1>
-                <p className="text-xs sm:text-sm text-[#64748B] mt-2 font-medium">
-                  Envie seu arquivo gráfico para validação automática de dimensões, sangrias, DPI, espaços de cores e normas PDF/X.
-                </p>
-              </div>
-              <UploadZone onFileSelected={handleFileSelected} />
-            </div>
+            <DashboardOverview history={historyList} onFileSelected={handleFileSelected} onOpenHistory={() => setActiveTab('history')} />
           )}
         </main>
       </div>
@@ -1557,16 +1448,6 @@ export const App: React.FC = () => {
       <Footer />
 
       {/* Modals */}
-      <ChangeProfileModal
-        isOpen={isChangeProfileOpen}
-        onClose={() => setIsChangeProfileOpen(false)}
-        currentProfile={selectedProfile}
-        onConfirmChange={handleSelectProfile}
-        onOpenFullLibrary={() => {
-          setCustomInitDimensions(null);
-          setIsProfilesOpen(true);
-        }}
-      />
       <PdfxPrerequisitesModal
         isOpen={isPdfxPrereqsModalOpen}
         onClose={() => setIsPdfxPrereqsModalOpen(false)}
@@ -1583,18 +1464,6 @@ export const App: React.FC = () => {
         onFixAllAndFinalize={handleCompoundFixAndFinalizePdfx}
         isProcessing={isFixingInProgress}
       />
-      {dimEligibility && (
-        <RotateConfirmationModal
-          isOpen={isRotateModalOpen}
-          onClose={() => setIsRotateModalOpen(false)}
-          onConfirm={() => handleFixDimensions('rotate_90')}
-          isFixingInProgress={isFixingInProgress}
-          sourceWidthMm={dimEligibility.sourceWidthMm}
-          sourceHeightMm={dimEligibility.sourceHeightMm}
-          targetWidthMm={dimEligibility.targetWidthMm}
-          targetHeightMm={dimEligibility.targetHeightMm}
-        />
-      )}
       <ApplyAllFixesModal
         isOpen={isApplyAllModalOpen}
         onClose={() => setIsApplyAllModalOpen(false)}
@@ -1624,41 +1493,6 @@ export const App: React.FC = () => {
           }}
         />
       )}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onSuccess={(user) => setCurrentUser(user)}
-      />
-      <ProductionProfilesModal
-        isOpen={isProfilesOpen}
-        onClose={() => {
-          setIsProfilesOpen(false);
-          setCustomInitDimensions(null);
-        }}
-        selectedProfile={selectedProfile}
-        onSelectProfile={handleSelectProfile}
-        initialDimensions={customInitDimensions}
-      />
-      <HistoryModal
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        onExportReport={handleExportHistoryReport}
-      />
-      <AboutBetaModal
-        isOpen={isAboutOpen}
-        onClose={() => setIsAboutOpen(false)}
-      />
-      <PlansModal
-        isOpen={isPlansOpen}
-        onClose={() => setIsPlansOpen(false)}
-      />
-      <TechnicalReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-        analysis={currentAnalysis}
-        profile={selectedProfile}
-        appliedCorrections={appliedCorrections}
-      />
     </div>
   );
 };

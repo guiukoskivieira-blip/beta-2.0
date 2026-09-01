@@ -2,14 +2,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('ARTECHECK AI — Hotfix P1 de Responsividade e Acessibilidade', () => {
-  it('1. Responsividade: <main> possui pb-24 em mobile e md:py-6 em desktop para evitar sobreposição da barra inferior', async () => {
+  it('1. Responsividade: <main> preserva espaço mobile e padding vertical desktop para evitar sobreposição', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const appFile = fs.readFileSync(path.join(process.cwd(), 'src', 'App.tsx'), 'utf-8');
 
-    // Valida que o elemento <main> possui a classe pb-24 e md:py-6
-    const hasMobilePadding = appFile.includes('pb-24 md:py-6');
-    assert.equal(hasMobilePadding, true, 'Tag <main> em App.tsx deve conter classes "pb-24 md:py-6"');
+    const mainTag = appFile.match(/<main[^>]+>/)?.[0] || '';
+    const hasResponsivePadding = mainTag.includes('pb-24') && /md:py-(6|8|10|12)/.test(mainTag);
+    assert.equal(hasResponsivePadding, true, 'Tag <main> deve reservar espaço mobile e manter padding vertical no desktop');
   });
 
   it('2. Upload Acessível: Dropzone possui nome acessível, label associado e input nativo sr-only', async () => {
@@ -127,8 +127,7 @@ describe('ARTECHECK AI — Hotfix P1 de Responsividade e Acessibilidade', () => 
       'AboutBetaModal.tsx',
       'AuthModal.tsx',
       'ChangeProfileModal.tsx',
-      'ProductionProfilesModal.tsx',
-      'TechnicalReportModal.tsx',
+      // Perfis e relatório agora também suportam renderização embutida como abas.
       'RotateConfirmationModal.tsx',
       'PdfxPrerequisitesModal.tsx',
       'ApplyAllFixesModal.tsx',

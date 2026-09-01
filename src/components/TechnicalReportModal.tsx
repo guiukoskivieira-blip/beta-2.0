@@ -33,6 +33,7 @@ interface TechnicalReportModalProps {
   onClose: () => void;
   analysis: PreflightAnalysis | null;
   profile: ProductionProfile;
+  embedded?: boolean;
 }
 
 export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
@@ -41,9 +42,10 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
   onClose,
   analysis,
   profile,
+  embedded = false,
 }) => {
   const { closeButtonRef, handleBackdropClick, handleContentClick } = useModalAccessibility({
-    isOpen,
+    isOpen: isOpen && !embedded,
     onClose,
   });
 
@@ -92,15 +94,15 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"
-      onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
+      className={embedded ? "w-full select-none" : "fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none"}
+      onClick={embedded ? undefined : handleBackdropClick}
+      role={embedded ? undefined : "dialog"}
+      aria-modal={embedded ? undefined : "true"}
       aria-labelledby="technical-report-modal-title"
     >
       <div
-        className="bg-white rounded-3xl border border-slate-200 w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
-        onClick={handleContentClick}
+        className={embedded ? "bg-white rounded-3xl border border-slate-200 w-full shadow-sm flex flex-col min-h-[70vh] overflow-hidden" : "bg-white rounded-3xl border border-slate-200 w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"}
+        onClick={embedded ? undefined : handleContentClick}
       >
         {/* Top Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
@@ -142,7 +144,7 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
                 </>
               )}
             </button>
-            <button
+            {!embedded && <button
               ref={closeButtonRef}
               type="button"
               onClick={onClose}
@@ -150,7 +152,7 @@ export const TechnicalReportModal: React.FC<TechnicalReportModalProps> = ({
               aria-label="Fechar"
             >
               <X className="w-5 h-5" />
-            </button>
+            </button>}
           </div>
         </div>
 

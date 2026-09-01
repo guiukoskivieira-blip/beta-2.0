@@ -155,7 +155,7 @@ test('Fonte não incorporada classificada como MANUAL, nunca auto', () => {
 // TESTE 4: RGB pode virar assisted
 // ============================================================================
 
-test('RGB detectado (error) classificado como ASSISTED', () => {
+test('RGB raster detectado (error) classificado como ASSISTED', () => {
   const rule = makeRule({
     ruleId: 'RULE-PROF-CLR-001',
     title: 'Espaço de Cores',
@@ -163,21 +163,25 @@ test('RGB detectado (error) classificado como ASSISTED', () => {
     evidence: 'RGB detectado em perfil CMYK',
     references: [{ page: 1, objectType: 'color', details: 'DeviceRGB' }],
   });
-  const proposal = classifyRule(rule);
+  const analysis = makeAnalysis([rule]);
+  analysis.document.colorSummary.hasRgbRaster = true;
+  const proposal = classifyRule(rule, analysis);
   assert.ok(proposal);
   assert.equal(proposal!.safetyLevel, 'assisted');
   assert.equal(proposal!.canApply, true);
   assert.equal(proposal!.requiresHumanApproval, true);
 });
 
-test('RGB detectado (warning) classificado como ASSISTED', () => {
+test('RGB raster detectado (warning) classificado como ASSISTED', () => {
   const rule = makeRule({
     ruleId: 'RULE-PROF-CLR-001',
     title: 'Espaço de Cores',
     status: 'warning',
     evidence: 'RGB detectado',
   });
-  const proposal = classifyRule(rule);
+  const analysis = makeAnalysis([rule], 'review');
+  analysis.document.colorSummary.hasRgbRaster = true;
+  const proposal = classifyRule(rule, analysis);
   assert.ok(proposal);
   assert.equal(proposal!.safetyLevel, 'assisted');
 });
@@ -250,6 +254,7 @@ test('Fix Engine não declara "corrigido" — propostas têm canApply=false', ()
     makeRule({ ruleId: 'RULE-PDFX-001', status: 'warning', title: 'PDF/X' }),
   ];
   const analysis = makeAnalysis(rules);
+  analysis.document.colorSummary.hasRgbRaster = true;
   const result = buildFixProposals(analysis);
 
   for (const p of result.proposals) {
@@ -294,6 +299,7 @@ test('buildFixProposals conta corretamente auto/assisted/manual', () => {
     makeRule({ ruleId: 'RULE-PROF-DPI-001', status: 'approved', title: 'DPI OK' }),
   ];
   const analysis = makeAnalysis(rules);
+  analysis.document.colorSummary.hasRgbRaster = true;
   const result = buildFixProposals(analysis);
   assert.equal(result.autoCount, 0, 'Nenhum auto nesta V1');
   assert.equal(result.assistedCount, 2, 'PDF/X + RGB = 2 assisted');
@@ -408,13 +414,15 @@ test('Segurança: DPI baixo não possui auto fix e não gera sucesso falso', () 
   assert.equal(contract.actionResult, 'not_supported');
 });
 
-test('Segurança: RGB não é convertido arbitrariamente sem perfil ICC e aprovação', () => {
+test('Segurança: RGB raster exige perfil ICC e aprovação', () => {
   const rule = makeRule({
     ruleId: 'RULE-PROF-CLR-001',
     status: 'error',
     evidence: 'DeviceRGB em perfil CMYK',
   });
-  const proposal = classifyRule(rule);
+  const analysis = makeAnalysis([rule]);
+  analysis.document.colorSummary.hasRgbRaster = true;
+  const proposal = classifyRule(rule, analysis);
   assert.ok(proposal);
   assert.equal(proposal!.safetyLevel, 'assisted');
   assert.equal(proposal!.canApply, true);
@@ -453,5 +461,7 @@ test('Segurança: PDF/X não recebe declaração falsa artificialmente', () => {
 // ============================================================================
 
 console.log(`\n  Fix Engine: ${passed}/${passed + failed} aprovados${failed > 0 ? `, ${failed} falhas` : ''}`);
+
+if (failed > 0) process.exitCode = 1;
 
 export { passed as fixPassed, failed as fixFailed };

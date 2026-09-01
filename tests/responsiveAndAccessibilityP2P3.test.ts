@@ -2,17 +2,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('ARTECHECK AI — Refinamento P2/P3 de Responsividade e Acessibilidade', () => {
-  it('1. Header Mobile: Contrato compacto em < sm, sem overflow e com nome acessível completo', async () => {
+  it('1. Header Mobile: produto e nova análise permanecem compactos, acessíveis e sem dados simulados', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const headerFile = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'Header.tsx'), 'utf-8');
 
-    // Valida versão compacta para mobile (< sm)
-    assert.ok(headerFile.includes('flex sm:hidden'), 'Deve haver botão compacto visível apenas em telas menores que sm');
-    assert.ok(headerFile.includes('hidden sm:flex'), 'Deve manter pílula de contrato expandida em desktop (sm:)');
-    assert.ok(headerFile.includes('aria-label={fullProfileLabel}'), 'Botão compacto mobile deve possuir aria-label descritivo com nome do perfil');
-    assert.ok(headerFile.includes('min-w-[36px] min-h-[36px]'), 'Botão compacto mobile deve ter área de toque ergonômica');
-    assert.ok(headerFile.includes('Novo Arquivo'), 'Botão de Novo Arquivo deve estar presente');
+    assert.ok(headerFile.includes('<span>ArteCheck</span>'), 'Produto atual deve permanecer identificado no mobile');
+    assert.ok(headerFile.includes('aria-label="Nova análise"'), 'A ação compacta deve ter nome acessível completo');
+    assert.ok(headerFile.includes('min-h-11 min-w-11'), 'A ação mobile deve ter área mínima de toque de 44 px');
+    assert.ok(headerFile.includes('hidden sm:inline">Nova análise'), 'Texto deve aparecer em telas maiores sem ocupar o cabeçalho mobile');
+    assert.ok(!headerFile.includes('Minha empresa') && !headerFile.includes('Notificações') && !headerFile.includes('>GS<'), 'Cabeçalho não deve simular dados que virão da Prexyon');
   });
 
   it('2. Checklist em 320 px: Quebra controlada flex-wrap sem truncar valores técnicos e sem colisão de status', async () => {

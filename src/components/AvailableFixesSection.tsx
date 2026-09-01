@@ -270,33 +270,16 @@ export const AvailableFixesSection: React.FC<AvailableFixesSectionProps> = ({
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-[#0F172A]">ORIENTAÇÃO INCOMPATÍVEL</span>
-                  <span className="px-2 py-0.5 rounded-md bg-[#FEF3C7] text-[#B45309] text-[10px] font-bold">Confirmação</span>
+                  <span className="px-2 py-0.5 rounded-md bg-[#FEF3C7] text-[#B45309] text-[10px] font-bold">Manual</span>
                 </div>
                 <p className="text-xs text-[#475569] leading-relaxed">
                   <strong>Arquivo:</strong> {dimensionEligibility.sourceWidthMm.toFixed(0)} × {dimensionEligibility.sourceHeightMm.toFixed(0)} mm — {dimensionEligibility.sourceWidthMm > dimensionEligibility.sourceHeightMm ? 'Horizontal' : 'Vertical'}<br />
                   <strong>Contrato:</strong> {dimensionEligibility.targetWidthMm} × {dimensionEligibility.targetHeightMm} mm — {dimensionEligibility.targetWidthMm > dimensionEligibility.targetHeightMm ? 'Horizontal' : 'Vertical'}<br />
-                  <span className="text-slate-500">Esta ação altera apenas a orientação geométrica do PDF e não deforma a arte.</span>
+                  <span className="text-slate-500">A rotação automática está desativada. Ajuste a orientação no arquivo de origem e envie novamente.</span>
                 </p>
               </div>
             </div>
 
-            <div className="shrink-0 flex items-center justify-end">
-              <button
-                type="button"
-                disabled={isFixingInProgress}
-                onClick={() => onRequestDimensionFix?.('rotate_90')}
-                className="px-4 py-2 rounded-xl bg-[#D97706] hover:bg-[#B45309] text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
-              >
-                {isFixingInProgress ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Girando...</span>
-                  </>
-                ) : (
-                  'Girar página 90°'
-                )}
-              </button>
-            </div>
           </div>
         ) : (hasDimensionsApplied && isDimensionApproved) ? (
           <AppliedFixStatusCard
