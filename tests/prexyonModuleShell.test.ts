@@ -5,11 +5,19 @@ import test from 'node:test';
 const appPath = new URL('../src/App.tsx', import.meta.url);
 const sidebarPath = new URL('../src/components/Sidebar.tsx', import.meta.url);
 const fixesPath = new URL('../src/components/AvailableFixesSection.tsx', import.meta.url);
+const headerPath = new URL('../src/components/Header.tsx', import.meta.url);
 
 test('shell Prexyon não renderiza login, planos ou confirmação de rotação', async () => {
   const app = await readFile(appPath, 'utf8');
   assert.doesNotMatch(app, /AuthModal|PlansModal|RotateConfirmationModal/);
   assert.doesNotMatch(app, /setIsAuthOpen|setIsPlansOpen|setIsRotateModalOpen/);
+});
+
+test('barra global Prexyon não contém ações operacionais do ArteCheck', async () => {
+  const header = await readFile(headerPath, 'utf8');
+  assert.doesNotMatch(header, /Nova análise|selectedProfile|onReset|onOpenChangeProfile/);
+  assert.match(header, /pre.*x.*yon/s);
+  assert.match(header, /<span>ArteCheck<\/span>/);
 });
 
 test('histórico, perfis e relatório são áreas embutidas da navegação', async () => {

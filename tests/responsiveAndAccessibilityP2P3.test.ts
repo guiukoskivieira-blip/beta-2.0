@@ -2,15 +2,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('ARTECHECK AI — Refinamento P2/P3 de Responsividade e Acessibilidade', () => {
-  it('1. Header Mobile: produto e nova análise permanecem compactos, acessíveis e sem dados simulados', async () => {
+  it('1. Header global: identifica o produto sem misturar ações internas ou dados simulados', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const headerFile = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'Header.tsx'), 'utf-8');
 
     assert.ok(headerFile.includes('<span>ArteCheck</span>'), 'Produto atual deve permanecer identificado no mobile');
-    assert.ok(headerFile.includes('aria-label="Nova análise"'), 'A ação compacta deve ter nome acessível completo');
-    assert.ok(headerFile.includes('min-h-11 min-w-11'), 'A ação mobile deve ter área mínima de toque de 44 px');
-    assert.ok(headerFile.includes('hidden sm:inline">Nova análise'), 'Texto deve aparecer em telas maiores sem ocupar o cabeçalho mobile');
+    assert.ok(!headerFile.includes('Nova análise'), 'Ações internas do ArteCheck não pertencem à barra global');
+    assert.ok(!headerFile.includes('selectedProfile') && !headerFile.includes('onReset'), 'O header global não deve receber estado operacional do módulo');
     assert.ok(!headerFile.includes('Minha empresa') && !headerFile.includes('Notificações') && !headerFile.includes('>GS<'), 'Cabeçalho não deve simular dados que virão da Prexyon');
   });
 

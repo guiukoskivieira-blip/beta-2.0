@@ -1176,15 +1176,7 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
       {/* Top Header */}
-      <Header
-        onReset={handleReset}
-        canReset={Boolean(originalFile || currentAnalysis)}
-        viewMode={viewMode}
-        onToggleViewMode={(mode) => setViewMode(mode)}
-        selectedProfile={selectedProfile}
-        onOpenChangeProfile={() => setActiveTab('profiles')}
-        hasActiveAnalysis={Boolean(currentAnalysis)}
-      />
+      <Header />
 
       {/* Main Layout Area */}
       <div className="flex flex-1 min-w-0">
