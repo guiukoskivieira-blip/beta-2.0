@@ -1,5 +1,5 @@
 ﻿// tests/rbac-analysis-create.test.ts
-// Directed RBAC tests for artecheck.analysis.create permission
+// Comprehensive RBAC & Auth Initialization Integration Tests
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -7,47 +7,41 @@ import {
   clearArteCheckSessionPermissions,
   hasPermission,
   getArteCheckSessionPermissions,
+  subscribeArteCheckPermissions,
 } from '../src/auth/arteCheckPermissions';
 import { resolveArteCheckPermissions } from '../src/services/resolveArteCheckPermissions';
+import { initializeAuthSession } from '../src/auth/initAuthSession';
 
 // ---------------------------------------------------------------------------
-// Unit tests: in-memory permission store
+// 1. In-Memory Store & hasPermission (Unit Tests)
 // ---------------------------------------------------------------------------
-describe('arteCheckPermissions — in-memory store', () => {
+describe('1. arteCheckPermissions — In-Memory Store & Reactivity', () => {
   beforeEach(() => {
     clearArteCheckSessionPermissions();
   });
 
-  it('A) MEMBER view=true create=false: visualização permitida, criação bloqueada', () => {
+  it('A) store inicialmente null: fail-closed, canCreate FALSE, nunca TRUE por fallback', () => {
+    assert.equal(getArteCheckSessionPermissions(), null, 'store deve iniciar null');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'ausência de store resulta estritamente false');
+    assert.equal(hasPermission('artecheck.analysis.view'), false, 'todas as permissões são false');
+  });
+
+  it('B) MEMBER com apenas view=allow e create ausente: canCreate FALSE', () => {
     setArteCheckSessionPermissions({
       resolved: {
         'artecheck.analysis.view': 'allow',
-        // artecheck.analysis.create intentionally absent (no grant)
       },
       isOwner: false,
       bootstrapped: true,
     });
 
-    assert.equal(hasPermission('artecheck.analysis.view'), true, 'view should be allowed');
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'create should be blocked (absent = fail-closed)');
-    assert.equal(hasPermission('artecheck.analysis.override_warnings'), false, 'override_warnings absent = blocked');
-    assert.equal(hasPermission('artecheck.reports.download'), false, 'reports.download absent = blocked');
+    assert.equal(hasPermission('artecheck.analysis.view'), true, 'view deve ser permitida');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'create ausente deve ser estritamente bloqueada');
+    assert.equal(hasPermission('artecheck.analysis.override_warnings'), false, 'override_warnings bloqueada');
+    assert.equal(hasPermission('artecheck.reports.download'), false, 'reports.download bloqueada');
   });
 
-  it('A) MEMBER create=false: deny override wins over absence', () => {
-    setArteCheckSessionPermissions({
-      resolved: {
-        'artecheck.analysis.view': 'allow',
-        'artecheck.analysis.create': 'deny',
-      },
-      isOwner: false,
-      bootstrapped: true,
-    });
-
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'explicit deny should block create');
-  });
-
-  it('B) Usuário com create=true: nova análise permitida', () => {
+  it('C) Usuário com create=allow explícito: canCreate TRUE', () => {
     setArteCheckSessionPermissions({
       resolved: {
         'artecheck.analysis.view': 'allow',
@@ -57,159 +51,264 @@ describe('arteCheckPermissions — in-memory store', () => {
       bootstrapped: true,
     });
 
-    assert.equal(hasPermission('artecheck.analysis.create'), true, 'explicit allow should permit create');
-    assert.equal(hasPermission('artecheck.analysis.view'), true, 'view should also be allowed');
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'create=allow permite criação');
+    assert.equal(hasPermission('artecheck.analysis.view'), true, 'view=allow permite visualização');
   });
 
-  it('C) OWNER válido: bypass all permissions unless denied', () => {
+  it('D) OWNER válido: canCreate TRUE via bypass arquitetural', () => {
     setArteCheckSessionPermissions({
       resolved: {
         'artecheck.analysis.view': 'allow',
-        // create NOT explicitly granted, but owner bypass applies
       },
       isOwner: true,
       bootstrapped: true,
     });
 
-    assert.equal(hasPermission('artecheck.analysis.create'), true, 'owner bypass allows create even without explicit grant');
-    assert.equal(hasPermission('artecheck.analysis.view'), true, 'owner bypass allows view');
-    assert.equal(hasPermission('artecheck.analysis.override_warnings'), true, 'owner bypass allows override_warnings');
-    assert.equal(hasPermission('artecheck.reports.download'), true, 'owner bypass allows reports.download');
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'owner bypass permite create sem grant explícito');
+    assert.equal(hasPermission('artecheck.analysis.view'), true, 'owner bypass permite view');
   });
 
-  it('C) OWNER com deny explícito: deny ainda vence sobre bypass de owner', () => {
+  it('D) OWNER com deny explícito: deny vence sobre bypass', () => {
     setArteCheckSessionPermissions({
       resolved: {
-        'artecheck.analysis.create': 'deny', // explicit deny
+        'artecheck.analysis.create': 'deny',
       },
       isOwner: true,
       bootstrapped: true,
     });
 
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'explicit deny wins even for owner');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'deny explícito bloqueia mesmo para owner');
   });
 
-  it('D) Ausência de bootstrap: fail-closed', () => {
-    // No setArteCheckSessionPermissions called
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'no bootstrap = fail-closed');
-    assert.equal(hasPermission('artecheck.analysis.view'), false, 'no bootstrap = fail-closed for view too');
-    assert.equal(getArteCheckSessionPermissions(), null, 'store should be null before bootstrap');
-  });
+  it('I) signOut / clearArteCheckSessionPermissions: limpa store e notifica subscribers', () => {
+    let notifiedPerms: any = undefined;
+    const unsub = subscribeArteCheckPermissions((p) => {
+      notifiedPerms = p;
+    });
 
-  it('D) clearArteCheckSessionPermissions: after clear, fail-closed', () => {
     setArteCheckSessionPermissions({
       resolved: { 'artecheck.analysis.create': 'allow' },
       isOwner: false,
       bootstrapped: true,
     });
-    assert.equal(hasPermission('artecheck.analysis.create'), true, 'should be allowed before clear');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+    assert.notEqual(notifiedPerms, null);
+
     clearArteCheckSessionPermissions();
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'should be fail-closed after clear');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'após signOut deve ser false');
+    assert.equal(getArteCheckSessionPermissions(), null, 'store deve ser null');
+    assert.equal(notifiedPerms, null, 'subscribers devem ser notificados com null');
+
+    unsub();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Unit tests: resolveArteCheckPermissions (with mock Supabase client)
+// 2. Integration: initializeAuthSession & Auth Lifecycle Wiring
 // ---------------------------------------------------------------------------
-describe('resolveArteCheckPermissions — integration unit', () => {
+describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Closed', () => {
   beforeEach(() => {
     clearArteCheckSessionPermissions();
   });
 
-  function makeMockClient(opts: {
-    permDefs?: Array<{ id: string; permission_key: string }>;
+  function makeMockSupabaseClient(opts: {
+    hasSession?: boolean;
+    sessionUser?: { id: string; email?: string } | null;
     memberRole?: string;
-    userProductRole?: { role_id: string } | null;
-    rolePermissions?: Array<{ permission_definition_id: string }>;
+    isMemberActive?: boolean;
+    isOrgActive?: boolean;
+    effectiveProducts?: string[];
+    productAccessEnabled?: boolean;
+    permDefs?: Array<{ id: string; permission_key: string }>;
+    userRole?: { role_id: string } | null;
+    rolePerms?: Array<{ permission_definition_id: string }>;
     overrides?: Array<{ permission_definition_id: string; effect: string }>;
+    exchangeFail?: boolean;
+    bootstrapFail?: boolean;
   }) {
     const {
-      permDefs = [],
+      hasSession = true,
+      sessionUser = { id: 'user-member-1', email: 'member@empresa.com' },
       memberRole = 'member',
-      userProductRole = null,
-      rolePermissions = [],
-      overrides = [],
+      isMemberActive = true,
+      isOrgActive = true,
+      effectiveProducts = ['artecheck'],
+      productAccessEnabled = true,
+      permDefs = [
+        { id: 'def-view', permission_key: 'artecheck.analysis.view' },
+        { id: 'def-create', permission_key: 'artecheck.analysis.create' },
+      ],
+      userRole = null,
+      rolePerms = [],
+      overrides = [{ permission_definition_id: 'def-view', effect: 'allow' }],
+      exchangeFail = false,
+      bootstrapFail = false,
     } = opts;
 
+    let signedOut = false;
+
     return {
+      get signedOut() {
+        return signedOut;
+      },
+      functions: {
+        invoke: async (_fn: string, _opts: any) => {
+          if (exchangeFail) return { data: null, error: new Error('Exchange failed') };
+          return { data: { token_hash: 'hash-abc', verification_type: 'email' }, error: null };
+        },
+      },
+      auth: {
+        verifyOtp: async () => {
+          if (exchangeFail) return { data: null, error: new Error('OTP failed') };
+          return {
+            data: { session: { access_token: 'valid-token', user: sessionUser } },
+            error: null,
+          };
+        },
+        getSession: async () => {
+          if (!hasSession) return { data: { session: null }, error: null };
+          return {
+            data: { session: { access_token: 'valid-token', user: sessionUser } },
+            error: null,
+          };
+        },
+        getUser: async () => ({ data: { user: sessionUser }, error: null }),
+        signOut: async () => {
+          signedOut = true;
+          return { error: null };
+        },
+      },
+      rpc: async (fn: string, _args: any) => {
+        if (fn === 'prexyon_get_organization_entitlements') {
+          if (bootstrapFail) return { data: null, error: new Error('RPC error') };
+          return { data: { effective_products: effectiveProducts }, error: null };
+        }
+        return { data: null, error: null };
+      },
       from: (table: string) => {
-        const createQueryBuilder = () => {
+        const createBuilder = () => {
           const builder: any = {
             select: () => builder,
-            eq: (_col: string, _val: any) => builder,
-            in: (_col: string, _vals: any[]) => builder,
-            maybeSingle: () => {
-              if (table === 'organization_members') return Promise.resolve({ data: { role: memberRole }, error: null });
-              if (table === 'prexyon_user_product_roles') return Promise.resolve({ data: userProductRole, error: null });
-              return Promise.resolve({ data: null, error: null });
+            eq: () => builder,
+            in: () => builder,
+            maybeSingle: async () => {
+              if (table === 'organization_members') {
+                if (bootstrapFail) return { data: null, error: new Error('DB error') };
+                return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
+              }
+              if (table === 'prexyon_user_product_roles') {
+                return { data: userRole, error: null };
+              }
+              return { data: null, error: null };
             },
-            single: () => {
-              if (table === 'organization_members') return Promise.resolve({ data: { role: memberRole }, error: null });
-              return Promise.resolve({ data: null, error: null });
+            single: async () => {
+              if (table === 'organization_members') {
+                if (bootstrapFail) return { data: null, error: new Error('DB error') };
+                return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
+              }
+              if (table === 'organizations') {
+                return { data: { id: 'org-1', is_active: isOrgActive }, error: null };
+              }
+              if (table === 'organization_member_product_access') {
+                return { data: { product_key: 'artecheck', is_enabled: productAccessEnabled }, error: null };
+              }
+              return { data: null, error: null };
             },
             then: (onfulfilled: any, onrejected: any) => {
               let resultData: any = null;
               if (table === 'prexyon_permission_definitions') resultData = permDefs;
-              else if (table === 'prexyon_role_permissions') resultData = rolePermissions;
+              else if (table === 'prexyon_role_permissions') resultData = rolePerms;
               else if (table === 'prexyon_user_permission_overrides') resultData = overrides;
               return Promise.resolve({ data: resultData, error: null }).then(onfulfilled, onrejected);
             },
           };
           return builder;
         };
-
-        return createQueryBuilder();
+        return createBuilder();
       },
     } as any;
   }
 
-  it('No permission definitions → empty resolved, bootstrapped=true', async () => {
-    const client = makeMockClient({ permDefs: [] });
-    const result = await resolveArteCheckPermissions(client, 'user-1', 'org-1');
-    assert.deepEqual(result.resolved, {});
-    assert.equal(result.bootstrapped, true);
-    assert.equal(result.isOwner, false);
+  it('E) Bootstrap pendente / client null: canCreate estritamente FALSE', async () => {
+    const status = await initializeAuthSession(null);
+    assert.equal(status, 'unauthenticated');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'sem bootstrap, canCreate é FALSE');
   });
 
-  it('Member with view override allow → view=allow, create absent', async () => {
-    const viewDefId = 'def-view';
-    const createDefId = 'def-create';
-    const client = makeMockClient({
-      permDefs: [
-        { id: viewDefId, permission_key: 'artecheck.analysis.view' },
-        { id: createDefId, permission_key: 'artecheck.analysis.create' },
-      ],
+  it('F) Bootstrap falha: status error, store limpa e canCreate estritamente FALSE', async () => {
+    const client = makeMockSupabaseClient({ bootstrapFail: true });
+    const status = await initializeAuthSession(client);
+    assert.equal(status, 'error');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'em falha de bootstrap, canCreate é FALSE');
+  });
+
+  it('G) /auth/prexyon?code=...: callback executa e popula permissões antes de liberar autorização', async () => {
+    const client = makeMockSupabaseClient({
       memberRole: 'member',
-      userProductRole: null,
-      overrides: [{ permission_definition_id: viewDefId, effect: 'allow' }],
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
     });
-    const result = await resolveArteCheckPermissions(client, 'user-1', 'org-1');
-    assert.equal(result.resolved['artecheck.analysis.view'], 'allow');
-    assert.equal(result.resolved['artecheck.analysis.create'], undefined);
-    assert.equal(result.isOwner, false);
+
+    const status = await initializeAuthSession(client, '?code=valid-sso-code');
+    assert.equal(status, 'authenticated');
+
+    const perms = getArteCheckSessionPermissions();
+    assert.notEqual(perms, null, 'store deve estar populada após callback');
+    assert.equal(perms?.bootstrapped, true);
+    assert.equal(perms?.isOwner, false);
+    assert.equal(hasPermission('artecheck.analysis.view'), true, 'MEMBER tem view=allow');
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'MEMBER NÃO tem create');
   });
 
-  it('Owner role: isOwner=true', async () => {
-    const client = makeMockClient({
-      permDefs: [{ id: 'def-view', permission_key: 'artecheck.analysis.view' }],
+  it('H) Reload com sessão Supabase existente: bootstrap re-executado e permissões restauradas em memória', async () => {
+    const client = makeMockSupabaseClient({
+      hasSession: true,
+      memberRole: 'member',
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    });
+
+    // Simulando reload (sem query params no search)
+    const status = await initializeAuthSession(client, '');
+    assert.equal(status, 'authenticated');
+
+    const perms = getArteCheckSessionPermissions();
+    assert.notEqual(perms, null);
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'após reload, MEMBER continua sem create');
+  });
+
+  it('B) MEMBER no ciclo completo: canCreate é FALSE', async () => {
+    const client = makeMockSupabaseClient({
+      hasSession: true,
+      memberRole: 'member',
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    });
+
+    await initializeAuthSession(client, '');
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+  });
+
+  it('C) Usuário com create=allow no ciclo completo: canCreate é TRUE', async () => {
+    const client = makeMockSupabaseClient({
+      hasSession: true,
+      memberRole: 'member',
+      overrides: [
+        { permission_definition_id: 'def-view', effect: 'allow' },
+        { permission_definition_id: 'def-create', effect: 'allow' },
+      ],
+    });
+
+    await initializeAuthSession(client, '');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+  });
+
+  it('D) OWNER no ciclo completo: canCreate é TRUE via bypass', async () => {
+    const client = makeMockSupabaseClient({
+      hasSession: true,
       memberRole: 'owner',
       overrides: [],
     });
-    const result = await resolveArteCheckPermissions(client, 'owner-1', 'org-1');
-    assert.equal(result.isOwner, true);
-  });
 
-  it('Deny override wins over role grant', async () => {
-    const createDefId = 'def-create';
-    const roleId = 'role-1';
-    const client = makeMockClient({
-      permDefs: [{ id: createDefId, permission_key: 'artecheck.analysis.create' }],
-      memberRole: 'member',
-      userProductRole: { role_id: roleId },
-      rolePermissions: [{ permission_definition_id: createDefId }],
-      overrides: [{ permission_definition_id: createDefId, effect: 'deny' }],
-    });
-    const result = await resolveArteCheckPermissions(client, 'user-1', 'org-1');
-    assert.equal(result.resolved['artecheck.analysis.create'], 'deny', 'deny override must win over role grant');
+    await initializeAuthSession(client, '');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
   });
 });

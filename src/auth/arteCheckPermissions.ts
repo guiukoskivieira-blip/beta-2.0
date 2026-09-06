@@ -16,7 +16,31 @@ export interface ArteCheckSessionPermissions {
   bootstrapped: boolean;
 }
 
+type PermissionListener = (perms: ArteCheckSessionPermissions | null) => void;
+const _listeners = new Set<PermissionListener>();
+
 let _store: ArteCheckSessionPermissions | null = null;
+
+function notifyListeners(): void {
+  _listeners.forEach((listener) => {
+    try {
+      listener(_store);
+    } catch {
+      // Ignore listener error
+    }
+  });
+}
+
+/**
+ * Subscribes to changes in the in-memory permissions store.
+ * Returns an unsubscribe function.
+ */
+export function subscribeArteCheckPermissions(listener: PermissionListener): () => void {
+  _listeners.add(listener);
+  return () => {
+    _listeners.delete(listener);
+  };
+}
 
 /**
  * Store the resolved permissions after a successful bootstrap.
@@ -24,6 +48,7 @@ let _store: ArteCheckSessionPermissions | null = null;
  */
 export function setArteCheckSessionPermissions(perms: ArteCheckSessionPermissions): void {
   _store = perms;
+  notifyListeners();
 }
 
 /**
@@ -40,6 +65,7 @@ export function getArteCheckSessionPermissions(): ArteCheckSessionPermissions | 
  */
 export function clearArteCheckSessionPermissions(): void {
   _store = null;
+  notifyListeners();
 }
 
 /**
