@@ -4,6 +4,7 @@ import { PrexyonSSOProvider } from './PrexyonSSOProvider';
 import { bootstrapUserContext } from './bootstrapUserContext';
 import { clearArteCheckSessionPermissions, getArteCheckSessionPermissions } from './arteCheckPermissions';
 import { observeAuthCallback, observeUrlCleanup } from './authDiagnostics';
+import { observeSsoStage } from './ssoDiagnostics';
 
 export type AuthInitStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 export type AuthInitStage = 'idle' | 'pending' | 'success' | 'failed';
@@ -51,6 +52,7 @@ async function executeAuthInit(
   _initStage = 'pending';
   observeAuthCallback(hasSSOCallbackCode(customSearch));
   if (!client) {
+    observeSsoStage('client_missing');
     _initStage = 'failed';
     _resolvedStatus = 'unauthenticated';
     clearArteCheckSessionPermissions();
@@ -72,7 +74,7 @@ async function executeAuthInit(
       const ssoProvider = new PrexyonSSOProvider(client);
       await ssoProvider.handleSSOCallback(code.trim());
     } catch (err) {
-      console.error('[ArteCheck SSO] Callback initialization failed:', err);
+      // Failure details are exposed only through the sanitized diagnostic panel.
       _initStage = 'failed';
       _resolvedStatus = 'error';
       clearArteCheckSessionPermissions();
@@ -118,7 +120,7 @@ async function executeAuthInit(
     _resolvedStatus = 'authenticated';
     return 'authenticated';
   } catch (err) {
-    console.error('[ArteCheck SSO] Active session bootstrap failed:', err);
+    // Do not log raw remote errors or session details.
     _initStage = 'failed';
     _resolvedStatus = 'error';
     clearArteCheckSessionPermissions();

@@ -13,7 +13,7 @@ export default defineConfig(() => {
   const revision = /^[a-f0-9]{40}$/i.test(commit) ? commit : 'unknown';
   return {
     define: {
-      __AUTH_DIAGNOSTIC_BUILD__: JSON.stringify(`auth-diag-1/${revision}/${new Date().toISOString()}`),
+      __AUTH_DIAGNOSTIC_BUILD__: JSON.stringify(`auth-diag-2/${revision}/${new Date().toISOString()}`),
     },
     plugins: [react(), tailwindcss()],
     resolve: {

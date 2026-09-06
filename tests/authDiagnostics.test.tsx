@@ -30,6 +30,8 @@ test('panel reflects the App props and only the permitted diagnostic fields', ()
   assert.deepEqual(content.split('\n').map(line => line.split(':')[0]), [
     'build', 'initStage', 'session', 'bootstrapped', 'isOwner', 'hasCreate',
     'callbackDetected', 'urlCleanupAttempted', 'urlCleanupSucceeded',
+    'ssoStage', 'ssoError', 'audienceArtecheck', 'exchangeRepeated', 'tokenHashPresent',
+    'verificationTypePresent', 'verificationTypeSupported', 'otpSessionReceived',
   ]);
   assert.match(content, /hasCreate: true/);
   assert.match(content, /urlCleanupSucceeded: true/);

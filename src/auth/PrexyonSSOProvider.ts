@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../lib/supabaseClient';
 import { bootstrapUserContext } from './bootstrapUserContext';
 import { exchangePrexyonCode } from '../services/prexyonSsoService';
 import { clearArteCheckSessionPermissions } from './arteCheckPermissions';
+import { observeSsoStage } from './ssoDiagnostics';
 import { isAuthInitPending, hasSSOCallbackCode, getAuthInitStage, resetAuthInitFlight } from './initAuthSession';
 
 /**
@@ -22,13 +23,22 @@ export class PrexyonSSOProvider implements AuthProvider {
 
   /** Handles the callback URL containing `code` (or legacy `sso_code`). */
   async handleSSOCallback(rawCode: string): Promise<void> {
+    observeSsoStage('callback_entered');
     if (!this.client) {
+      observeSsoStage('client_missing');
       throw new Error('Supabase client not configured');
     }
     const code = rawCode.trim();
     try {
       const session = await exchangePrexyonCode(this.client, code, 'artecheck');
-      await bootstrapUserContext(this.client, session);
+      observeSsoStage('bootstrap_pending');
+      try {
+        await bootstrapUserContext(this.client, session);
+        observeSsoStage('bootstrap_complete');
+      } catch (error) {
+        observeSsoStage('bootstrap_failed');
+        throw error;
+      }
     } catch (err) {
       // Fail-closed: ensure user is signed out and rethrow
       await this.signOut();

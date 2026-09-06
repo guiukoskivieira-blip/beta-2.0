@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getAuthDiagnostics } from '../auth/authDiagnostics';
+import { getSsoDiagnostics } from '../auth/ssoDiagnostics';
 import { getAuthInitStage } from '../auth/initAuthSession';
 import { getSupabaseClient } from '../lib/supabaseClient';
 
@@ -33,6 +34,7 @@ export function AuthDiagnostics({ bootstrapped, isOwner, hasCreate }: {
     isOwner: Boolean(isOwner),
     hasCreate: Boolean(hasCreate),
     ...getAuthDiagnostics(),
+    ...getSsoDiagnostics(),
   };
   return <pre aria-label="Diagnóstico temporário ArteCheck" className="m-4 whitespace-pre-wrap rounded border border-amber-400 bg-amber-50 p-3 text-xs text-slate-900">
     {Object.entries(fields).map(([key, value]) => `${key}: ${value}`).join('\n')}
