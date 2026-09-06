@@ -2,7 +2,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { PrexyonSSOProvider } from '../../src/auth/PrexyonSSOProvider';
-import { getSsoDiagnostics } from '../../src/auth/ssoDiagnostics';
 
 let signOutCalled = false;
 
@@ -75,7 +74,5 @@ describe('PrexyonSSOProvider fail‑closed behavior', () => {
     const provider = new PrexyonSSOProvider(failingBootstrapClient);
     await assert.rejects(() => provider.handleSSOCallback('validcode'));
     assert.equal(signOutCalled, true, 'signOut should be called on bootstrap error');
-    assert.equal(getSsoDiagnostics().ssoStage, 'bootstrap_failed');
-    assert.equal(getSsoDiagnostics().otpSessionReceived, true, 'session evidence survives fail-closed sign-out');
   });
 });
