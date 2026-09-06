@@ -1,4 +1,4 @@
-﻿// src/auth/bootstrapUserContext.ts
+// src/auth/bootstrapUserContext.ts
 import type { SupabaseClient, Session } from '@supabase/supabase-js';
 import { resolveArteCheckPermissions } from '../services/resolveArteCheckPermissions';
 import { setArteCheckSessionPermissions } from './arteCheckPermissions';
@@ -50,7 +50,7 @@ export async function bootstrapUserContext(
   // 4. Organization active
   const { data: org, error: orgErr } = await client
     .from('organizations')
-    .select('id, is_active')
+    .select('id, name, is_active')
     .eq('id', orgId)
     .single();
   if (orgErr || !org) {
@@ -88,6 +88,18 @@ export async function bootstrapUserContext(
   }
 
   // 7. Resolve and store permissions in memory (no localStorage/sessionStorage)
+  const meta = user.user_metadata || {};
+  const displayName = meta.display_name || meta.displayName || meta.full_name || user.email?.split('@')[0] || 'Usuário';
+  const orgName = (org as any)?.name || meta.company_name || meta.companyName || 'Organização';
+  const memberRole = (member as any)?.role || 'member';
+
   const perms = await resolveArteCheckPermissions(client, user.id, orgId);
-  setArteCheckSessionPermissions(perms);
+  setArteCheckSessionPermissions({
+    ...perms,
+    organizationName: orgName,
+    organizationId: orgId,
+    userEmail: user.email || '',
+    userDisplayName: displayName,
+    userRole: memberRole,
+  });
 }

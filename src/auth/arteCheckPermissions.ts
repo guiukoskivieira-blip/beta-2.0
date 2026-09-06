@@ -14,6 +14,16 @@ export interface ArteCheckSessionPermissions {
   isOwner: boolean;
   /** Whether bootstrap completed successfully. null = not yet bootstrapped. */
   bootstrapped: boolean;
+  /** Active organization name for UI display. */
+  organizationName?: string;
+  /** Active organization ID. */
+  organizationId?: string;
+  /** Authenticated user email. */
+  userEmail?: string;
+  /** Authenticated user display name. */
+  userDisplayName?: string;
+  /** Authenticated user role in org (e.g. 'owner' | 'member'). */
+  userRole?: string;
 }
 
 type PermissionListener = (perms: ArteCheckSessionPermissions | null) => void;
