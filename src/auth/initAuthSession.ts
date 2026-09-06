@@ -69,16 +69,6 @@ async function executeAuthInit(
     try {
       const ssoProvider = new PrexyonSSOProvider(client);
       await ssoProvider.handleSSOCallback(code.trim());
-
-      // Clean URL parameters safely
-      if (typeof window !== 'undefined' && window.history && window.location) {
-        const cleanPath = window.location.pathname || '/';
-        window.history.replaceState({}, document.title, cleanPath);
-      }
-
-      _initStage = 'success';
-      _resolvedStatus = 'authenticated';
-      return 'authenticated';
     } catch (err) {
       console.error('[ArteCheck SSO] Callback initialization failed:', err);
       _initStage = 'failed';
@@ -86,6 +76,25 @@ async function executeAuthInit(
       clearArteCheckSessionPermissions();
       return 'error';
     }
+
+    // URL cleanup is navigation hygiene, not authentication. A History API
+    // failure must never revoke an already bootstrapped session/RBAC state.
+    if (typeof window !== 'undefined' && window.history && window.location) {
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('code');
+        cleanUrl.searchParams.delete('sso_code');
+        const relativeUrl = `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}` || '/';
+        window.history.replaceState(window.history.state, '', relativeUrl);
+      } catch {
+        // Keep the authenticated session fail-safe; a later navigation/reload
+        // can clean the address without changing authorization.
+      }
+    }
+
+    _initStage = 'success';
+    _resolvedStatus = 'authenticated';
+    return 'authenticated';
   }
 
   // 2. Check for existing active session in Supabase Auth

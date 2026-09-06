@@ -661,4 +661,78 @@ describe('4. React DOM Rendering & useSyncExternalStore Single Source of Truth',
     const html = renderHarness();
     assert.match(html, /for="dashboard-upload"/);
   });
+
+  it('K) OWNER permanece ENABLED no DOM se a limpeza da URL falhar após o bootstrap', async () => {
+    const client = makeMockSupabaseClient({ memberRole: 'owner' });
+    const originalWindow = globalThis.window;
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: {
+          href: 'https://artecheck.example/auth/prexyon?code=redacted',
+          pathname: '/auth/prexyon',
+          search: '?code=redacted',
+          hash: '',
+        },
+        history: {
+          state: null,
+          replaceState: () => {
+            throw new Error('History API unavailable');
+          },
+        },
+      },
+    });
+
+    try {
+      const status = await initializeAuthSession(client);
+      assert.equal(status, 'authenticated');
+      assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+      const html = renderHarness();
+      assert.match(html, /for="dashboard-upload"/);
+      assert.doesNotMatch(html, /Você não tem permissão para criar novas análises/);
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+  });
+
+  it('L) callback SSO remove somente os parâmetros de código da URL', async () => {
+    const client = makeMockSupabaseClient({ memberRole: 'member' });
+    const originalWindow = globalThis.window;
+    let replacedUrl = '';
+
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: {
+          href: 'https://artecheck.example/auth/prexyon?code=redacted&source=prexyon#ready',
+          pathname: '/auth/prexyon',
+          search: '?code=redacted&source=prexyon',
+          hash: '#ready',
+        },
+        history: {
+          state: { preserved: true },
+          replaceState: (_state: unknown, _title: string, url: string) => {
+            replacedUrl = url;
+          },
+        },
+      },
+    });
+
+    try {
+      const status = await initializeAuthSession(client);
+      assert.equal(status, 'authenticated');
+      assert.equal(replacedUrl, '/auth/prexyon?source=prexyon#ready');
+      assert.doesNotMatch(replacedUrl, /code=/);
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+  });
 });
