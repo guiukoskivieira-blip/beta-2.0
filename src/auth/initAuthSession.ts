@@ -2,13 +2,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PrexyonSSOProvider } from './PrexyonSSOProvider';
 import { bootstrapUserContext } from './bootstrapUserContext';
-import { clearArteCheckSessionPermissions } from './arteCheckPermissions';
+import { clearArteCheckSessionPermissions, getArteCheckSessionPermissions } from './arteCheckPermissions';
 
 export type AuthInitStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 export type AuthInitStage = 'idle' | 'pending' | 'success' | 'failed';
 
 let _inFlightInit: Promise<AuthInitStatus> | null = null;
 let _initStage: AuthInitStage = 'idle';
+let _resolvedStatus: AuthInitStatus | null = null;
 
 export function getAuthInitStage(): AuthInitStage {
   return _initStage;
@@ -34,11 +35,12 @@ export function hasSSOCallbackCode(customSearch?: string): boolean {
 }
 
 /**
- * Resets the in-flight lock and stage (used primarily in test suites and logouts).
+ * Resets the in-flight lock, stage, and resolved status (used in test suites and logouts).
  */
 export function resetAuthInitFlight(): void {
   _inFlightInit = null;
   _initStage = 'idle';
+  _resolvedStatus = null;
 }
 
 async function executeAuthInit(
@@ -48,6 +50,7 @@ async function executeAuthInit(
   _initStage = 'pending';
   if (!client) {
     _initStage = 'failed';
+    _resolvedStatus = 'unauthenticated';
     clearArteCheckSessionPermissions();
     return 'unauthenticated';
   }
@@ -74,10 +77,12 @@ async function executeAuthInit(
       }
 
       _initStage = 'success';
+      _resolvedStatus = 'authenticated';
       return 'authenticated';
     } catch (err) {
       console.error('[ArteCheck SSO] Callback initialization failed:', err);
       _initStage = 'failed';
+      _resolvedStatus = 'error';
       clearArteCheckSessionPermissions();
       return 'error';
     }
@@ -88,6 +93,7 @@ async function executeAuthInit(
     const { data, error } = await client.auth.getSession();
     if (error || !data?.session) {
       _initStage = 'failed';
+      _resolvedStatus = 'unauthenticated';
       clearArteCheckSessionPermissions();
       return 'unauthenticated';
     }
@@ -95,10 +101,12 @@ async function executeAuthInit(
     // Re-bootstrap user context & restore permissions in memory
     await bootstrapUserContext(client, data.session);
     _initStage = 'success';
+    _resolvedStatus = 'authenticated';
     return 'authenticated';
   } catch (err) {
     console.error('[ArteCheck SSO] Active session bootstrap failed:', err);
     _initStage = 'failed';
+    _resolvedStatus = 'error';
     clearArteCheckSessionPermissions();
     return 'error';
   }
@@ -111,11 +119,23 @@ async function executeAuthInit(
  * Concurrent calls (such as React StrictMode double-mounting) share the same
  * running Promise, preventing duplicate exchange of one-time SSO codes and
  * spurious sign-out race conditions.
+ *
+ * If initialization has already succeeded in the current SPA lifecycle and no new SSO code is present,
+ * it returns the existing authenticated status without repeating destructive getSession checks.
  */
 export async function initializeAuthSession(
   client: SupabaseClient | null,
   customSearch?: string,
 ): Promise<AuthInitStatus> {
+  const hasNewCode = hasSSOCallbackCode(customSearch);
+
+  if (!hasNewCode && _initStage === 'success' && _resolvedStatus === 'authenticated') {
+    const currentPerms = getArteCheckSessionPermissions();
+    if (currentPerms && currentPerms.bootstrapped) {
+      return 'authenticated';
+    }
+  }
+
   if (_inFlightInit) {
     return _inFlightInit;
   }

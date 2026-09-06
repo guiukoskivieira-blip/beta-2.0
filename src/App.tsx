@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardOverview } from './components/DashboardOverview';
@@ -36,7 +36,7 @@ import { checkDimensionFixEligibility } from './services/dimensionFix';
 import { apiUrl } from './config/api';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
 import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X, Zap } from 'lucide-react';
-import { hasPermission, subscribeArteCheckPermissions } from './auth/arteCheckPermissions';
+import { hasPermission, subscribeArteCheckPermissions, getArteCheckSessionPermissions } from './auth/arteCheckPermissions';
 import { initializeAuthSession, type AuthInitStatus } from './auth/initAuthSession';
 import { getSupabaseClient } from './lib/supabaseClient';
 
@@ -89,39 +89,29 @@ export const App: React.FC = () => {
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
 
-  // RBAC & Auth state: strictly fail-closed (canCreate defaults to false)
+  // RBAC Single Source of Truth: directly derived from reactive in-memory permission store
+  const permissionState = useSyncExternalStore(
+    subscribeArteCheckPermissions,
+    getArteCheckSessionPermissions,
+    getArteCheckSessionPermissions,
+  );
+
+  const canCreate = Boolean(
+    permissionState?.bootstrapped && hasPermission('artecheck.analysis.create'),
+  );
+
   const [_authStatus, setAuthStatus] = useState<AuthInitStatus>('loading');
-  const [canCreate, setCanCreate] = useState<boolean>(false);
 
   useEffect(() => {
-    // 1. Reactive subscription to in-memory permission store updates
-    const unsubscribe = subscribeArteCheckPermissions((perms) => {
-      if (perms && perms.bootstrapped) {
-        setCanCreate(hasPermission('artecheck.analysis.create'));
-      } else {
-        setCanCreate(false);
-      }
-    });
-
-    // 2. Initialize SSO callback exchange or existing session bootstrap
+    // Initialize SSO callback exchange or existing session bootstrap
     const client = getSupabaseClient();
     initializeAuthSession(client)
       .then((status) => {
         setAuthStatus(status);
-        if (status === 'authenticated') {
-          setCanCreate(hasPermission('artecheck.analysis.create'));
-        } else {
-          setCanCreate(false);
-        }
       })
       .catch(() => {
         setAuthStatus('error');
-        setCanCreate(false);
       });
-
-    return () => {
-      unsubscribe();
-    };
   }, []);
 
   const storage = new LocalStorageProvider();

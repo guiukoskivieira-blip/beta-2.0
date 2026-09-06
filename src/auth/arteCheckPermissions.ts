@@ -1,4 +1,4 @@
-﻿// src/auth/arteCheckPermissions.ts
+// src/auth/arteCheckPermissions.ts
 // ---------------------------------------------------------------------------
 // In-memory permission store for the current SSO session.
 // NEVER persisted to localStorage, sessionStorage, or cookies.
@@ -52,12 +52,17 @@ export function setArteCheckSessionPermissions(perms: ArteCheckSessionPermission
 }
 
 /**
- * Returns the current in-memory permissions.
+ * Returns the current in-memory permissions snapshot.
  * Returns null if bootstrap has not been completed.
  */
 export function getArteCheckSessionPermissions(): ArteCheckSessionPermissions | null {
   return _store;
 }
+
+/**
+ * Snapshot getter alias for useSyncExternalStore.
+ */
+export const getArteCheckPermissionsSnapshot = getArteCheckSessionPermissions;
 
 /**
  * Clears the in-memory permissions.

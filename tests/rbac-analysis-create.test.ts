@@ -2,6 +2,10 @@
 // Comprehensive RBAC & Auth Initialization Concurrency & Integration Tests
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import React, { useSyncExternalStore } from 'react';
+import { renderToString } from 'react-dom/server';
+import { Sidebar } from '../src/components/Sidebar';
+import { DashboardOverview } from '../src/components/DashboardOverview';
 import {
   setArteCheckSessionPermissions,
   clearArteCheckSessionPermissions,
@@ -490,5 +494,171 @@ describe('3. Auth Events Lifecycle & PrexyonSSOProvider Coordination', () => {
     assert.equal(res2, 'authenticated');
     assert.equal(client.exchangeCallCount, 1);
     assert.equal(hasPermission('artecheck.analysis.create'), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. React DOM Rendering & useSyncExternalStore Integration Tests
+// ---------------------------------------------------------------------------
+describe('4. React DOM Rendering & useSyncExternalStore Single Source of Truth', () => {
+  beforeEach(() => {
+    clearArteCheckSessionPermissions();
+    resetAuthInitFlight();
+  });
+
+  function renderHarness(): string {
+    const TestAppHarness: React.FC = () => {
+      const permissionState = useSyncExternalStore(
+        subscribeArteCheckPermissions,
+        getArteCheckSessionPermissions,
+        getArteCheckSessionPermissions,
+      );
+      const canCreate = Boolean(
+        permissionState?.bootstrapped && hasPermission('artecheck.analysis.create'),
+      );
+      const disabledTabs = canCreate ? [] : ['files'];
+
+      return React.createElement(
+        'div',
+        null,
+        React.createElement(Sidebar, { activeTab: 'dashboard', disabledTabs }),
+        React.createElement(DashboardOverview, {
+          history: [],
+          onFileSelected: () => {},
+          onOpenHistory: () => {},
+          canCreate,
+        }),
+      );
+    };
+
+    return renderToString(React.createElement(TestAppHarness));
+  }
+
+  it('A) OWNER + StrictMode double mount: botão Nova análise ENABLED no DOM final', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    // Simula Mount 1
+    const s1 = await initializeAuthSession(client, '?code=owner-code');
+    assert.equal(s1, 'authenticated');
+
+    // Simula StrictMode Remount 2 (sem code na URL, reaproveitando status success)
+    const s2 = await initializeAuthSession(client, '');
+    assert.equal(s2, 'authenticated');
+    assert.equal(client.exchangeCallCount, 1, 'não deve repetir exchange no remount');
+
+    const html = renderHarness();
+    assert.match(html, /for="dashboard-upload"/, 'botão Nova análise deve estar ativo com label para upload');
+    assert.match(html, /id="dashboard-upload"/, 'input file deve estar presente');
+    assert.doesNotMatch(html, /Sem permissão para criar análises/, 'não deve ter título de bloqueio');
+    assert.doesNotMatch(html, /Você não tem permissão para criar novas análises/, 'não deve renderizar aviso de restrição');
+    assert.doesNotMatch(html, /Sem permissão para esta ação/, 'sidebar não deve ter bloqueio');
+  });
+
+  it('B) MEMBER view-only: botão Nova análise DISABLED no DOM final', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'member',
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    });
+
+    const status = await initializeAuthSession(client, '?code=member-code');
+    assert.equal(status, 'authenticated');
+
+    const html = renderHarness();
+    assert.match(html, /Sem permissão para criar análises/, 'botão do dashboard deve ter título de bloqueio');
+    assert.match(html, /Você não tem permissão para criar novas análises/, 'área de upload deve mostrar restrição');
+    assert.match(html, /Sem permissão para esta ação/, 'sidebar deve indicar bloqueio');
+    assert.doesNotMatch(html, /for="dashboard-upload"/, 'não deve renderizar label ativo');
+  });
+
+  it('C) Usuário com create explicit allow: botão ENABLED no DOM final', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'member',
+      overrides: [
+        { permission_definition_id: 'def-view', effect: 'allow' },
+        { permission_definition_id: 'def-create', effect: 'allow' },
+      ],
+    });
+
+    const status = await initializeAuthSession(client, '?code=allow-code');
+    assert.equal(status, 'authenticated');
+
+    const html = renderHarness();
+    assert.match(html, /for="dashboard-upload"/);
+    assert.doesNotMatch(html, /Você não tem permissão para criar novas análises/);
+  });
+
+  it('D) Fail-Closed / Bootstrap pendente: botão DISABLED no DOM inicial', () => {
+    // Sem chamar initializeAuthSession (estado inicial/pendente)
+    const html = renderHarness();
+    assert.match(html, /Sem permissão para criar análises/);
+    assert.match(html, /Sem permissão para esta ação/);
+  });
+
+  it('E) Falha de autenticação: botão DISABLED no DOM final', async () => {
+    const client = makeMockSupabaseClient({ exchangeFail: true });
+    const status = await initializeAuthSession(client, '?code=bad-code');
+    assert.equal(status, 'error');
+
+    const html = renderHarness();
+    assert.match(html, /Sem permissão para criar análises/);
+    assert.match(html, /Você não tem permissão para criar novas análises/);
+  });
+
+  it('F) SIGNED_OUT real: store limpa e botão torna-se DISABLED no DOM', async () => {
+    const client = makeMockSupabaseClient({ memberRole: 'owner' });
+    const ssoProvider = new PrexyonSSOProvider(client);
+    ssoProvider.onAuthStateChange?.(() => {});
+
+    await initializeAuthSession(client, '?code=owner-code');
+
+    let html = renderHarness();
+    assert.match(html, /for="dashboard-upload"/);
+
+    // Disparar SIGNED_OUT
+    client.triggerAuthEvent('SIGNED_OUT', null);
+
+    html = renderHarness();
+    assert.match(html, /Sem permissão para criar análises/);
+    assert.match(html, /Você não tem permissão para criar novas análises/);
+  });
+
+  it('G) Logout: reseta init stage para idle e limpa store', async () => {
+    const client = makeMockSupabaseClient({ memberRole: 'owner' });
+    const ssoProvider = new PrexyonSSOProvider(client);
+    await initializeAuthSession(client, '?code=owner-code');
+
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    await ssoProvider.signOut();
+
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+    assert.equal(getArteCheckSessionPermissions(), null);
+
+    const html = renderHarness();
+    assert.match(html, /Sem permissão para criar análises/);
+  });
+
+  it('J) Novo SSO após logout: pode inicializar novamente com sucesso', async () => {
+    const client = makeMockSupabaseClient({ memberRole: 'owner' });
+    const ssoProvider = new PrexyonSSOProvider(client);
+
+    // 1. Primeiro SSO
+    await initializeAuthSession(client, '?code=code-1');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    // 2. Logout
+    await ssoProvider.signOut();
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+
+    // 3. Segundo SSO com novo code
+    const s2 = await initializeAuthSession(client, '?code=code-2');
+    assert.equal(s2, 'authenticated');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    const html = renderHarness();
+    assert.match(html, /for="dashboard-upload"/);
   });
 });
