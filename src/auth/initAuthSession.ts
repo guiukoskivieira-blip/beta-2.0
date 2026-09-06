@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { PrexyonSSOProvider } from './PrexyonSSOProvider';
 import { bootstrapUserContext } from './bootstrapUserContext';
 import { clearArteCheckSessionPermissions, getArteCheckSessionPermissions } from './arteCheckPermissions';
+import { observeAuthCallback, observeUrlCleanup } from './authDiagnostics';
 
 export type AuthInitStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 export type AuthInitStage = 'idle' | 'pending' | 'success' | 'failed';
@@ -48,6 +49,7 @@ async function executeAuthInit(
   customSearch?: string,
 ): Promise<AuthInitStatus> {
   _initStage = 'pending';
+  observeAuthCallback(hasSSOCallbackCode(customSearch));
   if (!client) {
     _initStage = 'failed';
     _resolvedStatus = 'unauthenticated';
@@ -80,12 +82,15 @@ async function executeAuthInit(
     // URL cleanup is navigation hygiene, not authentication. A History API
     // failure must never revoke an already bootstrapped session/RBAC state.
     if (typeof window !== 'undefined' && window.history && window.location) {
+      observeUrlCleanup(false);
       try {
         const cleanUrl = new URL(window.location.href);
         cleanUrl.searchParams.delete('code');
         cleanUrl.searchParams.delete('sso_code');
         const relativeUrl = `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}` || '/';
         window.history.replaceState(window.history.state, '', relativeUrl);
+        const remaining = new URLSearchParams(window.location.search);
+        observeUrlCleanup(!remaining.has('code') && !remaining.has('sso_code'));
       } catch {
         // Keep the authenticated session fail-safe; a later navigation/reload
         // can clean the address without changing authorization.

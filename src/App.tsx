@@ -39,6 +39,7 @@ import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight,
 import { hasPermission, subscribeArteCheckPermissions, getArteCheckSessionPermissions } from './auth/arteCheckPermissions';
 import { initializeAuthSession, type AuthInitStatus } from './auth/initAuthSession';
 import { getSupabaseClient } from './lib/supabaseClient';
+import { AuthDiagnostics } from './components/AuthDiagnostics';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
@@ -1212,6 +1213,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
       {/* Top Header */}
       <Header />
+      <AuthDiagnostics bootstrapped={Boolean(permissionState?.bootstrapped)} isOwner={Boolean(permissionState?.isOwner)} hasCreate={canCreate} />
 
       {/* Main Layout Area */}
       <div className="flex flex-1 min-w-0">
