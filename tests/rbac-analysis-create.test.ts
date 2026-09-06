@@ -1,4 +1,4 @@
-﻿// tests/rbac-analysis-create.test.ts
+// tests/rbac-analysis-create.test.ts
 // Comprehensive RBAC & Auth Initialization Concurrency & Integration Tests
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,6 +11,7 @@ import {
 } from '../src/auth/arteCheckPermissions';
 import { resolveArteCheckPermissions } from '../src/services/resolveArteCheckPermissions';
 import { initializeAuthSession, resetAuthInitFlight } from '../src/auth/initAuthSession';
+import { PrexyonSSOProvider } from '../src/auth/PrexyonSSOProvider';
 
 // ---------------------------------------------------------------------------
 // 1. In-Memory Store & hasPermission (Unit Tests)
@@ -104,6 +105,152 @@ describe('1. arteCheckPermissions — In-Memory Store & Reactivity', () => {
   });
 });
 
+function makeMockSupabaseClient(opts: {
+  hasSession?: boolean;
+  sessionUser?: { id: string; email?: string } | null;
+  memberRole?: string;
+  isMemberActive?: boolean;
+  isOrgActive?: boolean;
+  effectiveProducts?: string[];
+  productAccessEnabled?: boolean;
+  permDefs?: Array<{ id: string; permission_key: string }>;
+  userRole?: { role_id: string } | null;
+  rolePerms?: Array<{ permission_definition_id: string }>;
+  overrides?: Array<{ permission_definition_id: string; effect: string }>;
+  exchangeFail?: boolean;
+  bootstrapFail?: boolean;
+}) {
+  const {
+    hasSession = true,
+    sessionUser = { id: 'user-member-1', email: 'member@empresa.com' },
+    memberRole = 'member',
+    isMemberActive = true,
+    isOrgActive = true,
+    effectiveProducts = ['artecheck'],
+    productAccessEnabled = true,
+    permDefs = [
+      { id: 'def-view', permission_key: 'artecheck.analysis.view' },
+      { id: 'def-create', permission_key: 'artecheck.analysis.create' },
+    ],
+    userRole = null,
+    rolePerms = [],
+    overrides = [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    exchangeFail = false,
+    bootstrapFail = false,
+  } = opts;
+
+  let signedOut = false;
+  let exchangeCallCount = 0;
+
+  let authStateListener: ((event: string, session: any) => void) | null = null;
+
+  return {
+    get signedOut() {
+      return signedOut;
+    },
+    get exchangeCallCount() {
+      return exchangeCallCount;
+    },
+    triggerAuthEvent(event: string, session: any) {
+      if (authStateListener) {
+        authStateListener(event, session);
+      }
+    },
+    functions: {
+      invoke: async (fn: string, _opts: any) => {
+        if (fn === 'prexyon-sso-exchange') {
+          exchangeCallCount++;
+          // Simulate slight network delay to test concurrency
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        if (exchangeFail) return { data: null, error: new Error('Exchange failed') };
+        return { data: { token_hash: 'hash-abc', verification_type: 'email' }, error: null };
+      },
+    },
+    auth: {
+      verifyOtp: async () => {
+        if (exchangeFail) return { data: null, error: new Error('OTP failed') };
+        return {
+          data: { session: { access_token: 'valid-token', user: sessionUser } },
+          error: null,
+        };
+      },
+      getSession: async () => {
+        if (!hasSession) return { data: { session: null }, error: null };
+        return {
+          data: { session: { access_token: 'valid-token', user: sessionUser } },
+          error: null,
+        };
+      },
+      getUser: async () => ({ data: { user: sessionUser }, error: null }),
+      signOut: async () => {
+        signedOut = true;
+        return { error: null };
+      },
+      onAuthStateChange: (callback: any) => {
+        authStateListener = callback;
+        return {
+          data: {
+            subscription: {
+              unsubscribe: () => {
+                authStateListener = null;
+              },
+            },
+          },
+        };
+      },
+    },
+    rpc: async (fn: string, _args: any) => {
+      if (fn === 'prexyon_get_organization_entitlements') {
+        if (bootstrapFail) return { data: null, error: new Error('RPC error') };
+        return { data: { effective_products: effectiveProducts }, error: null };
+      }
+      return { data: null, error: null };
+    },
+    from: (table: string) => {
+      const createBuilder = () => {
+        const builder: any = {
+          select: () => builder,
+          eq: () => builder,
+          in: () => builder,
+          maybeSingle: async () => {
+            if (table === 'organization_members') {
+              if (bootstrapFail) return { data: null, error: new Error('DB error') };
+              return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
+            }
+            if (table === 'prexyon_user_product_roles') {
+              return { data: userRole, error: null };
+            }
+            return { data: null, error: null };
+          },
+          single: async () => {
+            if (table === 'organization_members') {
+              if (bootstrapFail) return { data: null, error: new Error('DB error') };
+              return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
+            }
+            if (table === 'organizations') {
+              return { data: { id: 'org-1', is_active: isOrgActive }, error: null };
+            }
+            if (table === 'organization_member_product_access') {
+              return { data: { product_key: 'artecheck', is_enabled: productAccessEnabled }, error: null };
+            }
+            return { data: null, error: null };
+          },
+          then: (onfulfilled: any, onrejected: any) => {
+            let resultData: any = null;
+            if (table === 'prexyon_permission_definitions') resultData = permDefs;
+            else if (table === 'prexyon_role_permissions') resultData = rolePerms;
+            else if (table === 'prexyon_user_permission_overrides') resultData = overrides;
+            return Promise.resolve({ data: resultData, error: null }).then(onfulfilled, onrejected);
+          },
+        };
+        return builder;
+      };
+      return createBuilder();
+    },
+  } as any;
+}
+
 // ---------------------------------------------------------------------------
 // 2. Integration: initializeAuthSession & Auth Lifecycle Wiring
 // ---------------------------------------------------------------------------
@@ -112,133 +259,6 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização, Concorrên
     clearArteCheckSessionPermissions();
     resetAuthInitFlight();
   });
-
-  function makeMockSupabaseClient(opts: {
-    hasSession?: boolean;
-    sessionUser?: { id: string; email?: string } | null;
-    memberRole?: string;
-    isMemberActive?: boolean;
-    isOrgActive?: boolean;
-    effectiveProducts?: string[];
-    productAccessEnabled?: boolean;
-    permDefs?: Array<{ id: string; permission_key: string }>;
-    userRole?: { role_id: string } | null;
-    rolePerms?: Array<{ permission_definition_id: string }>;
-    overrides?: Array<{ permission_definition_id: string; effect: string }>;
-    exchangeFail?: boolean;
-    bootstrapFail?: boolean;
-  }) {
-    const {
-      hasSession = true,
-      sessionUser = { id: 'user-member-1', email: 'member@empresa.com' },
-      memberRole = 'member',
-      isMemberActive = true,
-      isOrgActive = true,
-      effectiveProducts = ['artecheck'],
-      productAccessEnabled = true,
-      permDefs = [
-        { id: 'def-view', permission_key: 'artecheck.analysis.view' },
-        { id: 'def-create', permission_key: 'artecheck.analysis.create' },
-      ],
-      userRole = null,
-      rolePerms = [],
-      overrides = [{ permission_definition_id: 'def-view', effect: 'allow' }],
-      exchangeFail = false,
-      bootstrapFail = false,
-    } = opts;
-
-    let signedOut = false;
-    let exchangeCallCount = 0;
-
-    return {
-      get signedOut() {
-        return signedOut;
-      },
-      get exchangeCallCount() {
-        return exchangeCallCount;
-      },
-      functions: {
-        invoke: async (fn: string, _opts: any) => {
-          if (fn === 'prexyon-sso-exchange') {
-            exchangeCallCount++;
-            // Simulate slight network delay to test concurrency
-            await new Promise((r) => setTimeout(r, 10));
-          }
-          if (exchangeFail) return { data: null, error: new Error('Exchange failed') };
-          return { data: { token_hash: 'hash-abc', verification_type: 'email' }, error: null };
-        },
-      },
-      auth: {
-        verifyOtp: async () => {
-          if (exchangeFail) return { data: null, error: new Error('OTP failed') };
-          return {
-            data: { session: { access_token: 'valid-token', user: sessionUser } },
-            error: null,
-          };
-        },
-        getSession: async () => {
-          if (!hasSession) return { data: { session: null }, error: null };
-          return {
-            data: { session: { access_token: 'valid-token', user: sessionUser } },
-            error: null,
-          };
-        },
-        getUser: async () => ({ data: { user: sessionUser }, error: null }),
-        signOut: async () => {
-          signedOut = true;
-          return { error: null };
-        },
-      },
-      rpc: async (fn: string, _args: any) => {
-        if (fn === 'prexyon_get_organization_entitlements') {
-          if (bootstrapFail) return { data: null, error: new Error('RPC error') };
-          return { data: { effective_products: effectiveProducts }, error: null };
-        }
-        return { data: null, error: null };
-      },
-      from: (table: string) => {
-        const createBuilder = () => {
-          const builder: any = {
-            select: () => builder,
-            eq: () => builder,
-            in: () => builder,
-            maybeSingle: async () => {
-              if (table === 'organization_members') {
-                if (bootstrapFail) return { data: null, error: new Error('DB error') };
-                return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
-              }
-              if (table === 'prexyon_user_product_roles') {
-                return { data: userRole, error: null };
-              }
-              return { data: null, error: null };
-            },
-            single: async () => {
-              if (table === 'organization_members') {
-                if (bootstrapFail) return { data: null, error: new Error('DB error') };
-                return { data: { organization_id: 'org-1', role: memberRole, is_active: isMemberActive }, error: null };
-              }
-              if (table === 'organizations') {
-                return { data: { id: 'org-1', is_active: isOrgActive }, error: null };
-              }
-              if (table === 'organization_member_product_access') {
-                return { data: { product_key: 'artecheck', is_enabled: productAccessEnabled }, error: null };
-              }
-              return { data: null, error: null };
-            },
-            then: (onfulfilled: any, onrejected: any) => {
-              let resultData: any = null;
-              if (table === 'prexyon_permission_definitions') resultData = permDefs;
-              else if (table === 'prexyon_role_permissions') resultData = rolePerms;
-              else if (table === 'prexyon_user_permission_overrides') resultData = overrides;
-              return Promise.resolve({ data: resultData, error: null }).then(onfulfilled, onrejected);
-            },
-          };
-          return builder;
-        };
-        return createBuilder();
-      },
-    } as any;
-  }
 
   it('A) Concorrência / Single-Flight: duas chamadas simultâneas executam exchange UMA vez e preservam sessão', async () => {
     const client = makeMockSupabaseClient({
@@ -308,7 +328,7 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização, Concorrên
     assert.equal(hasPermission('artecheck.analysis.create'), false, 'em falha de bootstrap, canCreate é FALSE');
   });
 
-  it('H) Reload com sessão Supabase existente: bootstrap re-executado e permissões restauradas em memória', async () => {
+  it('G) Reload com sessão Supabase existente: bootstrap re-executado e permissões restauradas em memória', async () => {
     const client = makeMockSupabaseClient({
       hasSession: true,
       memberRole: 'member',
@@ -323,5 +343,152 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização, Concorrên
     assert.notEqual(perms, null);
     assert.equal(hasPermission('artecheck.analysis.view'), true);
     assert.equal(hasPermission('artecheck.analysis.create'), false, 'após reload, MEMBER continua sem create');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Supabase Auth Events & PrexyonSSOProvider Integration
+// ---------------------------------------------------------------------------
+describe('3. Auth Events Lifecycle & PrexyonSSOProvider Coordination', () => {
+  beforeEach(() => {
+    clearArteCheckSessionPermissions();
+    resetAuthInitFlight();
+  });
+
+  it('A) INITIAL_SESSION com session=null durante SSO init pendente: NÃO limpa permissões', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const ssoProvider = new PrexyonSSOProvider(client);
+    ssoProvider.onAuthStateChange?.(() => {});
+
+    // Iniciar auth init com code no search (init pendente)
+    const initPromise = initializeAuthSession(client, '?code=owner-code');
+
+    // Durante o init in-flight, Supabase dispara INITIAL_SESSION com session=null
+    client.triggerAuthEvent('INITIAL_SESSION', null);
+
+    const status = await initPromise;
+    assert.equal(status, 'authenticated');
+
+    // Store deve permanecer intacta com isOwner=true e canCreate=true
+    const perms = getArteCheckSessionPermissions();
+    assert.notEqual(perms, null);
+    assert.equal(perms?.isOwner, true);
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'OWNER mantém canCreate=true mesmo com INITIAL_SESSION null');
+  });
+
+  it('B) SSO conclui OWNER e evento inicial atrasado: não reverte canCreate para false', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const ssoProvider = new PrexyonSSOProvider(client);
+    ssoProvider.onAuthStateChange?.(() => {});
+
+    const status = await initializeAuthSession(client, '?code=owner-code');
+    assert.equal(status, 'authenticated');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    // Evento inicial atrasado após sucesso
+    client.triggerAuthEvent('INITIAL_SESSION', null);
+
+    // Store deve continuar preservada pois init foi success
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+  });
+
+  it('C) MEMBER view-only: canCreate=false mesmo com ciclo reativo de permissões', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'member',
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    });
+
+    const status = await initializeAuthSession(client, '?code=member-code');
+    assert.equal(status, 'authenticated');
+
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+  });
+
+  it('D) SIGNED_OUT real: store limpa e canCreate torna-se FALSE imediatamente', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const ssoProvider = new PrexyonSSOProvider(client);
+    ssoProvider.onAuthStateChange?.(() => {});
+
+    await initializeAuthSession(client, '?code=owner-code');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    // Disparar SIGNED_OUT real
+    client.triggerAuthEvent('SIGNED_OUT', null);
+
+    assert.equal(getArteCheckSessionPermissions(), null);
+    assert.equal(hasPermission('artecheck.analysis.create'), false, 'após SIGNED_OUT, create é false');
+  });
+
+  it('D2) signOut() explícito via PrexyonSSOProvider: limpa store e chama supabase signOut', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const ssoProvider = new PrexyonSSOProvider(client);
+    await initializeAuthSession(client, '?code=owner-code');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+
+    await ssoProvider.signOut();
+
+    assert.equal(getArteCheckSessionPermissions(), null);
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+    assert.equal(client.signedOut, true);
+  });
+
+  it('E) Falha real do callback SSO: fail-closed e store limpa', async () => {
+    const client = makeMockSupabaseClient({ exchangeFail: true });
+    const ssoProvider = new PrexyonSSOProvider(client);
+    ssoProvider.onAuthStateChange?.(() => {});
+
+    const status = await initializeAuthSession(client, '?code=bad-code');
+    assert.equal(status, 'error');
+    assert.equal(getArteCheckSessionPermissions(), null);
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+    assert.equal(client.signedOut, true);
+  });
+
+  it('F) Reload com sessão válida: bootstrap executa e autorização é correta', async () => {
+    const client = makeMockSupabaseClient({
+      hasSession: true,
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const status = await initializeAuthSession(client, '');
+    assert.equal(status, 'authenticated');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+  });
+
+  it('G) Dupla inicialização StrictMode: continua single-flight e exchange só uma vez', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const [res1, res2] = await Promise.all([
+      initializeAuthSession(client, '?code=strict-code'),
+      initializeAuthSession(client, '?code=strict-code'),
+    ]);
+
+    assert.equal(res1, 'authenticated');
+    assert.equal(res2, 'authenticated');
+    assert.equal(client.exchangeCallCount, 1);
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
   });
 });

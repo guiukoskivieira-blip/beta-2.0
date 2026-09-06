@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../lib/supabaseClient';
 import { bootstrapUserContext } from './bootstrapUserContext';
 import { exchangePrexyonCode } from '../services/prexyonSsoService';
 import { clearArteCheckSessionPermissions } from './arteCheckPermissions';
+import { isAuthInitPending, hasSSOCallbackCode, getAuthInitStage, resetAuthInitFlight } from './initAuthSession';
 
 /**
  * AuthProvider that handles Prexyon SSO V2 flow.
@@ -67,24 +68,60 @@ export class PrexyonSSOProvider implements AuthProvider {
   }
 
   async signOut(): Promise<void> {
-    if (!this.client) return;
+    resetAuthInitFlight();
     clearArteCheckSessionPermissions();
-    await this.client.auth.signOut();
+    if (this.client) {
+      await this.client.auth.signOut();
+    }
   }
 
   onAuthStateChange?(callback: (session: UserSession | null) => void): () => void {
     if (!this.client) return () => {};
-    const { data } = this.client.auth.onAuthStateChange((_event, session) => {
+    const { data } = this.client.auth.onAuthStateChange((event: string, session: any) => {
       (async () => {
-        if (!session) {
-          clearArteCheckSessionPermissions();
+        switch (event) {
+          case 'INITIAL_SESSION': {
+            if (!session) {
+              // During initial load, if SSO callback or auth initialization is in-flight,
+              // do not wipe permissions prematurely.
+              if (isAuthInitPending() || hasSSOCallbackCode()) {
+                break;
+              }
+              // If initialization completed with no session or was marked failed, fail closed
+              if (getAuthInitStage() === 'failed' || getAuthInitStage() === 'idle') {
+                clearArteCheckSessionPermissions();
+              }
+            }
+            break;
+          }
+          case 'SIGNED_OUT': {
+            // Explicit or confirmed remote sign out: clear RBAC immediately
+            resetAuthInitFlight();
+            clearArteCheckSessionPermissions();
+            break;
+          }
+          case 'SIGNED_IN':
+          case 'TOKEN_REFRESHED':
+          case 'USER_UPDATED': {
+            if (!session) {
+              clearArteCheckSessionPermissions();
+            }
+            break;
+          }
+          default: {
+            if (!session && !isAuthInitPending()) {
+              clearArteCheckSessionPermissions();
+            }
+            break;
+          }
         }
+
         const user = session ? await this.getCurrentUser() : null;
         callback(user ? { user, accessToken: session.access_token } : null);
       })();
     });
     return () => {
-      data.subscription.unsubscribe();
+      data?.subscription?.unsubscribe();
     };
   }
 }
