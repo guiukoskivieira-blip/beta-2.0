@@ -36,6 +36,7 @@ import { checkDimensionFixEligibility } from './services/dimensionFix';
 import { apiUrl } from './config/api';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from './services/reportPdfGenerator';
 import { Download, RotateCcw, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Check, X, Zap } from 'lucide-react';
+import { hasPermission, getArteCheckSessionPermissions } from './auth/arteCheckPermissions';
 
 export const App: React.FC = () => {
   const [selectedProfile, setSelectedProfile] = useState<ProductionProfile>(COMMERCIAL_PRINT_300DPI_PROFILE);
@@ -86,6 +87,20 @@ export const App: React.FC = () => {
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
 
+  // RBAC: read ArteCheck permissions from in-memory store (populated by Prexyon SSO bootstrap).
+  const [canCreate, setCanCreate] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Read from the in-memory store (never from localStorage/sessionStorage)
+    const perms = getArteCheckSessionPermissions();
+    if (perms) {
+      setCanCreate(hasPermission('artecheck.analysis.create'));
+    } else {
+      // No bootstrap yet (e.g., LocalDev mode) — default to allow for dev/non-SSO flows
+      setCanCreate(true);
+    }
+  }, []);
+
   const storage = new LocalStorageProvider();
 
   const loadHistory = useCallback(() => {
@@ -116,6 +131,8 @@ export const App: React.FC = () => {
   }, [currentAnalysis, activeTab]);
 
   const handleFileSelected = (file: File) => {
+    // RBAC: fail-closed — reject if user does not have analysis.create permission
+    if (!canCreate) return;
     setOriginalFile(file);
     setWorkingFile(file);
     setWorkingPdfBlob(null);
@@ -1170,8 +1187,13 @@ export const App: React.FC = () => {
   };
 
   const handleSidebarTabSelect = (tab: string) => {
+    // RBAC: block navigation to 'files' (Nova análise) without create permission
+    if (tab === 'files' && !canCreate) return;
     setActiveTab(tab);
   };
+
+  // Tabs that are RBAC-disabled for the current user
+  const disabledTabs = canCreate ? [] : ['files'];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
@@ -1184,6 +1206,7 @@ export const App: React.FC = () => {
         <Sidebar
           activeTab={activeTab}
           onSelectTab={handleSidebarTabSelect}
+          disabledTabs={disabledTabs}
         />
 
         {/* Center Main Stage */}
@@ -1431,7 +1454,7 @@ export const App: React.FC = () => {
               />
             </div>
           ) : (
-            <DashboardOverview history={historyList} onFileSelected={handleFileSelected} onOpenHistory={() => setActiveTab('history')} />
+            <DashboardOverview history={historyList} onFileSelected={handleFileSelected} onOpenHistory={() => setActiveTab('history')} canCreate={canCreate} />
           )}
         </main>
       </div>

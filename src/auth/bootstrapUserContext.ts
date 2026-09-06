@@ -1,10 +1,11 @@
-// src/auth/bootstrapUserContext.ts
+﻿// src/auth/bootstrapUserContext.ts
 import type { SupabaseClient, Session } from '@supabase/supabase-js';
 import { resolveArteCheckPermissions } from '../services/resolveArteCheckPermissions';
+import { setArteCheckSessionPermissions } from './arteCheckPermissions';
 
 /**
- * Performs the post‑SSO bootstrap validation.
- * Steps (must fail‑close on any error):
+ * Performs the post-SSO bootstrap validation.
+ * Steps (fail-closed on any error):
  *   1. Verify that a user is authenticated (session.user).
  *   2. Retrieve the organization membership for that user.
  *   3. Ensure the membership is active (not blocked).
@@ -13,14 +14,15 @@ import { resolveArteCheckPermissions } from '../services/resolveArteCheckPermiss
  *      `effective_products` includes "artecheck".
  *   6. Verify `organization_member_product_access` contains a record with
  *      `product_key = 'artecheck'` and `is_enabled = true` for the user.
- *   7. Resolve ArteCheck permissions via `resolveArteCheckPermissions`.
+ *   7. Resolve ArteCheck permissions via `resolveArteCheckPermissions` and
+ *      store them in the in-memory permission store.
  *
  * On any failure the function throws, allowing the caller to perform a
- * fail‑closed sign‑out.
+ * fail-closed sign-out.
  */
 export async function bootstrapUserContext(
   client: SupabaseClient,
-  session: Session
+  session: Session,
 ): Promise<void> {
   // 1. User existence
   const user = session.user;
@@ -38,7 +40,7 @@ export async function bootstrapUserContext(
     throw new Error('Bootstrap failed: organization membership not found');
   }
 
-  // 3. Membership active check (assume column `is_active` boolean)
+  // 3. Membership active check
   if (!(member as any).is_active) {
     throw new Error('Bootstrap failed: inactive organization membership');
   }
@@ -85,6 +87,7 @@ export async function bootstrapUserContext(
     throw new Error('Bootstrap failed: artecheck product access disabled');
   }
 
-  // 7. Permissions resolution – will throw if not resolved
-  await resolveArteCheckPermissions(client, user.id, orgId);
+  // 7. Resolve and store permissions in memory (no localStorage/sessionStorage)
+  const perms = await resolveArteCheckPermissions(client, user.id, orgId);
+  setArteCheckSessionPermissions(perms);
 }

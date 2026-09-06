@@ -1,5 +1,5 @@
-import React from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, FilePlus2, Files, XCircle, ChevronRight } from 'lucide-react';
+﻿import React from 'react';
+import { AlertTriangle, CheckCircle2, Clock3, FilePlus2, Files, XCircle, ChevronRight, Lock } from 'lucide-react';
 import type { AnalysisRecordSummary } from '../domain/beta';
 import { UploadZone } from './UploadZone';
 
@@ -7,9 +7,11 @@ interface DashboardOverviewProps {
   history: AnalysisRecordSummary[];
   onFileSelected: (file: File) => void;
   onOpenHistory: () => void;
+  /** RBAC: whether the current user has artecheck.analysis.create permission. */
+  canCreate: boolean;
 }
 
-export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ history, onFileSelected, onOpenHistory }) => {
+export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ history, onFileSelected, onOpenHistory, canCreate }) => {
   const total = history.length;
   const ready = history.filter((item) => item.status === 'approved').length;
   const review = history.filter((item) => item.status === 'review').length;
@@ -31,6 +33,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ history, o
     red: 'text-red-700 bg-red-100 border-red-500',
   };
 
+  /** Guard: only call onFileSelected if user has create permission. */
+  const handleFileSelectedGuarded = (file: File) => {
+    if (!canCreate) return; // fail-closed: discard silently
+    onFileSelected(file);
+  };
+
   return (
     <div className="space-y-7 animate-in fade-in duration-200">
       <section className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -39,16 +47,41 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ history, o
           <p className="mt-2 text-sm sm:text-base font-medium text-slate-500">Verifique seus arquivos antes de enviar para a produção.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
-          <label htmlFor="dashboard-upload" className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-700 to-purple-600 px-7 text-sm font-bold text-white shadow-lg shadow-violet-600/20 transition hover:-translate-y-0.5">
-            <FilePlus2 className="h-5 w-5" /> Nova análise
-          </label>
+          {canCreate ? (
+            <label
+              htmlFor="dashboard-upload"
+              className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-700 to-purple-600 px-7 text-sm font-bold text-white shadow-lg shadow-violet-600/20 transition hover:-translate-y-0.5"
+            >
+              <FilePlus2 className="h-5 w-5" /> Nova análise
+            </label>
+          ) : (
+            <div
+              title="Sem permissão para criar análises"
+              className="inline-flex min-h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-slate-200 px-7 text-sm font-bold text-slate-400 select-none"
+            >
+              <Lock className="h-4 w-4" /> Nova análise
+            </div>
+          )}
           <button type="button" onClick={onOpenHistory} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 border-violet-600 bg-white px-7 text-sm font-bold text-violet-700 transition hover:bg-violet-50">
             <Clock3 className="h-5 w-5" /> Ver histórico
           </button>
         </div>
       </section>
 
-      <input id="dashboard-upload" type="file" accept="application/pdf,.pdf" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) onFileSelected(file); event.currentTarget.value = ''; }} />
+      {/* Hidden file input: only functional when canCreate */}
+      {canCreate && (
+        <input
+          id="dashboard-upload"
+          type="file"
+          accept="application/pdf,.pdf"
+          className="sr-only"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) handleFileSelectedGuarded(file);
+            event.currentTarget.value = '';
+          }}
+        />
+      )}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(({ label, value, icon: Icon, tone }) => (
@@ -90,7 +123,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ history, o
       </section>
 
       <section className="rounded-2xl border border-violet-100 bg-white p-4 shadow-sm">
-        <UploadZone onFileSelected={onFileSelected} />
+        {canCreate ? (
+          <UploadZone onFileSelected={handleFileSelectedGuarded} />
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-3 py-10 text-center text-slate-500">
+            <Lock className="h-8 w-8 text-slate-300" />
+            <p className="text-sm font-semibold">Acesso restrito</p>
+            <p className="text-xs text-slate-400">Você não tem permissão para criar novas análises.</p>
+          </div>
+        )}
       </section>
     </div>
   );
