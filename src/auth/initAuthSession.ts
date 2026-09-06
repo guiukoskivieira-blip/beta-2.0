@@ -6,21 +6,16 @@ import { clearArteCheckSessionPermissions } from './arteCheckPermissions';
 
 export type AuthInitStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 
+let _inFlightInit: Promise<AuthInitStatus> | null = null;
+
 /**
- * Initializes the authentication session and resolves in-memory ArteCheck permissions.
- *
- * Scenarios:
- * 1. SSO callback URL (/auth/prexyon?code=... or ?code=... / ?sso_code=...):
- *    - Extracts code without logging sensitive data.
- *    - Invokes PrexyonSSOProvider.handleSSOCallback (exchange -> verifyOtp -> bootstrapUserContext).
- *    - Removes query parameters from the URL via replaceState on success.
- * 2. Existing active session (reload / re-entry without code):
- *    - Fetches official session from Supabase Auth.
- *    - Re-executes bootstrapUserContext to re-populate in-memory permissions.
- * 3. No session / error:
- *    - Calls clearArteCheckSessionPermissions() ensuring strict fail-closed state.
+ * Resets the in-flight lock (used primarily in test suites).
  */
-export async function initializeAuthSession(
+export function resetAuthInitFlight(): void {
+  _inFlightInit = null;
+}
+
+async function executeAuthInit(
   client: SupabaseClient | null,
   customSearch?: string,
 ): Promise<AuthInitStatus> {
@@ -74,4 +69,31 @@ export async function initializeAuthSession(
     clearArteCheckSessionPermissions();
     return 'error';
   }
+}
+
+/**
+ * Initializes the authentication session and resolves in-memory ArteCheck permissions.
+ *
+ * Implements a Single-Flight / In-Flight lock in memory:
+ * Concurrent calls (such as React StrictMode double-mounting) share the same
+ * running Promise, preventing duplicate exchange of one-time SSO codes and
+ * spurious sign-out race conditions.
+ */
+export async function initializeAuthSession(
+  client: SupabaseClient | null,
+  customSearch?: string,
+): Promise<AuthInitStatus> {
+  if (_inFlightInit) {
+    return _inFlightInit;
+  }
+
+  _inFlightInit = (async () => {
+    try {
+      return await executeAuthInit(client, customSearch);
+    } finally {
+      _inFlightInit = null;
+    }
+  })();
+
+  return _inFlightInit;
 }

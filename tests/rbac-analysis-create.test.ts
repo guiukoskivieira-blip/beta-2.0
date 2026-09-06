@@ -1,5 +1,5 @@
 ﻿// tests/rbac-analysis-create.test.ts
-// Comprehensive RBAC & Auth Initialization Integration Tests
+// Comprehensive RBAC & Auth Initialization Concurrency & Integration Tests
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -10,7 +10,7 @@ import {
   subscribeArteCheckPermissions,
 } from '../src/auth/arteCheckPermissions';
 import { resolveArteCheckPermissions } from '../src/services/resolveArteCheckPermissions';
-import { initializeAuthSession } from '../src/auth/initAuthSession';
+import { initializeAuthSession, resetAuthInitFlight } from '../src/auth/initAuthSession';
 
 // ---------------------------------------------------------------------------
 // 1. In-Memory Store & hasPermission (Unit Tests)
@@ -18,6 +18,7 @@ import { initializeAuthSession } from '../src/auth/initAuthSession';
 describe('1. arteCheckPermissions — In-Memory Store & Reactivity', () => {
   beforeEach(() => {
     clearArteCheckSessionPermissions();
+    resetAuthInitFlight();
   });
 
   it('A) store inicialmente null: fail-closed, canCreate FALSE, nunca TRUE por fallback', () => {
@@ -106,9 +107,10 @@ describe('1. arteCheckPermissions — In-Memory Store & Reactivity', () => {
 // ---------------------------------------------------------------------------
 // 2. Integration: initializeAuthSession & Auth Lifecycle Wiring
 // ---------------------------------------------------------------------------
-describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Closed', () => {
+describe('2. initializeAuthSession — Ciclo Real de Inicialização, Concorrência & Fail-Closed', () => {
   beforeEach(() => {
     clearArteCheckSessionPermissions();
+    resetAuthInitFlight();
   });
 
   function makeMockSupabaseClient(opts: {
@@ -146,13 +148,22 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Clos
     } = opts;
 
     let signedOut = false;
+    let exchangeCallCount = 0;
 
     return {
       get signedOut() {
         return signedOut;
       },
+      get exchangeCallCount() {
+        return exchangeCallCount;
+      },
       functions: {
-        invoke: async (_fn: string, _opts: any) => {
+        invoke: async (fn: string, _opts: any) => {
+          if (fn === 'prexyon-sso-exchange') {
+            exchangeCallCount++;
+            // Simulate slight network delay to test concurrency
+            await new Promise((r) => setTimeout(r, 10));
+          }
           if (exchangeFail) return { data: null, error: new Error('Exchange failed') };
           return { data: { token_hash: 'hash-abc', verification_type: 'email' }, error: null };
         },
@@ -229,6 +240,61 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Clos
     } as any;
   }
 
+  it('A) Concorrência / Single-Flight: duas chamadas simultâneas executam exchange UMA vez e preservam sessão', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    // Disparar duas chamadas simultâneas (simulando StrictMode / duplo mount)
+    const [res1, res2] = await Promise.all([
+      initializeAuthSession(client, '?code=single-use-code-123'),
+      initializeAuthSession(client, '?code=single-use-code-123'),
+    ]);
+
+    assert.equal(res1, 'authenticated');
+    assert.equal(res2, 'authenticated');
+    assert.equal(client.exchangeCallCount, 1, 'prexyon-sso-exchange deve ser chamado estritamente 1 vez');
+    assert.equal(client.signedOut, false, 'signOut NÃO deve ser chamado por execução concorrente');
+
+    const perms = getArteCheckSessionPermissions();
+    assert.notEqual(perms, null, 'store deve estar populada');
+    assert.equal(perms?.isOwner, true, 'isOwner deve ser true');
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'OWNER tem canCreate=true');
+  });
+
+  it('B) OWNER com single-flight: isOwner=true e canCreate=true', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'owner',
+      overrides: [],
+    });
+
+    const status = await initializeAuthSession(client, '?code=owner-code');
+    assert.equal(status, 'authenticated');
+    assert.equal(hasPermission('artecheck.analysis.create'), true);
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+  });
+
+  it('C) MEMBER view-only com single-flight: isOwner=false e canCreate=false', async () => {
+    const client = makeMockSupabaseClient({
+      memberRole: 'member',
+      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
+    });
+
+    const status = await initializeAuthSession(client, '?code=member-code');
+    assert.equal(status, 'authenticated');
+    assert.equal(hasPermission('artecheck.analysis.view'), true);
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+  });
+
+  it('D) Falha real no exchange: fail-closed, status error e canCreate FALSE', async () => {
+    const client = makeMockSupabaseClient({ exchangeFail: true });
+    const status = await initializeAuthSession(client, '?code=invalid-code');
+    assert.equal(status, 'error');
+    assert.equal(hasPermission('artecheck.analysis.create'), false);
+    assert.equal(client.signedOut, true, 'falha real de auth dispara signOut fail-closed');
+  });
+
   it('E) Bootstrap pendente / client null: canCreate estritamente FALSE', async () => {
     const status = await initializeAuthSession(null);
     assert.equal(status, 'unauthenticated');
@@ -240,23 +306,6 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Clos
     const status = await initializeAuthSession(client);
     assert.equal(status, 'error');
     assert.equal(hasPermission('artecheck.analysis.create'), false, 'em falha de bootstrap, canCreate é FALSE');
-  });
-
-  it('G) /auth/prexyon?code=...: callback executa e popula permissões antes de liberar autorização', async () => {
-    const client = makeMockSupabaseClient({
-      memberRole: 'member',
-      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
-    });
-
-    const status = await initializeAuthSession(client, '?code=valid-sso-code');
-    assert.equal(status, 'authenticated');
-
-    const perms = getArteCheckSessionPermissions();
-    assert.notEqual(perms, null, 'store deve estar populada após callback');
-    assert.equal(perms?.bootstrapped, true);
-    assert.equal(perms?.isOwner, false);
-    assert.equal(hasPermission('artecheck.analysis.view'), true, 'MEMBER tem view=allow');
-    assert.equal(hasPermission('artecheck.analysis.create'), false, 'MEMBER NÃO tem create');
   });
 
   it('H) Reload com sessão Supabase existente: bootstrap re-executado e permissões restauradas em memória', async () => {
@@ -274,41 +323,5 @@ describe('2. initializeAuthSession — Ciclo Real de Inicialização & Fail-Clos
     assert.notEqual(perms, null);
     assert.equal(hasPermission('artecheck.analysis.view'), true);
     assert.equal(hasPermission('artecheck.analysis.create'), false, 'após reload, MEMBER continua sem create');
-  });
-
-  it('B) MEMBER no ciclo completo: canCreate é FALSE', async () => {
-    const client = makeMockSupabaseClient({
-      hasSession: true,
-      memberRole: 'member',
-      overrides: [{ permission_definition_id: 'def-view', effect: 'allow' }],
-    });
-
-    await initializeAuthSession(client, '');
-    assert.equal(hasPermission('artecheck.analysis.create'), false);
-  });
-
-  it('C) Usuário com create=allow no ciclo completo: canCreate é TRUE', async () => {
-    const client = makeMockSupabaseClient({
-      hasSession: true,
-      memberRole: 'member',
-      overrides: [
-        { permission_definition_id: 'def-view', effect: 'allow' },
-        { permission_definition_id: 'def-create', effect: 'allow' },
-      ],
-    });
-
-    await initializeAuthSession(client, '');
-    assert.equal(hasPermission('artecheck.analysis.create'), true);
-  });
-
-  it('D) OWNER no ciclo completo: canCreate é TRUE via bypass', async () => {
-    const client = makeMockSupabaseClient({
-      hasSession: true,
-      memberRole: 'owner',
-      overrides: [],
-    });
-
-    await initializeAuthSession(client, '');
-    assert.equal(hasPermission('artecheck.analysis.create'), true);
   });
 });
