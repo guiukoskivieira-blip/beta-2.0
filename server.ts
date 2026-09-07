@@ -66,6 +66,124 @@ function isBillingEnforced() {
   return Boolean(getBillingAdmin() && process.env.BILLING_PROVIDER);
 }
 
+/**
+ * Resolves Prexyon organization context and verifies explicit homologation entitlement for ArteCheck.
+ * Flow:
+ * 1. Resolves organization membership for the authenticated user (server-authoritative).
+ * 2. Ensures membership is active (is_active: true).
+ * 3. Verifies organization is active (is_active: true).
+ * 4. Calls RPC `prexyon_get_organization_entitlements`.
+ * 5. Checks if "artecheck" is in `effective_products` AND `homologation_products`.
+ * Returns { authorized: true, organizationId } if all conditions met; otherwise { authorized: false }.
+ * Fail-closed on any error or missing requirement.
+ */
+async function resolvePrexyonHomologationEntitlement(userId: string): Promise<{ authorized: boolean; organizationId?: string }> {
+  if (!isValidUuid(userId)) return { authorized: false };
+
+  const admin = getBillingAdmin();
+  if (!admin) return { authorized: false };
+
+  try {
+    // 1. Membership lookup (server-authoritative: resolve org from user membership)
+    const { data: member, error: memberErr } = await admin
+      .from('organization_members')
+      .select('organization_id, role, is_active')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (memberErr || !member || !member.is_active) {
+      return { authorized: false };
+    }
+
+    const orgId = member.organization_id;
+    if (!orgId) return { authorized: false };
+
+    // 2. Organization active check
+    const { data: org, error: orgErr } = await admin
+      .from('organizations')
+      .select('id, is_active')
+      .eq('id', orgId)
+      .maybeSingle();
+
+    if (orgErr || !org || !org.is_active) {
+      return { authorized: false };
+    }
+
+    // 3. Entitlement check via Prexyon central RPC
+    const { data: entData, error: entErr } = await admin.rpc('prexyon_get_organization_entitlements', {
+      p_org_id: orgId,
+    });
+
+    if (entErr || !entData) {
+      return { authorized: false };
+    }
+
+    const effectiveProducts: string[] = (entData as any).effective_products || [];
+    const homologationProducts: string[] = (entData as any).homologation_products || [];
+
+    const hasEffective = effectiveProducts.includes('artecheck');
+    const hasHomologation = homologationProducts.includes('artecheck');
+
+    if (hasEffective && hasHomologation) {
+      return { authorized: true, organizationId: orgId };
+    }
+
+    return { authorized: false };
+  } catch (err: any) {
+    console.error('[Prexyon-Entitlement] Erro ao resolver homologação:', err?.message || err);
+    return { authorized: false };
+  }
+}
+
+/**
+ * Centralized authorization for file processing (used in /api/upload and /api/flatten-transparency).
+ * If user has valid Prexyon homologation entitlement, explicitly authorizes processing without
+ * consulting legacy subscriptions/plans/analysis_usage_events tables.
+ * Otherwise, falls back to standard billing quota validation (fail-closed).
+ */
+async function authorizeProcessing(req: Request, res: Response): Promise<{ allowed: boolean; billingUserId?: string }> {
+  if (!isBillingEnforced()) {
+    return { allowed: true };
+  }
+
+  const userId = (req as any).authUser?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' }) as any;
+
+  // 1. Check explicit Prexyon homologation entitlement
+  const homologation = await resolvePrexyonHomologationEntitlement(userId);
+  if (homologation.authorized) {
+    // Homologation explicitly authorized — bypass legacy subscriptions/plans/analysis_usage_events
+    (req as any).prexyonHomologation = true;
+    (req as any).organizationId = homologation.organizationId;
+    return { allowed: true };
+  }
+
+  // 2. Standard commercial subscription / quota validation (fail-closed)
+  let state;
+  try {
+    state = await getSubscriptionUsage(userId);
+  } catch (err: any) {
+    console.error('Erro de infraestrutura ao validar quota:', err);
+    return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota de análises.' }) as any;
+  }
+
+  if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
+    res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para processar arquivos.' });
+    return { allowed: false };
+  }
+  if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {
+    res.status(402).json({ success: false, code: 'SUBSCRIPTION_EXPIRED', error: 'Sua assinatura expirou. Escolha um plano para continuar.' });
+    return { allowed: false };
+  }
+  if (state.remaining <= 0) {
+    res.status(429).json({ success: false, code: 'PLAN_LIMIT_REACHED', renewsAt: state.subscription.current_period_end, error: `Você atingiu o limite do seu plano. Seu limite será renovado em ${new Date(state.subscription.current_period_end).toLocaleDateString('pt-BR')}. Para continuar analisando novos arquivos agora, faça upgrade para um plano maior.` });
+    return { allowed: false };
+  }
+
+  (req as any).billingUserId = userId;
+  return { allowed: true, billingUserId: userId };
+}
+
 async function getSubscriptionUsage(userId: string) {
   const isUuid = isValidUuid(userId);
 
@@ -893,28 +1011,8 @@ async function startServer() {
   app.post(
     "/api/upload",
     async (req: Request, res: Response, next: NextFunction) => {
-      if (!isBillingEnforced()) return next();
-      const userId = (req as any).authUser?.id;
-      if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' });
-
-      let state;
-      try {
-        state = await getSubscriptionUsage(userId);
-      } catch (err: any) {
-        console.error('Erro de infraestrutura ao validar quota:', err);
-        return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota de análises.' });
-      }
-
-      if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
-        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para iniciar novas análises.' });
-      }
-      if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {
-        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_EXPIRED', error: 'Sua assinatura expirou. Escolha um plano para continuar analisando arquivos.' });
-      }
-      if (state.remaining <= 0) {
-        return res.status(429).json({ success: false, code: 'PLAN_LIMIT_REACHED', renewsAt: state.subscription.current_period_end, error: `Você atingiu o limite do seu plano. Seu limite será renovado em ${new Date(state.subscription.current_period_end).toLocaleDateString('pt-BR')}. Para continuar analisando novos arquivos agora, faça upgrade para um plano maior.` });
-      }
-      (req as any).billingUserId = userId;
+      const auth = await authorizeProcessing(req, res);
+      if (!auth.allowed) return;
       next();
     },
     (req: Request, res: Response, next: NextFunction) => {
@@ -1372,26 +1470,8 @@ async function startServer() {
     "/api/flatten-transparency",
     async (req: Request, res: Response, next: NextFunction) => {
       if (!isBillingEnforced()) return next();
-      const userId = (req as any).authUser?.id;
-      if (!userId) return res.status(401).json({ success: false, error: 'Faça login para continuar.' });
-
-      let state;
-      try {
-        state = await getSubscriptionUsage(userId);
-      } catch (err: any) {
-        console.error('Erro de infraestrutura ao validar quota:', err);
-        return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota.' });
-      }
-
-      if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
-        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para processar arquivos.' });
-      }
-      if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {
-        return res.status(402).json({ success: false, code: 'SUBSCRIPTION_EXPIRED', error: 'Sua assinatura expirou. Escolha um plano para continuar.' });
-      }
-      if (state.remaining <= 0) {
-        return res.status(429).json({ success: false, code: 'PLAN_LIMIT_REACHED', error: 'Você atingiu o limite do seu plano.' });
-      }
+      const auth = await authorizeProcessing(req, res);
+      if (!auth.allowed) return;
       next();
     },
     upload.single("file"),

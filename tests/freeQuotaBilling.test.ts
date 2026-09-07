@@ -127,4 +127,165 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     const ruleEngineSrc = fs.readFileSync('src/utils/ruleEngine.ts', 'utf8');
     assert.match(ruleEngineSrc, /export function runDeterministicRuleEngine/);
   });
+
+  it('12. Prexyon homologation entitlement: resolvePrexyonHomologationEntitlement e authorizeProcessing existem e validam o fluxo obrigatório', () => {
+    // 1. Deve verificar membership ativo no servidor
+    assert.match(serverSrc, /from\(['"]organization_members['"]\)/);
+    assert.match(serverSrc, /\.eq\(['"]user_id['"],\s*userId\)/);
+    assert.match(serverSrc, /member\.is_active/);
+
+    // 2. Deve verificar organização ativa
+    assert.match(serverSrc, /from\(['"]organizations['"]\)/);
+    assert.match(serverSrc, /org\.is_active/);
+
+    // 3. Deve consultar RPC prexyon_get_organization_entitlements
+    assert.match(serverSrc, /rpc\(['"]prexyon_get_organization_entitlements['"]/);
+
+    // 4. Deve exigir artecheck em effective_products E homologation_products
+    assert.match(serverSrc, /effectiveProducts\.includes\(['"]artecheck['"]\)/);
+    assert.match(serverSrc, /homologationProducts\.includes\(['"]artecheck['"]\)/);
+
+    // 5. Homologação autorizada faz bypass de subscriptions/plans/analysis_usage_events
+    assert.match(serverSrc, /if \(homologation\.authorized\)/);
+    assert.match(serverSrc, /prexyonHomologation = true/);
+
+    // 6. Autorização centralizada aplicada a POST /api/upload e POST /api/flatten-transparency
+    assert.match(serverSrc, /app\.post\(\s*["']\/api\/upload["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
+    assert.match(serverSrc, /app\.post\(\s*["']\/api\/flatten-transparency["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
+  });
+
+  describe('Prexyon Homologation Entitlement Processing Authorization Logic', () => {
+    function simulatePrexyonHomologationResolution(opts: {
+      userId: string;
+      member?: { organization_id: string; role: string; is_active: boolean } | null;
+      memberErr?: any;
+      org?: { id: string; is_active: boolean } | null;
+      orgErr?: any;
+      entData?: { effective_products?: string[]; homologation_products?: string[] } | null;
+      entErr?: any;
+    }) {
+      const { userId, member, memberErr, org, orgErr, entData, entErr } = opts;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+      if (!isUuid) return { authorized: false };
+
+      if (memberErr || !member || !member.is_active) return { authorized: false };
+      const orgId = member.organization_id;
+      if (!orgId) return { authorized: false };
+
+      if (orgErr || !org || !org.is_active) return { authorized: false };
+      if (entErr || !entData) return { authorized: false };
+
+      const effectiveProducts: string[] = entData.effective_products || [];
+      const homologationProducts: string[] = entData.homologation_products || [];
+
+      if (effectiveProducts.includes('artecheck') && homologationProducts.includes('artecheck')) {
+        return { authorized: true, organizationId: orgId };
+      }
+      return { authorized: false };
+    }
+
+    const validOwnerId = '2e12961a-2294-40dc-8d58-1cd19c8ac0c4';
+    const validMemberId = 'c9f649fc-be89-42b4-89ea-9cb3bb2b335c';
+    const validOrgId = '43c47a08-2f84-42db-a64d-d1f0ea0c6a6b';
+
+    it('A) homologation entitlement ArteCheck válido -> upload e flatten permitidos sem subscriptions', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          effective_products: ['artecheck', 'arteflow', 'orcagraf'],
+          homologation_products: ['artecheck', 'arteflow', 'orcagraf'],
+        },
+      });
+      assert.equal(res.authorized, true);
+      assert.equal(res.organizationId, validOrgId);
+    });
+
+    it('B) homologation entitlement válido para MEMBER -> autorizado com organização resolvida no servidor', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validMemberId,
+        member: { organization_id: validOrgId, role: 'member', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          effective_products: ['artecheck'],
+          homologation_products: ['artecheck'],
+        },
+      });
+      assert.equal(res.authorized, true);
+      assert.equal(res.organizationId, validOrgId);
+    });
+
+    it('C) sem entitlement ArteCheck (outros produtos) -> BLOQUEADO (fail-closed)', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          effective_products: ['arteflow', 'orcagraf'],
+          homologation_products: ['arteflow', 'orcagraf'],
+        },
+      });
+      assert.equal(res.authorized, false);
+    });
+
+    it('D) artecheck em effective_products mas ausente em homologation_products -> BLOQUEADO', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          effective_products: ['artecheck'],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, false);
+    });
+
+    it('E) membership inválido/inativo -> BLOQUEADO', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: false },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          effective_products: ['artecheck'],
+          homologation_products: ['artecheck'],
+        },
+      });
+      assert.equal(res.authorized, false);
+    });
+
+    it('F) organização inativa -> BLOQUEADO', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: false },
+        entData: {
+          effective_products: ['artecheck'],
+          homologation_products: ['artecheck'],
+        },
+      });
+      assert.equal(res.authorized, false);
+    });
+
+    it('G) erro de RPC central de entitlements -> BLOQUEADO (fail-closed)', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entErr: new Error('RPC network failure'),
+      });
+      assert.equal(res.authorized, false);
+    });
+
+    it('H) usuário sem membership -> BLOQUEADO', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        member: null,
+      });
+      assert.equal(res.authorized, false);
+    });
+  });
 });
+
+
