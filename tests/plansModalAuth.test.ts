@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { PLANS } from '../src/domain/billing';
+import { getPrexyonPortalUrl } from '../src/config/prexyon';
 
 describe('Plans Modal & Billing Auth Flow Tests', () => {
   it('1. Public plans are available without requiring session or auth token', () => {
@@ -308,8 +309,9 @@ describe('Plans Modal & Billing Auth Flow Tests', () => {
   });
 
   it('8. Frontend upgrade delegation points directly to Prexyon Portal without calling /api/billing', () => {
-    const portalUrl = 'https://portal.prexyon.com';
-    assert.equal(portalUrl, 'https://portal.prexyon.com');
+    const portalUrl = getPrexyonPortalUrl();
+    assert.ok(portalUrl.startsWith('https://'));
+    assert.ok(portalUrl.includes('prexyon'));
   });
 });
 

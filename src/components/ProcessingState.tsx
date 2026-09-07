@@ -1,5 +1,6 @@
 import React from 'react';
 import { Loader2, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { getPrexyonPortalUrl } from '../config/prexyon';
 
 interface ProcessingStateProps {
   status: 'uploading' | 'extracting' | 'analyzing' | 'error';
@@ -102,7 +103,7 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
             </button>
           ) : (
             <a
-              href="https://portal.prexyon.com"
+              href={getPrexyonPortalUrl()}
               className="px-6 py-2.5 bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />

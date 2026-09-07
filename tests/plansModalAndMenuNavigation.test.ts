@@ -1,10 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { getPrexyonPortalUrl } from '../src/config/prexyon';
 
 describe('ARTECHECK AI — Navegação, Desacoplamento de Planos e Preparação Prexyon', () => {
   it('1. CTA de Upgrade no Frontend direciona para o Portal Prexyon sem abrir checkout local', () => {
-    const portalUrl = 'https://portal.prexyon.com';
-    assert.ok(portalUrl.includes('portal.prexyon.com'));
+    const portalUrl = getPrexyonPortalUrl();
+    assert.ok(portalUrl.startsWith('https://'), 'URL do portal deve ser HTTPS');
+    assert.ok(portalUrl.includes('prexyon'), 'URL do portal deve apontar para o ecossistema Prexyon');
   });
 
   it('2. Nenhum CTA do frontend chama /api/billing/checkout ou /api/billing/status', () => {

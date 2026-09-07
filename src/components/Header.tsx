@@ -4,6 +4,7 @@ import { ShieldCheck, Building2, LogOut, LayoutGrid, ChevronDown, ExternalLink }
 import { subscribeArteCheckPermissions, getArteCheckSessionPermissions } from '../auth/arteCheckPermissions';
 import { PrexyonSSOProvider } from '../auth/PrexyonSSOProvider';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { getPrexyonPortalUrl } from '../config/prexyon';
 
 export interface HeaderProps {
   portalUrl?: string;
@@ -11,7 +12,7 @@ export interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  portalUrl = 'https://portal.prexyon.com',
+  portalUrl = getPrexyonPortalUrl(),
   onLogout,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);

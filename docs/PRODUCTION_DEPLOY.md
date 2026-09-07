@@ -16,6 +16,7 @@ Configure as seguintes variáveis no servidor de produção (ou no Secret Manage
 | `API_URL` | Recomendado | URL pública da API backend | `https://app.artecheck.com.br` |
 | `VITE_SUPABASE_URL` | Obrigatório (SaaS) | URL do projeto Supabase | `https://xyz.supabase.co` |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Obrigatório (SaaS) | Chave pública Publishable do Supabase | `sb_publishable_...` |
+| `VITE_PREXYON_PORTAL_URL` | Recomendado | URL pública do Portal Prexyon | `https://prexyon-production.up.railway.app` |
 | `SUPABASE_SECRET_KEY` | Servidor | Chave privada Secret Key (apenas backend) | `sb_secret_...` |
 | `SUPABASE_PUBLISHABLE_KEY` | Servidor | Chave pública para cliente autenticado backend | `sb_publishable_...` |
 | `GEMINI_API_KEY` | Opcional | Chave para o assistente de IA explicativo | `AIzaSy...` |
