@@ -18,8 +18,8 @@ export function resolveSupabaseEnv(): { url: string; anonKey: string; hasPartial
     // 1. Acesso direto a import.meta.env (permite estática substituição pelo Vite)
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
       const meta = (import.meta as any).env;
-      url = meta.VITE_SUPABASE_URL || meta.NEXT_PUBLIC_SUPABASE_URL || meta.SUPABASE_URL || '';
-      anonKey = meta.VITE_SUPABASE_ANON_KEY || meta.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || meta.NEXT_PUBLIC_SUPABASE_ANON_KEY || meta.SUPABASE_ANON_KEY || '';
+      url = meta.VITE_SUPABASE_URL || meta.SUPABASE_URL || '';
+      anonKey = meta.VITE_SUPABASE_PUBLISHABLE_KEY || meta.VITE_SUPABASE_ANON_KEY || meta.SUPABASE_PUBLISHABLE_KEY || meta.SUPABASE_ANON_KEY || '';
     }
   } catch {
     // Ignore meta resolution error
@@ -30,10 +30,10 @@ export function resolveSupabaseEnv(): { url: string; anonKey: string; hasPartial
     try {
       if (typeof process !== 'undefined' && process.env) {
         if (!url) {
-          url = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+          url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
         }
         if (!anonKey) {
-          anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+          anonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
         }
       }
     } catch {

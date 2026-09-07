@@ -48,8 +48,10 @@ function getAuthenticatedSupabaseClient(authToken: string) {
   if (!authToken || typeof authToken !== 'string' || !authToken.trim()) return null;
   const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
   const anonKey = (
-    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
     ''
   ).trim();
   if (!rawUrl || !anonKey || !rawUrl.startsWith('http')) return null;

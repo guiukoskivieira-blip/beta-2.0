@@ -15,15 +15,12 @@ Configure as seguintes variáveis no servidor de produção (ou no Secret Manage
 | `APP_URL` | Recomendado | URL pública canônica da aplicação frontend | `https://app.artecheck.com.br` |
 | `API_URL` | Recomendado | URL pública da API backend | `https://app.artecheck.com.br` |
 | `VITE_SUPABASE_URL` | Obrigatório (SaaS) | URL do projeto Supabase | `https://xyz.supabase.co` |
-| `VITE_SUPABASE_ANON_KEY` | Obrigatório (SaaS) | Chave pública anônima do Supabase | `eyJh...` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Servidor | Chave privada Service Role (apenas backend) | `eyJh...` |
-| `BILLING_PROVIDER` | Recomendado | Provedor de pagamento ativo | `mercadopago` |
-| `MERCADOPAGO_ACCESS_TOKEN` | Servidor | Access Token do Mercado Pago | `APP_USR-...` |
-| `MERCADOPAGO_WEBHOOK_SECRET` | Servidor | Chave secreta de validação do webhook | `sec_...` |
-| `MERCADOPAGO_WEBHOOK_URL` | Opcional | URL explícita do webhook (se diferente de APP_URL) | `https://app.artecheck.com.br/api/billing/webhook/mercadopago` |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Obrigatório (SaaS) | Chave pública Publishable do Supabase (fallback: `VITE_SUPABASE_ANON_KEY`) | `sb_publishable_...` |
+| `SUPABASE_SECRET_KEY` | Servidor | Chave privada Secret Key (apenas backend) | `sb_secret_...` |
+| `SUPABASE_PUBLISHABLE_KEY` | Servidor | Chave pública para cliente autenticado backend (fallback: `SUPABASE_ANON_KEY`) | `sb_publishable_...` |
 | `GEMINI_API_KEY` | Opcional | Chave para o assistente de IA explicativo | `AIzaSy...` |
 
-> ⚠️ **Regra Crítica de Segurança**: As variáveis `SUPABASE_SERVICE_ROLE_KEY`, `MERCADOPAGO_ACCESS_TOKEN` e `MERCADOPAGO_WEBHOOK_SECRET` **NUNCA** devem receber o prefixo `VITE_` e devem residir exclusivamente no backend.
+> ⚠️ **Regra Crítica de Segurança**: A variável `SUPABASE_SECRET_KEY` **NUNCA** deve receber o prefixo `VITE_` e deve residir exclusivamente no backend.
 
 ---
 

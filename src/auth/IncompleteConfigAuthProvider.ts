@@ -7,7 +7,7 @@ export class IncompleteConfigAuthProvider implements AuthProvider {
   constructor(message?: string) {
     this.errorMessage =
       message ||
-      'Configuração do Supabase incompleta ou inválida. Verifique VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no ambiente.';
+      'Configuração do Supabase incompleta ou inválida. Verifique VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY no ambiente.';
   }
 
   async getCurrentUser(): Promise<BetaUser | null> {
