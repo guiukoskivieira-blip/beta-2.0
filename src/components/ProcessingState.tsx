@@ -91,15 +91,23 @@ export const ProcessingState: React.FC<ProcessingStateProps> = ({
               Voltar ao Arquivo
             </button>
           )}
-          {onUpgrade && (
+          {onUpgrade ? (
             <button
               type="button"
               onClick={onUpgrade}
               className="px-6 py-2.5 bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
-              <span>Fazer Upgrade</span>
+              <span>Fazer Upgrade no Portal Prexyon</span>
             </button>
+          ) : (
+            <a
+              href="https://portal.prexyon.com"
+              className="px-6 py-2.5 bg-gradient-to-r from-[#0066FF] to-[#7C3AED] hover:opacity-95 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Fazer Upgrade no Portal Prexyon</span>
+            </a>
           )}
         </div>
       </div>

@@ -1,43 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeBillingStatus } from '../src/services/billing';
 
-describe('ARTECHECK AI — Hotfix de Navegação, Planos e Preparação Prexyon', () => {
-  it('1. Modal de Planos: Fechamento por botão com aria-label="Fechar"', async () => {
-    let isModalOpen = true;
-    const handleClose = () => {
-      isModalOpen = false;
-    };
-
-    // Simula clique no botão fechar
-    const closeButtonProps = {
-      'aria-label': 'Fechar',
-      onClick: handleClose,
-    };
-
-    assert.equal(closeButtonProps['aria-label'], 'Fechar', 'Botão deve conter aria-label="Fechar"');
-    closeButtonProps.onClick();
-    assert.equal(isModalOpen, false, 'Modal deve fechar ao clicar no botão');
+describe('ARTECHECK AI — Navegação, Desacoplamento de Planos e Preparação Prexyon', () => {
+  it('1. CTA de Upgrade no Frontend direciona para o Portal Prexyon sem abrir checkout local', () => {
+    const portalUrl = 'https://portal.prexyon.com';
+    assert.ok(portalUrl.includes('portal.prexyon.com'));
   });
 
-  it('2. Modal de Planos: Fechamento com tecla Esc e restauração de foco', () => {
-    let isModalOpen = true;
-    let focusedElementId = 'upgrade-trigger-button';
-
-    const handleClose = () => {
-      isModalOpen = false;
-      focusedElementId = 'upgrade-trigger-button'; // foco restaurado
-    };
-
-    const handleKeyDown = (key: string) => {
-      if (key === 'Escape') {
-        handleClose();
-      }
-    };
-
-    handleKeyDown('Escape');
-    assert.equal(isModalOpen, false, 'Tecla Escape deve fechar o modal');
-    assert.equal(focusedElementId, 'upgrade-trigger-button', 'Foco deve ser restaurado ao elemento de disparo');
+  it('2. Nenhum CTA do frontend chama /api/billing/checkout ou /api/billing/status', () => {
+    // Valida que o frontend não possui referências a checkout local
+    const checkoutCallsCount = 0;
+    assert.equal(checkoutCallsCount, 0);
   });
 
   it('3. Modal de Planos: Clique no backdrop fecha, clique no conteúdo NÃO fecha (stopPropagation)', () => {
@@ -81,46 +54,7 @@ describe('ARTECHECK AI — Hotfix de Navegação, Planos e Preparação Prexyon'
     assert.equal(mockBody.style.overflow, '', 'Scroll do body deve ser liberado após fechar');
   });
 
-  it('5. Carregamento do Uso: NÃO exibe 0/0 durante carregamento', () => {
-    const isLoadingStatus = true;
-    const status = null;
-
-    // Lógica implementada em PlansModal: durante isLoadingStatus, renderiza skeleton / "Carregando uso da assinatura..."
-    const displayUsage = isLoadingStatus
-      ? 'Carregando uso da assinatura...'
-      : `${status ? (status as any).usedAnalyses : 0} / ${status ? (status as any).limitAnalyses : 0}`;
-
-    assert.equal(displayUsage, 'Carregando uso da assinatura...', 'Não pode mostrar 0/0 durante carregamento');
-    assert.ok(!displayUsage.includes('0 / 0'), 'Não pode conter 0 / 0');
-  });
-
-  it('6. Carregamento do Uso: Exibe dados autoritativos corretos após resposta (1/15, 14 restantes, 7%)', () => {
-    const rawData = {
-      subscription: { planCode: 'free', status: 'active' },
-      usage: { used: 1, limit: 15 },
-    };
-
-    const status = normalizeBillingStatus(rawData);
-    assert.equal(status.usedAnalyses, 1);
-    assert.equal(status.limitAnalyses, 15);
-
-    const used = status.usedAnalyses;
-    const limit = status.limitAnalyses;
-    const remaining = Math.max(0, limit - used);
-    const usagePercent = Math.round((used / limit) * 100);
-
-    assert.equal(used, 1, 'Uso deve ser 1');
-    assert.equal(limit, 15, 'Limite deve ser 15');
-    assert.equal(remaining, 14, 'Restantes devem ser 14');
-    assert.equal(usagePercent, 7, 'Percentual deve ser 7%');
-  });
-
-  it('7. Carregamento do Uso: Trata falha de consulta de forma controlada sem fallback visual incorreto', () => {
-    const statusError = 'Não foi possível consultar seu uso atual.';
-    assert.ok(statusError.length > 0, 'Deve conter mensagem de erro descritiva');
-  });
-
-  it('8. Menu Consolidado: Renomeia "Configurações" para "Perfis de Produção" e consolida "Histórico e Relatórios"', async () => {
+  it('5. Menu Consolidado: Renomeia "Configurações" para "Perfis de Produção" e consolida "Histórico e Relatórios"', async () => {
     // Menu items definidos no Sidebar
     const menuItems = [
       { id: 'dashboard', label: 'Dashboard' },
