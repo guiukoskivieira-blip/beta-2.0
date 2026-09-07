@@ -1,134 +1,72 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { PLANS } from '../src/domain/billing';
 
-describe('Free Plan & Billing Quota Restoration Tests', () => {
+describe('Prexyon Entitlement & Telemetry Authorization Tests', () => {
   const serverSrc = fs.readFileSync('server.ts', 'utf8');
 
-  it('1. BILLING_PLAN_LIMITS contains free: 15 and preserves all paid plans', () => {
-    assert.match(serverSrc, /free:\s*15/);
-    assert.match(serverSrc, /essential:\s*60/);
-    assert.match(serverSrc, /professional:\s*200/);
-    assert.match(serverSrc, /business:\s*500/);
-    assert.match(serverSrc, /professional_launch:\s*200/);
-
-    assert.equal(PLANS.free.analysisLimit, 15);
-    assert.equal(PLANS.essential.analysisLimit, 60);
-    assert.equal(PLANS.professional.analysisLimit, 200);
-    assert.equal(PLANS.business.analysisLimit, 500);
-    assert.equal(PLANS.professional_launch.analysisLimit, 200);
+  it('1. resolvePrexyonEntitlement e authorizeProcessing existem no servidor', () => {
+    assert.match(serverSrc, /async function resolvePrexyonEntitlement/);
+    assert.match(serverSrc, /async function authorizeProcessing/);
   });
 
-  it('2. local_dev_user validação não-UUID não consulta Supabase e não gera PostgreSQL 22P02', () => {
+  it('2. local_dev_user validação não-UUID é tratada com segurança', () => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     assert.equal(uuidRegex.test('local_dev_user'), false);
     assert.equal(uuidRegex.test('11111111-2222-3333-4444-555555555555'), true);
 
-    // No server.ts, getSubscriptionUsage verifica isValidUuid antes de chamar admin.from
+    // No server.ts, resolvePrexyonEntitlement verifica isValidUuid antes de consultar o banco
     assert.match(serverSrc, /function isValidUuid\(id: string\): boolean/);
-    assert.match(serverSrc, /if \(!isUuid\) \{|if \(!isValidUuid\(userId\)\) \{/);
+    assert.match(serverSrc, /if \(!isValidUuid\(userId\)\) return \{ authorized: false \};/);
   });
 
-  it('3. Usuário novo com UUID sem subscription recebe plano Free virtual ativo com 15 de limite', () => {
-    const userId = '11111111-2222-3333-4444-555555555555';
-    const userCreatedAt = new Date('2026-08-01T00:00:00Z');
-    const now = new Date('2026-08-15T00:00:00Z').getTime();
-    const cycleMs = 30 * 24 * 60 * 60 * 1000;
-    const elapsed = Math.max(0, now - userCreatedAt.getTime());
-    const cycleIndex = Math.floor(elapsed / cycleMs);
-    const periodStart = new Date(userCreatedAt.getTime() + cycleIndex * cycleMs).toISOString();
-    const periodEnd = new Date(userCreatedAt.getTime() + (cycleIndex + 1) * cycleMs).toISOString();
-
-    const used = 0;
-    const limit = 15;
-    const remaining = Math.max(0, limit - used);
-
-    const virtualFreeSubscription = {
-      id: `free_${userId}`,
-      user_id: userId,
-      organization_id: null,
-      plan_code: 'free',
-      billing_period: 'monthly',
-      status: 'active',
-      current_period_start: periodStart,
-      current_period_end: periodEnd,
-      cancel_at_period_end: false,
-      promotion_cycles_used: 0,
-      is_virtual_free: true,
-    };
-
-    assert.equal(virtualFreeSubscription.plan_code, 'free');
-    assert.equal(virtualFreeSubscription.status, 'active');
-    assert.equal(limit, 15);
-    assert.equal(remaining, 15);
+  it('3. Sem entitlement retorna 403 ENTITLEMENT_REQUIRED (fail-closed)', () => {
+    assert.match(serverSrc, /code:\s*['"]ENTITLEMENT_REQUIRED['"]/);
+    assert.match(serverSrc, /res\.status\(403\)/);
   });
 
-  it('4. Free com 0 a 14 usos permite análise; 15 usos bloqueia na 16ª tentativa', () => {
-    const limit = 15;
-    assert.equal(Math.max(0, limit - 0) > 0, true, '0 usos => permite');
-    assert.equal(Math.max(0, limit - 14) > 0, true, '14 usos => permite');
-    assert.equal(Math.max(0, limit - 15) <= 0, true, '15 usos => bloqueia');
+  it('4. Homologação ou assinatura comercial autorizada libera processamento com prexyonEntitled = true', () => {
+    assert.match(serverSrc, /prexyonEntitled = true/);
+    assert.match(serverSrc, /prexyonHomologation = entitlement\.mode === 'homologation'/);
   });
 
-  it('5. Ausência de subscription NÃO retorna SUBSCRIPTION_REQUIRED', () => {
-    assert.match(serverSrc, /is_virtual_free:\s*true/);
-    assert.match(serverSrc, /plan_code:\s*['"]free['"]/);
-    assert.match(serverSrc, /status:\s*['"]active['"]/);
+  it('5. Usuário não autenticado retorna 401', () => {
+    assert.match(serverSrc, /if \(!userId\) \{\s*res\.status\(401\)\.json\(\{ success: false, error: 'Faça login para iniciar uma análise\.' \}\);/);
   });
 
-  it('6. Free real grava uso em analyses sem violar subscription_id NOT NULL', () => {
-    // Para plano Free virtual, grava em analyses
+  it('6. Análise gravada em public.analyses com organization_id e user_id', () => {
     assert.match(serverSrc, /admin\.from\('analyses'\)\.insert/);
-    // Para plano pago, grava em analysis_usage_events com subscription_id
-    assert.match(serverSrc, /admin\.from\('analysis_usage_events'\)\.upsert/);
+    assert.match(serverSrc, /organization_id:\s*validOrgUuid/);
+    assert.match(serverSrc, /user_id:\s*validUserUuid/);
   });
 
-  it('7. Subscriptions pagas continuam com seus limites exatos e gravação em analysis_usage_events', () => {
-    const paidLimits: Record<string, number> = {
-      essential: 60,
-      professional: 200,
-      business: 500,
-      professional_launch: 200,
-    };
-
-    assert.equal(paidLimits.essential, 60);
-    assert.equal(paidLimits.professional, 200);
-    assert.equal(paidLimits.business, 500);
-    assert.equal(paidLimits.professional_launch, 200);
+  it('7. Desacoplamento total: zero referências a subscriptions, plans ou mercadopago no processamento', () => {
+    assert.doesNotMatch(serverSrc, /getSubscriptionUsage/);
+    assert.doesNotMatch(serverSrc, /isBillingEnforced/);
+    assert.doesNotMatch(serverSrc, /mercadopago/i);
+    assert.doesNotMatch(serverSrc, /\/api\/billing\//);
   });
 
-  it('8. Usuário não autenticado continua bloqueado', () => {
-    assert.match(serverSrc, /if \(!userId\) return res\.status\(401\)\.json\({ success: false, error: 'Faça login para iniciar uma análise\.' }\)/);
-  });
-
-  it('9. Erro real de banco NÃO vira plano free silenciosamente', () => {
-    assert.match(serverSrc, /if \(subError\) \{\s*throw new Error/);
-    assert.match(serverSrc, /if \(usageError\) \{\s*throw new Error/);
-    assert.match(serverSrc, /return res\.status\(500\)\.json\({ success: false, error: 'Falha temporária ao verificar sua cota de análises\.' }\)/);
-  });
-
-  it('10. Análise bem-sucedida registra usage e falha no parser NÃO consome quota', () => {
+  it('8. Análise bem-sucedida registra telemetria e falha no parser NÃO consome nem trava', () => {
     const uploadRoute = serverSrc.slice(serverSrc.indexOf('app.post(\n    "/api/upload"'));
     const extractPos = uploadRoute.indexOf('extractPdfStructure(file.buffer)');
-    const recordPos = uploadRoute.indexOf('recordSuccessfulAnalysis(billingUserId');
+    const recordPos = uploadRoute.indexOf('recordSuccessfulAnalysis(');
     const catchPos = uploadRoute.indexOf('catch (extractError: any)');
 
     assert.ok(extractPos >= 0, 'Extração deve existir');
     assert.ok(recordPos >= 0, 'Registro de uso deve existir');
     assert.ok(catchPos >= 0, 'Tratamento de erro de extração deve existir');
 
-    assert.ok(extractPos < recordPos, 'Extração ocorre antes de registrar uso');
-    assert.ok(recordPos < catchPos, 'Registro de uso ocorre no bloco try antes do catch de erro');
+    assert.ok(extractPos < recordPos, 'Extração ocorre antes de registrar telemetria');
+    assert.ok(recordPos < catchPos, 'Registro ocorre no bloco try antes do catch de erro');
   });
 
-  it('11. Motor 1 permanece intacto e acessível após extração', () => {
-    // Validação que o motor de regras determinísticas não foi modificado
+  it('9. Motor 1 permanece intacto e acessível após extração', () => {
     const ruleEngineSrc = fs.readFileSync('src/utils/ruleEngine.ts', 'utf8');
     assert.match(ruleEngineSrc, /export function runDeterministicRuleEngine/);
   });
 
-  it('12. Prexyon entitlement: resolvePrexyonEntitlement e authorizeProcessing existem e validam o fluxo obrigatório (homologação e comercial)', () => {
+  it('10. Prexyon entitlement: resolvePrexyonEntitlement e authorizeProcessing existem e validam o fluxo obrigatório (homologação e comercial)', () => {
     // 1. Deve verificar membership ativo no servidor
     assert.match(serverSrc, /from\(['"]organization_members['"]\)/);
     assert.match(serverSrc, /\.eq\(['"]user_id['"],\s*userId\)/);

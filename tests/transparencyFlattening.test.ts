@@ -460,14 +460,14 @@ test('18. Prova estrita de que a verificação de autenticação e cota ocorre A
 
   const routeBlock = serverCode.slice(flattenRoutePos, flattenRoutePos + 1800);
 
-  // 1. O middleware de cota/auth deve aparecer ANTES de upload.single("file")
-  const quotaAuthPos = routeBlock.indexOf('isBillingEnforced()');
+  // 1. O middleware de entitlement/auth deve aparecer ANTES de upload.single("file")
+  const quotaAuthPos = routeBlock.indexOf('authorizeProcessing(req, res)');
   const multerPos = routeBlock.indexOf('upload.single("file")');
   const signatureCheckPos = routeBlock.indexOf('%PDF-');
 
-  assert.ok(quotaAuthPos > 0, 'Validação de billing/auth deve estar na rota');
+  assert.ok(quotaAuthPos > 0, 'Validação de entitlement/auth deve estar na rota');
   assert.ok(multerPos > 0, 'Multer deve estar na rota');
-  assert.ok(quotaAuthPos < multerPos, 'Validação de billing/auth deve ser executada ANTES do Multer');
+  assert.ok(quotaAuthPos < multerPos, 'Validação de entitlement/auth deve ser executada ANTES do Multer');
   assert.ok(multerPos < signatureCheckPos, 'Assinatura %PDF- deve ser checada após o upload do buffer');
 });
 

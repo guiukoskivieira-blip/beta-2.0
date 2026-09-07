@@ -19,14 +19,6 @@ import type { ProductionProfile } from "./src/utils/productionProfiles";
 import { GoogleGenAI } from "@google/genai";
 import { LIMITS } from "./src/config/limits";
 import { getSupabaseClient, isSupabaseConfigured } from "./src/lib/supabaseClient";
-import { PLANS, PlanCode, BillingPeriod } from "./src/domain/billing";
-import {
-  isMercadoPagoConfigured,
-  createMercadoPagoCheckoutPreference,
-  verifyMercadoPagoWebhookSignature,
-  fetchMercadoPagoResource,
-} from "./server/mercadopago";
-
 import { parseCorsAllowedOrigins, isOriginAllowed } from "./server/cors";
 
 // Configure Multer for in-memory storage (no permanent disk writes)
@@ -34,15 +26,6 @@ import { parseCorsAllowedOrigins, isOriginAllowed } from "./server/cors";
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_STRING_LENGTH = 20_000;
 const MAX_ARRAY_ITEMS = 2_000;
-
-
-const BILLING_PLAN_LIMITS: Record<string, number> = {
-  free: 15,
-  essential: 60,
-  professional: 200,
-  business: 500,
-  professional_launch: 200,
-};
 
 function isValidUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -86,10 +69,6 @@ function getAuthenticatedSupabaseClient(authToken: string) {
       },
     },
   });
-}
-
-function isBillingEnforced() {
-  return Boolean(getBillingAdmin() && process.env.BILLING_PROVIDER);
 }
 
 /**
@@ -185,23 +164,22 @@ const resolvePrexyonHomologationEntitlement = resolvePrexyonEntitlement;
 
 /**
  * Centralized authorization for file processing (used in /api/upload and /api/flatten-transparency).
- * If user has valid Prexyon entitlement (commercial or homologation), explicitly authorizes processing without
- * consulting legacy subscriptions/plans/analysis_usage_events tables.
- * Otherwise, falls back to standard billing quota validation (fail-closed).
+ * Relies STRICTLY on Prexyon central entitlement via resolvePrexyonEntitlement(userId, authToken).
+ * If authorized: true -> allows processing.
+ * If authorized: false -> blocks fail-closed.
+ * No legacy billing fallback.
  */
-async function authorizeProcessing(req: Request, res: Response): Promise<{ allowed: boolean; billingUserId?: string }> {
-  if (!isBillingEnforced()) {
-    return { allowed: true };
-  }
-
+async function authorizeProcessing(req: Request, res: Response): Promise<{ allowed: boolean }> {
   const userId = (req as any).authUser?.id;
   const authToken = (req as any).authToken;
-  if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' }) as any;
+  if (!userId) {
+    res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' });
+    return { allowed: false };
+  }
 
-  // 1. Check explicit Prexyon entitlement (commercial or homologation) using the user's Bearer JWT
+  // Check explicit Prexyon entitlement (commercial or homologation) using the user's Bearer JWT
   const entitlement = await resolvePrexyonEntitlement(userId, authToken);
   if (entitlement.authorized) {
-    // Entitlement explicitly authorized via Prexyon — bypass legacy subscriptions/plans/analysis_usage_events
     (req as any).prexyonEntitled = true;
     (req as any).prexyonHomologation = entitlement.mode === 'homologation';
     (req as any).prexyonMode = entitlement.mode;
@@ -209,293 +187,74 @@ async function authorizeProcessing(req: Request, res: Response): Promise<{ allow
     return { allowed: true };
   }
 
-  // 2. Standard commercial subscription / quota validation (fail-closed)
-  let state;
-  try {
-    state = await getSubscriptionUsage(userId);
-  } catch (err: any) {
-    console.error('Erro de infraestrutura ao validar quota:', err);
-    return res.status(500).json({ success: false, error: 'Falha temporária ao verificar sua cota de análises.' }) as any;
-  }
-
-  if (!state || !['active', 'canceled'].includes(state.subscription.status)) {
-    res.status(402).json({ success: false, code: 'SUBSCRIPTION_REQUIRED', error: 'É necessário um plano ativo para processar arquivos.' });
-    return { allowed: false };
-  }
-  if (new Date(state.subscription.current_period_end).getTime() <= Date.now()) {
-    res.status(402).json({ success: false, code: 'SUBSCRIPTION_EXPIRED', error: 'Sua assinatura expirou. Escolha um plano para continuar.' });
-    return { allowed: false };
-  }
-  if (state.remaining <= 0) {
-    res.status(429).json({ success: false, code: 'PLAN_LIMIT_REACHED', renewsAt: state.subscription.current_period_end, error: `Você atingiu o limite do seu plano. Seu limite será renovado em ${new Date(state.subscription.current_period_end).toLocaleDateString('pt-BR')}. Para continuar analisando novos arquivos agora, faça upgrade para um plano maior.` });
-    return { allowed: false };
-  }
-
-  (req as any).billingUserId = userId;
-  return { allowed: true, billingUserId: userId };
+  // Fail-closed: No entitlement for ArteCheck in Prexyon
+  res.status(403).json({
+    success: false,
+    code: 'ENTITLEMENT_REQUIRED',
+    error: 'Sua organização não possui acesso ao ArteCheck. Contrate ou ative seu plano no Portal Prexyon para continuar.',
+  });
+  return { allowed: false };
 }
 
-async function getSubscriptionUsage(userId: string) {
-  const isUuid = isValidUuid(userId);
-
-  // Se userId for não-UUID (ambiente local/dev, teste, guest):
-  if (!isUuid) {
-    const cycleMs = 30 * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const periodStart = new Date(now).toISOString();
-    const periodEnd = new Date(now + cycleMs).toISOString();
-    const limit = BILLING_PLAN_LIMITS.free || 15;
-    return {
-      subscription: {
-        id: `dev_${userId}`,
-        user_id: userId,
-        organization_id: null,
-        plan_code: 'free',
-        billing_period: 'monthly',
-        status: 'active',
-        current_period_start: periodStart,
-        current_period_end: periodEnd,
-        cancel_at_period_end: false,
-        promotion_cycles_used: 0,
-        is_virtual_free: true,
-      },
-      used: 0,
-      limit,
-      remaining: limit,
-      isFree: true,
-    };
-  }
-
+/**
+ * Records successful analysis telemetry and metadata in public.analyses.
+ * Preserves user_id and organization_id for history and operational metrics.
+ */
+async function recordSuccessfulAnalysis(opts: {
+  userId?: string | null;
+  organizationId?: string | null;
+  analysisId: string;
+  fileName: string;
+  fileSizeBytes: number;
+  score?: number;
+  errorCount?: number;
+  warningCount?: number;
+  approvedCount?: number;
+  status?: string;
+  requestId?: string;
+}) {
   const admin = getBillingAdmin();
-  if (!admin) return null;
+  if (!admin) return;
 
-  // 1. Consulta subscription ativa ou cancelada
-  let subscription: any = null;
-  let subError: any = null;
-  try {
-    const res = await admin
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .in('status', ['active', 'canceled'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    subscription = res.data;
-    subError = res.error;
-  } catch (err: any) {
-    console.error('Erro ao consultar assinaturas no Supabase:', err?.message || err);
-    throw new Error(`Erro ao consultar assinaturas: ${err?.message || err}`);
-  }
-
-  if (subError) {
-    throw new Error(`Erro ao consultar assinaturas: ${subError.message}`);
-  }
-
-  // 2. Se houver subscription válida com períodos definidos
-  if (subscription && subscription.current_period_start && subscription.current_period_end) {
-    const limit = BILLING_PLAN_LIMITS[subscription.plan_code] || 0;
-    const { count, error: usageError } = await admin
-      .from('analysis_usage_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('subscription_id', subscription.id)
-      .eq('status', 'counted')
-      .gte('counted_at', subscription.current_period_start)
-      .lt('counted_at', subscription.current_period_end);
-
-    if (usageError) {
-      throw new Error(`Erro ao consultar uso da assinatura: ${usageError.message}`);
-    }
-
-    const used = count || 0;
-    return {
-      subscription,
-      used,
-      limit,
-      remaining: Math.max(0, limit - used),
-      isFree: false,
-    };
-  }
-
-  // 3. Usuário autenticado com UUID válido sem subscription ativa -> Plano FREE virtual ativo com 15 análises
-  let userCreatedAt: Date = new Date();
-  try {
-    const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
-
-    if (userError) {
-      console.warn(`[Billing] Usuário auth não localizado para ${userId}:`, userError.message);
-    } else if (userData?.user?.created_at) {
-      const parsedDate = new Date(userData.user.created_at);
-      if (!isNaN(parsedDate.getTime())) {
-        userCreatedAt = parsedDate;
-      }
-    }
-  } catch (err: any) {
-    console.warn(`[Billing] Falha ao obter created_at do usuário para ${userId}:`, err?.message || err);
-  }
-
-  const now = Date.now();
-  const cycleMs = 30 * 24 * 60 * 60 * 1000;
-  const elapsed = Math.max(0, now - userCreatedAt.getTime());
-  const cycleIndex = Math.floor(elapsed / cycleMs);
-  const periodStart = new Date(userCreatedAt.getTime() + cycleIndex * cycleMs).toISOString();
-  const periodEnd = new Date(userCreatedAt.getTime() + (cycleIndex + 1) * cycleMs).toISOString();
-
-  const limit = BILLING_PLAN_LIMITS.free || 15;
-
-  let count = 0;
-  let hasFoundEvents = false;
-
-  // Consulta canônica em analysis_usage_events (tabela oficial de eventos de cota)
-  try {
-    const usageRes = await admin
-      .from('analysis_usage_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'counted')
-      .gte('counted_at', periodStart)
-      .lt('counted_at', periodEnd);
-
-    if (!usageRes.error && typeof usageRes.count === 'number') {
-      count = usageRes.count;
-      hasFoundEvents = true;
-    }
-  } catch (err: any) {
-    console.warn(`[Billing] Consulta primária em analysis_usage_events para free user ${userId}:`, err?.message || err);
-  }
-
-  // Fallback / histórico legado na tabela analyses
-  if (!hasFoundEvents || count === 0) {
-    try {
-      const aRes = await admin
-        .from('analyses')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .gte('created_at', periodStart)
-        .lt('created_at', periodEnd);
-
-      if (!aRes.error && typeof aRes.count === 'number' && aRes.count > 0) {
-        count = aRes.count;
-      }
-    } catch (err: any) {
-      console.warn(`[Billing] Consulta fallback em analyses para ${userId}:`, err?.message || err);
-    }
-  }
-
-  const used = count || 0;
-  const virtualFreeSubscription = {
-    id: `free_${userId}`,
-    user_id: userId,
-    organization_id: null,
-    plan_code: 'free',
-    billing_period: 'monthly',
-    status: 'active',
-    current_period_start: periodStart,
-    current_period_end: periodEnd,
-    cancel_at_period_end: false,
-    promotion_cycles_used: 0,
-    is_virtual_free: true,
-  };
-
-  return {
-    subscription: virtualFreeSubscription,
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    isFree: true,
-  };
-}
-
-async function recordSuccessfulAnalysis(
-  userId: string,
-  analysisId: string,
-  uploadBytes: number,
-  correlationId?: string
-) {
-  if (!isBillingEnforced()) return;
-  if (!isValidUuid(userId)) return;
-
-  const admin = getBillingAdmin();
-  if (!admin) {
-    throw new Error('Supabase billing admin client indisponível.');
-  }
-
-  const state = await getSubscriptionUsage(userId);
-  if (!state || state.remaining <= 0) {
-    throw new Error('Limite de análises atingido para este ciclo.');
-  }
+  const {
+    userId,
+    organizationId,
+    analysisId,
+    fileName,
+    fileSizeBytes,
+    score = 100,
+    errorCount = 0,
+    warningCount = 0,
+    approvedCount = 0,
+    status = 'completed',
+    requestId,
+  } = opts;
 
   const nowIso = new Date().toISOString();
-  const safeBytes = Math.max(0, Number(uploadBytes) || 0);
+  const validUserUuid = userId && isValidUuid(userId) ? userId : null;
+  const validOrgUuid = organizationId && isValidUuid(organizationId) ? organizationId : null;
+  const validAnalysisUuid = isValidUuid(analysisId) ? analysisId : undefined;
 
-  if (state.isFree) {
-    // 1. Tenta gravar na tabela canônica oficial analysis_usage_events (com subscription_id = null)
-    let recorded = false;
-    try {
-      const { error: usageErr } = await admin.from('analysis_usage_events').upsert({
-        user_id: userId,
-        organization_id: state.subscription.organization_id || null,
-        subscription_id: null,
-        analysis_id: analysisId,
-        upload_bytes: safeBytes,
-        billing_period_start: state.subscription.current_period_start,
-        billing_period_end: state.subscription.current_period_end,
-        status: 'counted',
-        counted_at: nowIso,
-      }, {
-        onConflict: 'user_id,analysis_id',
-        ignoreDuplicates: true,
-      });
-
-      if (!usageErr) {
-        recorded = true;
-      } else {
-        console.warn(`[Billing:${correlationId || analysisId}] analysis_usage_events (null sub) retornou: ${usageErr.message}. Tentando fallback em analyses.`);
-      }
-    } catch (err: any) {
-      console.warn(`[Billing:${correlationId || analysisId}] Exceção ao gravar em analysis_usage_events:`, err?.message || err);
-    }
-
-    // 2. Se analysis_usage_events falhou (ex: restrição NOT NULL em banco pré-migração 004), grava na tabela base analyses com colunas canônicas
-    if (!recorded) {
-      const { error: analysesErr } = await admin.from('analyses').insert({
-        id: isValidUuid(analysisId) ? analysisId : undefined,
-        user_id: userId,
-        organization_id: state.subscription.organization_id || null,
-        file_name: 'analysis.pdf',
-        score: 100,
-        error_count: 0,
-        warning_count: 0,
-        approved_count: 0,
-        created_at: nowIso,
-      });
-
-      if (analysesErr) {
-        console.error(`[Billing:${correlationId || analysisId}] Falha ao persistir uso em analyses para user ${userId}:`, analysesErr.message);
-        throw new Error('Falha de persistência ao registrar evento de uso.');
-      }
-    }
-  } else {
-    // Plano pago: registra em analysis_usage_events com subscription_id física válida
-    const { error } = await admin.from('analysis_usage_events').upsert({
-      user_id: userId,
-      organization_id: state.subscription.organization_id || null,
-      subscription_id: state.subscription.id,
-      analysis_id: analysisId,
-      upload_bytes: safeBytes,
-      billing_period_start: state.subscription.current_period_start,
-      billing_period_end: state.subscription.current_period_end,
-      status: 'counted',
-      counted_at: nowIso,
-    }, {
-      onConflict: 'user_id,analysis_id',
-      ignoreDuplicates: true,
+  try {
+    const { error: insertErr } = await admin.from('analyses').insert({
+      id: validAnalysisUuid,
+      user_id: validUserUuid,
+      organization_id: validOrgUuid,
+      file_name: fileName || 'analysis.pdf',
+      file_size_bytes: Math.max(0, Number(fileSizeBytes) || 0),
+      score,
+      status,
+      error_count: errorCount,
+      warning_count: warningCount,
+      approved_count: approvedCount,
+      created_at: nowIso,
     });
 
-    if (error) {
-      console.error(`[Billing:${correlationId || analysisId}] Falha ao registrar evento de uso pago para análise ${analysisId}:`, error.message);
-      throw new Error('Falha de persistência ao registrar evento de uso.');
+    if (insertErr) {
+      console.warn(`[Analyses:${requestId || analysisId}] Registro operacional em analyses:`, insertErr.message);
     }
+  } catch (err: any) {
+    console.warn(`[Analyses:${requestId || analysisId}] Falha ao registrar telemetria em analyses:`, err?.message || err);
   }
 }
 
@@ -680,382 +439,8 @@ async function startServer() {
       endpoints: ["/api/health", "/api/upload", "/api/diagnose", "/api/assistant"],
       persistence: isSupabase ? "supabase_postgres" : "local_client_only",
       authentication: isSupabase ? "supabase_jwt" : "local_dev",
-      billing: isBillingEnforced() ? "configured" : "test_architecture_only",
+      entitlement: "prexyon_central",
     });
-  });
-
-  // Billing status is read-only for the browser; prices/limits remain server authoritative.
-  app.get('/api/billing/status', async (req: Request, res: Response) => {
-    const userId = (req as any).authUser?.id;
-    if (!userId) return res.status(401).json({ success: false, error: 'Autenticação necessária.' });
-    try {
-      const state = await getSubscriptionUsage(userId);
-      if (!state) {
-        return res.json({
-          success: true,
-          configured: isBillingEnforced(),
-          plan: 'free',
-          status: 'active',
-          subscription: null,
-          usedAnalyses: 0,
-          limitAnalyses: 15,
-          usage: { used: 0, limit: 15, remaining: 15, percentage: 0 },
-        });
-      }
-      const s = state.subscription;
-      const isVirtualFree = Boolean((s as any).is_virtual_free);
-      return res.json({
-        success: true,
-        configured: isBillingEnforced(),
-        plan: s.plan_code,
-        status: s.status,
-        usedAnalyses: state.used,
-        limitAnalyses: state.limit,
-        subscription: isVirtualFree ? null : {
-          id: s.id,
-          planCode: s.plan_code,
-          billingPeriod: s.billing_period,
-          status: s.status,
-          currentPeriodStart: s.current_period_start,
-          currentPeriodEnd: s.current_period_end,
-          cancelAtPeriodEnd: s.cancel_at_period_end,
-          promotionCyclesUsed: s.promotion_cycles_used || 0,
-        },
-        usage: {
-          used: state.used,
-          limit: state.limit,
-          remaining: state.remaining,
-          percentage: state.limit ? Math.min(100, Math.round((state.used / state.limit) * 100)) : 0,
-        },
-      });
-    } catch (err: any) {
-      console.error('Erro ao consultar status de assinatura:', err);
-      return res.status(500).json({ success: false, error: 'Erro ao consultar status de assinatura.' });
-    }
-  });
-
-  app.post('/api/billing/checkout', async (req: Request, res: Response) => {
-    const authUser = (req as any).authUser;
-    if (!authUser?.id) {
-      return res.status(401).json({ success: false, error: 'Autenticação necessária.' });
-    }
-
-    const planCode = String(req.body?.plan_code || req.body?.plan || '').trim() as PlanCode;
-    const billingPeriod = String(req.body?.billing_period || req.body?.period || '').trim() as BillingPeriod;
-
-    const planDef = PLANS[planCode];
-    if (!planDef) {
-      return res.status(400).json({ success: false, error: 'Plano inválido ou inexistente.' });
-    }
-
-    if (billingPeriod !== 'monthly' && billingPeriod !== 'yearly') {
-      return res.status(400).json({ success: false, error: 'Período de cobrança inválido.' });
-    }
-
-    if (planCode === 'professional_launch' && billingPeriod === 'yearly') {
-      return res.status(400).json({ success: false, error: 'O plano promocional de lançamento está disponível apenas no ciclo mensal.' });
-    }
-
-    // Preço é estritamente resolvido server-side a partir da definição do plano (public.plans / PLANS)
-    const price = billingPeriod === 'yearly' ? planDef.yearlyPrice : planDef.monthlyPrice;
-    if (price == null || price <= 0 || isNaN(price)) {
-      return res.status(400).json({ success: false, error: 'Preço inválido para o ciclo selecionado.' });
-    }
-
-    if (!isMercadoPagoConfigured()) {
-      return res.status(503).json({
-        success: false,
-        code: 'BILLING_PROVIDER_NOT_CONFIGURED',
-        error: 'Checkout em modo de preparação. Configure MERCADOPAGO_ACCESS_TOKEN e BILLING_PROVIDER=mercadopago para ativar cobranças.'
-      });
-    }
-
-    try {
-      const admin = getBillingAdmin();
-      let subscriptionId = randomUUID();
-
-      if (admin) {
-        const { data: existingSub } = await admin
-          .from('subscriptions')
-          .select('id')
-          .eq('user_id', authUser.id)
-          .eq('status', 'pending')
-          .maybeSingle();
-
-        if (existingSub?.id) {
-          subscriptionId = existingSub.id;
-          await admin.from('subscriptions').update({
-            plan_code: planCode,
-            billing_period: billingPeriod,
-            provider: 'mercadopago',
-            updated_at: new Date().toISOString(),
-          }).eq('id', subscriptionId);
-        } else {
-          const { data: insertedSub } = await admin.from('subscriptions').insert({
-            id: subscriptionId,
-            user_id: authUser.id,
-            plan_code: planCode,
-            billing_period: billingPeriod,
-            status: 'pending',
-            provider: 'mercadopago',
-          }).select('id').single();
-
-          if (insertedSub?.id) {
-            subscriptionId = insertedSub.id;
-          }
-        }
-      }
-
-      const hostHeader = req.get('host') || 'localhost:3000';
-      const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-      const appOrigin = process.env.APP_URL?.trim().replace(/\/$/, '') || `${protocol}://${hostHeader}`;
-
-      const preference = await createMercadoPagoCheckoutPreference({
-        userId: authUser.id,
-        userEmail: authUser.email,
-        planCode,
-        planName: planDef.name,
-        billingPeriod,
-        price,
-        subscriptionId,
-        origin: appOrigin,
-      });
-
-      if (admin && preference.id) {
-        await admin.from('subscriptions').update({
-          provider_subscription_id: preference.id,
-          updated_at: new Date().toISOString(),
-        }).eq('id', subscriptionId);
-      }
-
-      return res.status(200).json({
-        success: true,
-        checkoutUrl: preference.initPoint,
-        url: preference.initPoint,
-        subscriptionId,
-        status: 'pending',
-      });
-    } catch (checkoutError: any) {
-      console.error('Erro ao gerar checkout do Mercado Pago:', checkoutError.message || checkoutError);
-      return res.status(502).json({
-        success: false,
-        error: checkoutError.message || 'Falha ao processar checkout junto ao Mercado Pago.',
-      });
-    }
-  });
-
-  app.post('/api/billing/portal', async (req: Request, res: Response) => {
-    if (!(req as any).authUser?.id) return res.status(401).json({ success: false, error: 'Autenticação necessária.' });
-    return res.status(503).json({ success: false, code: 'BILLING_PROVIDER_NOT_CONFIGURED', error: 'Portal de cobrança ainda não configurado.' });
-  });
-
-  // POST /api/billing/webhook/mercadopago - Secure Mercado Pago Webhook
-  app.post('/api/billing/webhook/mercadopago', async (req: Request, res: Response) => {
-    const xSignatureHeader = req.headers['x-signature'] as string | undefined;
-    const xRequestIdHeader = req.headers['x-request-id'] as string | undefined;
-    const body = req.body || {};
-    const query = req.query || {};
-
-    const resourceType = String(body.type || body.topic || query.type || query.topic || '').trim();
-    const dataId = String(body.data?.id || body.id || query['data.id'] || query.id || '').trim();
-
-    // 1. Validar assinatura com chave secreta
-    const isValidSignature = verifyMercadoPagoWebhookSignature({
-      xSignatureHeader,
-      xRequestIdHeader,
-      dataId,
-    });
-
-    if (!isValidSignature) {
-      // Assinatura inválida => HTTP 401 e nenhuma alteração no banco
-      return res.status(401).json({
-        success: false,
-        error: 'Assinatura de webhook inválida ou ausente.',
-      });
-    }
-
-    // 2. Tratar apenas eventos suportados de assinaturas
-    const isPreapproval = resourceType === 'subscription_preapproval' || resourceType === 'preapproval';
-    const isAuthorizedPayment = resourceType === 'subscription_authorized_payment' || resourceType === 'authorized_payment';
-
-    if (!isPreapproval && !isAuthorizedPayment) {
-      // Evento válido recebido mas fora do escopo de assinaturas (ex: teste ou outro tipo)
-      return res.status(200).json({ received: true, ignored: true, reason: 'unsupported_resource_type' });
-    }
-
-    const admin = getBillingAdmin();
-    if (!admin) {
-      return res.status(500).json({ success: false, error: 'Database service role client not configured.' });
-    }
-
-    try {
-      // 3. NUNCA confiar apenas no payload recebido; consultar diretamente a API do Mercado Pago
-      const verifiedResource = await fetchMercadoPagoResource(resourceType, dataId);
-      if (!verifiedResource) {
-        return res.status(404).json({ success: false, error: 'Recurso não encontrado na API Mercado Pago.' });
-      }
-
-      let preapprovalId: string | null = null;
-      let externalReference: string | null = null;
-      let verifiedStatus: string | null = null;
-      let nextPaymentDate: string | null = null;
-      let dateCreated: string | null = null;
-
-      if (isPreapproval) {
-        preapprovalId = verifiedResource.id || dataId;
-        externalReference = verifiedResource.external_reference || null;
-        verifiedStatus = (verifiedResource.status || '').toLowerCase();
-        nextPaymentDate = verifiedResource.next_payment_date || null;
-        dateCreated = verifiedResource.date_created || null;
-      } else if (isAuthorizedPayment) {
-        preapprovalId = verifiedResource.preapproval_id || null;
-        externalReference = verifiedResource.external_reference || null;
-        const paymentStatus = (verifiedResource.status || '').toLowerCase();
-        if (paymentStatus === 'approved') {
-          verifiedStatus = 'authorized';
-        } else if (paymentStatus === 'rejected' || paymentStatus === 'cancelled') {
-          verifiedStatus = 'cancelled';
-        }
-      }
-
-      // 4. Mapear status do Mercado Pago para os status permitidos em public.subscriptions
-      // Status permitidos: ('pending','active','past_due','canceled','expired')
-      let mappedStatus: 'active' | 'pending' | 'past_due' | 'canceled' | 'expired' | null = null;
-      if (verifiedStatus === 'authorized' || verifiedStatus === 'active') {
-        mappedStatus = 'active';
-      } else if (verifiedStatus === 'pending') {
-        mappedStatus = 'pending';
-      } else if (verifiedStatus === 'paused') {
-        mappedStatus = 'past_due';
-      } else if (verifiedStatus === 'cancelled' || verifiedStatus === 'canceled') {
-        mappedStatus = 'canceled';
-      } else if (verifiedStatus === 'expired') {
-        mappedStatus = 'expired';
-      }
-
-      if (!mappedStatus) {
-        return res.status(200).json({ received: true, ignored: true, reason: 'unknown_mp_status', status: verifiedStatus });
-      }
-
-      // 5. Localizar assinatura existente por provider_subscription_id ou ID de referência
-      let existingSub: any = null;
-      if (preapprovalId) {
-        const { data } = await admin
-          .from('subscriptions')
-          .select('*')
-          .eq('provider_subscription_id', preapprovalId)
-          .maybeSingle();
-        existingSub = data;
-      }
-
-      if (!existingSub && externalReference) {
-        const { data } = await admin
-          .from('subscriptions')
-          .select('*')
-          .eq('id', externalReference)
-          .maybeSingle();
-        existingSub = data;
-      }
-
-      if (!existingSub) {
-        return res.status(200).json({
-          received: true,
-          matched: false,
-          message: 'Nenhuma assinatura local correspondente encontrada para atualizar.',
-        });
-      }
-
-      // 6. Extrair períodos diretamente do recurso Mercado Pago
-      // Mercado Pago preapproval traz:
-      // auto_recurring: { start_date, end_date, ... } ou date_created / next_payment_date / last_modified
-      const now = new Date();
-      const mpStartDate = verifiedResource.auto_recurring?.start_date ||
-        verifiedResource.date_created ||
-        verifiedResource.start_date ||
-        dateCreated;
-      const mpEndDate = verifiedResource.next_payment_date ||
-        verifiedResource.auto_recurring?.end_date ||
-        nextPaymentDate;
-
-      let periodStart = mpStartDate ? new Date(mpStartDate).toISOString() : (existingSub.current_period_start || now.toISOString());
-      let periodEnd = mpEndDate ? new Date(mpEndDate).toISOString() : existingSub.current_period_end;
-
-      if (!periodEnd) {
-        const d = new Date(periodStart);
-        if (existingSub.billing_period === 'yearly') {
-          d.setFullYear(d.getFullYear() + 1);
-        } else {
-          d.setMonth(d.getMonth() + 1);
-        }
-        periodEnd = d.toISOString();
-      }
-
-      // Detecção de novo ciclo confirmado pelo Mercado Pago:
-      // Se a data de início do período mudou ou o status transitou para active a partir de pending
-      const isNewCycle = Boolean(
-        mappedStatus === 'active' && (
-          existingSub.status !== 'active' ||
-          (mpStartDate && existingSub.current_period_start && new Date(mpStartDate).getTime() > new Date(existingSub.current_period_start).getTime())
-        )
-      );
-
-      // 7. professional_launch:
-      // - incrementar promotion_cycles_used somente após pagamento confirmado / novo ciclo
-      // - nunca passar de 6
-      // - após 6 ciclos, não permitir novo ciclo promocional e preparar transição para 'professional'
-      let newPromoCycles = existingSub.promotion_cycles_used || 0;
-      let targetPlanCode = existingSub.plan_code;
-
-      if (existingSub.plan_code === 'professional_launch') {
-        if (isNewCycle) {
-          if (newPromoCycles < 6) {
-            newPromoCycles += 1;
-          }
-        }
-        // Se completou os 6 ciclos promocionais e um novo ciclo ocorrer, faz a transição segura para 'professional'
-        if (newPromoCycles >= 6 && isNewCycle && (existingSub.promotion_cycles_used || 0) >= 6) {
-          targetPlanCode = 'professional';
-        }
-      }
-
-      newPromoCycles = Math.min(6, Math.max(0, newPromoCycles));
-
-      // 8. Atualizar registro local em public.subscriptions
-      const updatePayload: Record<string, any> = {
-        status: mappedStatus,
-        provider: 'mercadopago',
-        plan_code: targetPlanCode,
-        updated_at: now.toISOString(),
-        promotion_cycles_used: newPromoCycles,
-      };
-
-      if (preapprovalId && !existingSub.provider_subscription_id) {
-        updatePayload.provider_subscription_id = preapprovalId;
-      }
-
-      if (mappedStatus === 'active') {
-        updatePayload.current_period_start = periodStart;
-        updatePayload.current_period_end = periodEnd;
-      }
-
-      await admin
-        .from('subscriptions')
-        .update(updatePayload)
-        .eq('id', existingSub.id);
-
-      return res.status(200).json({
-        success: true,
-        subscriptionId: existingSub.id,
-        status: mappedStatus,
-        planCode: targetPlanCode,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd,
-        promotionCyclesUsed: newPromoCycles,
-      });
-    } catch (err: any) {
-      console.error('Erro ao processar webhook do Mercado Pago:', err.message || err);
-      return res.status(500).json({ success: false, error: err.message || 'Erro interno no processamento do webhook.' });
-    }
   });
 
   // POST /api/upload - Stage 3 Real PDF Upload & Deterministic Structure Extraction
@@ -1184,19 +569,19 @@ async function startServer() {
         });
 
         const analysisId = randomUUID();
-        const billingUserId = (req as any).billingUserId as string | undefined;
-        if (billingUserId) {
-          try {
-            await recordSuccessfulAnalysis(billingUserId, analysisId, file.size, requestId);
-          } catch (billingErr: any) {
-            console.error(`[SERVER:${requestId}] Falha ao registrar bilhetagem para ${billingUserId}:`, billingErr?.message || billingErr);
-            return res.status(500).json({
-              success: false,
-              code: 'USAGE_RECORDING_FAILED',
-              error: 'Não foi possível registrar esta análise. Nenhuma cota foi consumida. Tente novamente em alguns instantes.',
-            });
-          }
-        }
+        const authUserId = (req as any).authUser?.id as string | undefined;
+        const orgId = (req as any).organizationId as string | undefined;
+
+        // Telemetry & analysis record in public.analyses
+        await recordSuccessfulAnalysis({
+          userId: authUserId,
+          organizationId: orgId,
+          analysisId,
+          fileName: originalName,
+          fileSizeBytes: file.size,
+          score: 100,
+          requestId,
+        });
 
         console.log(`[SERVER:${requestId}] response started`);
         return res.status(200).json({
@@ -1520,7 +905,6 @@ async function startServer() {
   app.post(
     "/api/flatten-transparency",
     async (req: Request, res: Response, next: NextFunction) => {
-      if (!isBillingEnforced()) return next();
       const auth = await authorizeProcessing(req, res);
       if (!auth.allowed) return;
       next();
