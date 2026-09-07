@@ -86,23 +86,24 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-50 flex h-[72px] min-h-[72px] w-full items-center justify-between border-b border-white/10 bg-[#031225] px-4 text-white shadow-lg shadow-black/20 sm:px-6 lg:px-8">
       {/* Left: Prexyon Identity + Product Module */}
       <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-        {/* Prexyon Brand Logo */}
+        {/* Prexyon Official Brand Logo */}
         <a
           href={portalUrl}
           title="Ir para o Portal Prexyon"
-          className="group flex shrink-0 items-center gap-2.5 rounded-xl pr-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:border-r sm:border-white/15 sm:pr-4"
+          className="group flex shrink-0 items-center rounded-xl pr-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:border-r sm:border-white/15 sm:pr-4"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-md shadow-blue-500/20 transition group-hover:scale-105">
-            <span className="text-lg font-black text-white">P</span>
-          </div>
-          <span className="hidden text-xl font-black tracking-tight text-white transition group-hover:text-slate-100 sm:inline">
-            pre<span className="text-cyan-400">x</span>yon
-          </span>
+          <img
+            src="/prexyon-logo-white.png"
+            alt="Prexyon"
+            className="h-8 w-auto max-w-[130px] sm:max-w-[155px] object-contain object-left transition group-hover:opacity-90"
+          />
         </a>
 
         {/* Current Product Badge: ArteCheck */}
-        <div className="flex h-10 items-center gap-2.5 rounded-xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold tracking-tight text-white shadow-inner sm:px-3.5">
-          <ShieldCheck className="h-5 w-5 text-violet-400" />
+        <div className="flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold tracking-tight text-white shadow-inner sm:px-3.5">
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-violet-400/60 bg-violet-500/20 text-[11px] font-black text-violet-300">
+            AC
+          </span>
           <span>ArteCheck</span>
         </div>
 

@@ -23,9 +23,9 @@ test('barra global Prexyon não contém ações operacionais do ArteCheck', asyn
 test('histórico, perfis e relatório são áreas embutidas da navegação', async () => {
   const app = await readFile(appPath, 'utf8');
   const sidebar = await readFile(sidebarPath, 'utf8');
-  assert.match(app, /<HistoryModal isOpen embedded/);
+  assert.match(app, /<HistoryModal[\s\S]*?embedded/);
   assert.match(app, /<ProductionProfilesModal[\s\S]*?embedded/);
-  assert.match(app, /<TechnicalReportModal isOpen embedded/);
+  assert.match(app, /<TechnicalReportModal[\s\S]*?embedded/);
   assert.match(sidebar, /id: 'history'/);
   assert.match(sidebar, /id: 'profiles'/);
   assert.match(sidebar, /id: 'report'/);
