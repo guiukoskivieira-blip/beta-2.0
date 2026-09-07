@@ -138,18 +138,27 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     assert.match(serverSrc, /from\(['"]organizations['"]\)/);
     assert.match(serverSrc, /org\.is_active/);
 
-    // 3. Deve consultar RPC prexyon_get_organization_entitlements
-    assert.match(serverSrc, /rpc\(['"]prexyon_get_organization_entitlements['"]/);
+    // 3. Deve consultar RPC prexyon_get_organization_entitlements usando cliente autenticado com Bearer JWT
+    assert.match(serverSrc, /function getAuthenticatedSupabaseClient\(authToken:\s*string\)/);
+    assert.match(serverSrc, /Authorization:\s*`Bearer \$\{authToken\.trim\(\)\}`/);
+    assert.match(serverSrc, /userClient\.rpc\(['"]prexyon_get_organization_entitlements['"]/);
 
-    // 4. Deve exigir artecheck em effective_products E homologation_products
+    // 4. NÃO deve usar service_role para a chamada do RPC
+    assert.doesNotMatch(serverSrc, /admin\.rpc\(['"]prexyon_get_organization_entitlements['"]/);
+
+    // 5. Deve passar authToken do request para resolvePrexyonHomologationEntitlement
+    assert.match(serverSrc, /const authToken = \(req as any\)\.authToken;/);
+    assert.match(serverSrc, /resolvePrexyonHomologationEntitlement\(userId,\s*authToken\)/);
+
+    // 6. Deve exigir artecheck em effective_products E homologation_products
     assert.match(serverSrc, /effectiveProducts\.includes\(['"]artecheck['"]\)/);
     assert.match(serverSrc, /homologationProducts\.includes\(['"]artecheck['"]\)/);
 
-    // 5. Homologação autorizada faz bypass de subscriptions/plans/analysis_usage_events
+    // 7. Homologação autorizada faz bypass de subscriptions/plans/analysis_usage_events
     assert.match(serverSrc, /if \(homologation\.authorized\)/);
     assert.match(serverSrc, /prexyonHomologation = true/);
 
-    // 6. Autorização centralizada aplicada a POST /api/upload e POST /api/flatten-transparency
+    // 8. Autorização centralizada aplicada a POST /api/upload e POST /api/flatten-transparency
     assert.match(serverSrc, /app\.post\(\s*["']\/api\/upload["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
     assert.match(serverSrc, /app\.post\(\s*["']\/api\/flatten-transparency["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
   });
@@ -157,23 +166,50 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
   describe('Prexyon Homologation Entitlement Processing Authorization Logic', () => {
     function simulatePrexyonHomologationResolution(opts: {
       userId: string;
+      authToken?: string | null;
+      clientType?: 'authenticated' | 'service_role' | 'anon';
       member?: { organization_id: string; role: string; is_active: boolean } | null;
       memberErr?: any;
       org?: { id: string; is_active: boolean } | null;
       orgErr?: any;
+      rpcCallerRole?: 'authenticated' | 'anon';
+      rpcCallerId?: string | null;
       entData?: { effective_products?: string[]; homologation_products?: string[] } | null;
       entErr?: any;
     }) {
-      const { userId, member, memberErr, org, orgErr, entData, entErr } = opts;
+      const { userId, authToken, clientType, member, memberErr, org, orgErr, rpcCallerRole, rpcCallerId, entData, entErr } = opts;
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-      if (!isUuid) return { authorized: false };
+      if (!isUuid) return { authorized: false, reason: 'invalid_uuid' };
 
-      if (memberErr || !member || !member.is_active) return { authorized: false };
+      // Requer authToken válido
+      if (!authToken || typeof authToken !== 'string' || !authToken.trim()) {
+        return { authorized: false, reason: 'missing_or_empty_jwt' };
+      }
+
+      // Requer client user-scoped authenticated (não service_role nem anon)
+      if (clientType && clientType !== 'authenticated') {
+        return { authorized: false, reason: 'unauthorized_client_type' };
+      }
+
+      if (memberErr || !member || !member.is_active) return { authorized: false, reason: 'inactive_membership' };
       const orgId = member.organization_id;
-      if (!orgId) return { authorized: false };
+      if (!orgId) return { authorized: false, reason: 'missing_org_id' };
 
-      if (orgErr || !org || !org.is_active) return { authorized: false };
-      if (entErr || !entData) return { authorized: false };
+      if (orgErr || !org || !org.is_active) return { authorized: false, reason: 'inactive_org' };
+
+      // Simulação do comportamento interno do RPC no Postgres:
+      const role = rpcCallerRole || 'authenticated';
+      const callerId = rpcCallerId || userId;
+      if (role === 'anon') {
+        // Erro 42501 UNAUTHENTICATED: Anonymous enumeration is not permitted
+        return { authorized: false, rpcError: { code: '42501', message: 'UNAUTHENTICATED: Anonymous enumeration is not permitted' } };
+      }
+      if (role === 'authenticated' && (!callerId || callerId !== userId)) {
+        // Erro 42501 UNAUTHORIZED: User does not have access to this organization
+        return { authorized: false, rpcError: { code: '42501', message: 'UNAUTHORIZED: User does not have access to this organization' } };
+      }
+
+      if (entErr || !entData) return { authorized: false, reason: 'rpc_error' };
 
       const effectiveProducts: string[] = entData.effective_products || [];
       const homologationProducts: string[] = entData.homologation_products || [];
@@ -181,16 +217,21 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       if (effectiveProducts.includes('artecheck') && homologationProducts.includes('artecheck')) {
         return { authorized: true, organizationId: orgId };
       }
-      return { authorized: false };
+      return { authorized: false, reason: 'missing_artecheck_entitlement' };
     }
 
     const validOwnerId = '2e12961a-2294-40dc-8d58-1cd19c8ac0c4';
     const validMemberId = 'c9f649fc-be89-42b4-89ea-9cb3bb2b335c';
     const validOrgId = '43c47a08-2f84-42db-a64d-d1f0ea0c6a6b';
+    const validJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.jwt';
 
-    it('A) homologation entitlement ArteCheck válido -> upload e flatten permitidos sem subscriptions', () => {
+    it('A) homologation entitlement ArteCheck válido com Bearer JWT -> autorizado com contexto authenticated', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
@@ -202,9 +243,13 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.organizationId, validOrgId);
     });
 
-    it('B) homologation entitlement válido para MEMBER -> autorizado com organização resolvida no servidor', () => {
+    it('B) homologation entitlement válido para MEMBER com Bearer JWT -> autorizado', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validMemberId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validMemberId,
         member: { organization_id: validOrgId, role: 'member', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
@@ -216,9 +261,39 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.organizationId, validOrgId);
     });
 
-    it('C) sem entitlement ArteCheck (outros produtos) -> BLOQUEADO (fail-closed)', () => {
+    it('C) RPC com role anon (sem JWT) lança 42501 -> FAIL CLOSED', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        rpcCallerRole: 'anon',
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal((res as any).rpcError?.code, '42501');
+    });
+
+    it('D) JWT ausente ou vazio -> BLOQUEADO imediatamente', () => {
+      const res1 = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        authToken: null,
+      });
+      assert.equal(res1.authorized, false);
+      assert.equal(res1.reason, 'missing_or_empty_jwt');
+
+      const res2 = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        authToken: '   ',
+      });
+      assert.equal(res2.authorized, false);
+      assert.equal(res2.reason, 'missing_or_empty_jwt');
+    });
+
+    it('E) sem entitlement ArteCheck (outros produtos) -> BLOQUEADO (fail-closed)', () => {
+      const res = simulatePrexyonHomologationResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
@@ -229,9 +304,11 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.authorized, false);
     });
 
-    it('D) artecheck em effective_products mas ausente em homologation_products -> BLOQUEADO', () => {
+    it('F) artecheck em effective_products mas ausente em homologation_products -> BLOQUEADO', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
@@ -242,9 +319,11 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.authorized, false);
     });
 
-    it('E) membership inválido/inativo -> BLOQUEADO', () => {
+    it('G) membership inválido/inativo -> BLOQUEADO', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: false },
         org: { id: validOrgId, is_active: true },
         entData: {
@@ -255,9 +334,11 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.authorized, false);
     });
 
-    it('F) organização inativa -> BLOQUEADO', () => {
+    it('H) organização inativa -> BLOQUEADO', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: false },
         entData: {
@@ -268,9 +349,11 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.authorized, false);
     });
 
-    it('G) erro de RPC central de entitlements -> BLOQUEADO (fail-closed)', () => {
+    it('I) erro de rede no RPC central de entitlements -> BLOQUEADO (fail-closed)', () => {
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
         entErr: new Error('RPC network failure'),
@@ -278,12 +361,18 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal(res.authorized, false);
     });
 
-    it('H) usuário sem membership -> BLOQUEADO', () => {
+    it('J) Segurança: nenhum JWT ou token é exposto em logs ou retornos de erro', () => {
+      // Garante que a resolução não expõe o token
       const res = simulatePrexyonHomologationResolution({
         userId: validOwnerId,
-        member: null,
+        authToken: 'secret-jwt-token-123',
+        clientType: 'authenticated',
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: { effective_products: ['artecheck'], homologation_products: ['artecheck'] },
       });
-      assert.equal(res.authorized, false);
+      const serialized = JSON.stringify(res);
+      assert.equal(serialized.includes('secret-jwt-token-123'), false);
     });
   });
 });

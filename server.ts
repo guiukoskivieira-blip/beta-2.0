@@ -62,6 +62,32 @@ function getBillingAdmin() {
   return createClient(rawUrl, rawKey, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+/**
+ * Creates a user-scoped authenticated Supabase client for RPC calls using the user's Bearer JWT.
+ * NEVER uses service_role key to bypass internal PostgreSQL / RPC authorization checks.
+ * Sets Authorization: Bearer <authToken> so PostgreSQL runs with auth.role() = 'authenticated'
+ * and auth.uid() = user.id.
+ */
+function getAuthenticatedSupabaseClient(authToken: string) {
+  if (!authToken || typeof authToken !== 'string' || !authToken.trim()) return null;
+  const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const anonKey = (
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+  if (!rawUrl || !anonKey || !rawUrl.startsWith('http')) return null;
+
+  return createClient(rawUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${authToken.trim()}`,
+      },
+    },
+  });
+}
+
 function isBillingEnforced() {
   return Boolean(getBillingAdmin() && process.env.BILLING_PROVIDER);
 }
@@ -72,16 +98,21 @@ function isBillingEnforced() {
  * 1. Resolves organization membership for the authenticated user (server-authoritative).
  * 2. Ensures membership is active (is_active: true).
  * 3. Verifies organization is active (is_active: true).
- * 4. Calls RPC `prexyon_get_organization_entitlements`.
+ * 4. Calls RPC `prexyon_get_organization_entitlements` using the user's Bearer JWT client (authenticated role).
+ *    NEVER uses service_role key to bypass internal PostgreSQL / RPC authorization checks.
  * 5. Checks if "artecheck" is in `effective_products` AND `homologation_products`.
  * Returns { authorized: true, organizationId } if all conditions met; otherwise { authorized: false }.
- * Fail-closed on any error or missing requirement.
+ * Fail-closed on any error, missing token, or missing requirement.
  */
-async function resolvePrexyonHomologationEntitlement(userId: string): Promise<{ authorized: boolean; organizationId?: string }> {
+async function resolvePrexyonHomologationEntitlement(userId: string, authToken?: string | null): Promise<{ authorized: boolean; organizationId?: string }> {
   if (!isValidUuid(userId)) return { authorized: false };
+  if (!authToken || typeof authToken !== 'string' || !authToken.trim()) return { authorized: false };
 
   const admin = getBillingAdmin();
   if (!admin) return { authorized: false };
+
+  const userClient = getAuthenticatedSupabaseClient(authToken);
+  if (!userClient) return { authorized: false };
 
   try {
     // 1. Membership lookup (server-authoritative: resolve org from user membership)
@@ -109,8 +140,9 @@ async function resolvePrexyonHomologationEntitlement(userId: string): Promise<{ 
       return { authorized: false };
     }
 
-    // 3. Entitlement check via Prexyon central RPC
-    const { data: entData, error: entErr } = await admin.rpc('prexyon_get_organization_entitlements', {
+    // 3. Entitlement check via Prexyon central RPC using user-scoped authenticated client
+    // Executes with auth.role() = 'authenticated' and auth.uid() = user.id.
+    const { data: entData, error: entErr } = await userClient.rpc('prexyon_get_organization_entitlements', {
       p_org_id: orgId,
     });
 
@@ -147,10 +179,11 @@ async function authorizeProcessing(req: Request, res: Response): Promise<{ allow
   }
 
   const userId = (req as any).authUser?.id;
+  const authToken = (req as any).authToken;
   if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' }) as any;
 
-  // 1. Check explicit Prexyon homologation entitlement
-  const homologation = await resolvePrexyonHomologationEntitlement(userId);
+  // 1. Check explicit Prexyon homologation entitlement using the user's Bearer JWT
+  const homologation = await resolvePrexyonHomologationEntitlement(userId, authToken);
   if (homologation.authorized) {
     // Homologation explicitly authorized — bypass legacy subscriptions/plans/analysis_usage_events
     (req as any).prexyonHomologation = true;
