@@ -15,9 +15,9 @@ Configure as seguintes variáveis no servidor de produção (ou no Secret Manage
 | `APP_URL` | Recomendado | URL pública canônica da aplicação frontend | `https://app.artecheck.com.br` |
 | `API_URL` | Recomendado | URL pública da API backend | `https://app.artecheck.com.br` |
 | `VITE_SUPABASE_URL` | Obrigatório (SaaS) | URL do projeto Supabase | `https://xyz.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Obrigatório (SaaS) | Chave pública Publishable do Supabase (fallback: `VITE_SUPABASE_ANON_KEY`) | `sb_publishable_...` |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Obrigatório (SaaS) | Chave pública Publishable do Supabase | `sb_publishable_...` |
 | `SUPABASE_SECRET_KEY` | Servidor | Chave privada Secret Key (apenas backend) | `sb_secret_...` |
-| `SUPABASE_PUBLISHABLE_KEY` | Servidor | Chave pública para cliente autenticado backend (fallback: `SUPABASE_ANON_KEY`) | `sb_publishable_...` |
+| `SUPABASE_PUBLISHABLE_KEY` | Servidor | Chave pública para cliente autenticado backend | `sb_publishable_...` |
 | `GEMINI_API_KEY` | Opcional | Chave para o assistente de IA explicativo | `AIzaSy...` |
 
 > ⚠️ **Regra Crítica de Segurança**: A variável `SUPABASE_SECRET_KEY` **NUNCA** deve receber o prefixo `VITE_` e deve residir exclusivamente no backend.

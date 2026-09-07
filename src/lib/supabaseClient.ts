@@ -19,7 +19,7 @@ export function resolveSupabaseEnv(): { url: string; anonKey: string; hasPartial
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
       const meta = (import.meta as any).env;
       url = meta.VITE_SUPABASE_URL || meta.SUPABASE_URL || '';
-      anonKey = meta.VITE_SUPABASE_PUBLISHABLE_KEY || meta.VITE_SUPABASE_ANON_KEY || meta.SUPABASE_PUBLISHABLE_KEY || meta.SUPABASE_ANON_KEY || '';
+      anonKey = meta.VITE_SUPABASE_PUBLISHABLE_KEY || meta.SUPABASE_PUBLISHABLE_KEY || '';
     }
   } catch {
     // Ignore meta resolution error
@@ -33,7 +33,7 @@ export function resolveSupabaseEnv(): { url: string; anonKey: string; hasPartial
           url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
         }
         if (!anonKey) {
-          anonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+          anonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || '';
         }
       }
     } catch {
