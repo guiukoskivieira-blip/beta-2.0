@@ -105,50 +105,98 @@ function isBillingEnforced() {
  * Fail-closed on any error, missing token, or missing requirement.
  */
 async function resolvePrexyonHomologationEntitlement(userId: string, authToken?: string | null): Promise<{ authorized: boolean; organizationId?: string }> {
-  if (!isValidUuid(userId)) return { authorized: false };
-  if (!authToken || typeof authToken !== 'string' || !authToken.trim()) return { authorized: false };
+  const t0 = Date.now();
+  if (!isValidUuid(userId)) {
+    console.warn('[PREXYON_AUTH] invalid_user_uuid');
+    return { authorized: false };
+  }
+  if (!authToken || typeof authToken !== 'string' || !authToken.trim()) {
+    console.warn('[PREXYON_AUTH] token_missing_or_empty');
+    return { authorized: false };
+  }
+
+  console.log('[PREXYON_AUTH] token_present');
 
   const admin = getBillingAdmin();
-  if (!admin) return { authorized: false };
+  if (!admin) {
+    console.warn('[PREXYON_ADMIN] client_unavailable');
+    return { authorized: false };
+  }
 
   const userClient = getAuthenticatedSupabaseClient(authToken);
-  if (!userClient) return { authorized: false };
+  if (!userClient) {
+    console.warn('[PREXYON_USER_CLIENT] client_creation_failed');
+    return { authorized: false };
+  }
 
   try {
     // 1. Membership lookup (server-authoritative: resolve org from user membership)
+    const tMem = Date.now();
     const { data: member, error: memberErr } = await admin
       .from('organization_members')
       .select('organization_id, role, is_active')
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (memberErr || !member || !member.is_active) {
+    if (memberErr) {
+      console.warn(`[PREXYON_MEMBERSHIP] query_failed code=${memberErr.code || 'unknown'} elapsedMs=${Date.now() - tMem}`);
+      return { authorized: false };
+    }
+    if (!member) {
+      console.warn(`[PREXYON_MEMBERSHIP] not_found elapsedMs=${Date.now() - tMem}`);
+      return { authorized: false };
+    }
+    if (!member.is_active) {
+      console.warn(`[PREXYON_MEMBERSHIP] inactive elapsedMs=${Date.now() - tMem}`);
       return { authorized: false };
     }
 
     const orgId = member.organization_id;
-    if (!orgId) return { authorized: false };
+    if (!orgId) {
+      console.warn(`[PREXYON_MEMBERSHIP] missing_org_id elapsedMs=${Date.now() - tMem}`);
+      return { authorized: false };
+    }
+    console.log(`[PREXYON_MEMBERSHIP] resolved elapsedMs=${Date.now() - tMem}`);
 
     // 2. Organization active check
+    const tOrg = Date.now();
     const { data: org, error: orgErr } = await admin
       .from('organizations')
       .select('id, is_active')
       .eq('id', orgId)
       .maybeSingle();
 
-    if (orgErr || !org || !org.is_active) {
+    if (orgErr) {
+      console.warn(`[PREXYON_ORGANIZATION] query_failed code=${orgErr.code || 'unknown'} elapsedMs=${Date.now() - tOrg}`);
       return { authorized: false };
     }
+    if (!org) {
+      console.warn(`[PREXYON_ORGANIZATION] not_found elapsedMs=${Date.now() - tOrg}`);
+      return { authorized: false };
+    }
+    if (!org.is_active) {
+      console.warn(`[PREXYON_ORGANIZATION] inactive elapsedMs=${Date.now() - tOrg}`);
+      return { authorized: false };
+    }
+    console.log(`[PREXYON_ORGANIZATION] resolved elapsedMs=${Date.now() - tOrg}`);
 
     // 3. Entitlement check via Prexyon central RPC using user-scoped authenticated client
     // Executes with auth.role() = 'authenticated' and auth.uid() = user.id.
+    const tRpc = Date.now();
+    console.log('[PREXYON_RPC] started');
     const { data: entData, error: entErr } = await userClient.rpc('prexyon_get_organization_entitlements', {
       p_org_id: orgId,
     });
 
-    if (entErr || !entData) {
+    if (entErr) {
+      console.warn(`[PREXYON_RPC] failed code=${entErr.code || 'unknown'} message=${entErr.message?.slice(0, 100)} elapsedMs=${Date.now() - tRpc}`);
       return { authorized: false };
     }
+    if (!entData) {
+      console.warn(`[PREXYON_RPC] null_data elapsedMs=${Date.now() - tRpc}`);
+      return { authorized: false };
+    }
+    console.log(`[PREXYON_RPC] success elapsedMs=${Date.now() - tRpc}`);
 
     const effectiveProducts: string[] = (entData as any).effective_products || [];
     const homologationProducts: string[] = (entData as any).homologation_products || [];
@@ -156,13 +204,17 @@ async function resolvePrexyonHomologationEntitlement(userId: string, authToken?:
     const hasEffective = effectiveProducts.includes('artecheck');
     const hasHomologation = homologationProducts.includes('artecheck');
 
+    console.log(`[PREXYON_ENTITLEMENT] artecheck_effective=${hasEffective} artecheck_homologation=${hasHomologation} totalElapsedMs=${Date.now() - t0}`);
+
     if (hasEffective && hasHomologation) {
+      console.log('[PREXYON_AUTHORIZATION] homologation_authorized');
       return { authorized: true, organizationId: orgId };
     }
 
+    console.warn('[PREXYON_AUTHORIZATION] homologation_denied');
     return { authorized: false };
   } catch (err: any) {
-    console.error('[Prexyon-Entitlement] Erro ao resolver homologação:', err?.message || err);
+    console.error(`[PREXYON_AUTHORIZATION] exception message=${err?.message?.slice(0, 100)} totalElapsedMs=${Date.now() - t0}`);
     return { authorized: false };
   }
 }
@@ -192,6 +244,7 @@ async function authorizeProcessing(req: Request, res: Response): Promise<{ allow
   }
 
   // 2. Standard commercial subscription / quota validation (fail-closed)
+  console.warn('[PREXYON_FALLBACK] legacy_billing_entered');
   let state;
   try {
     state = await getSubscriptionUsage(userId);
