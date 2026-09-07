@@ -1,14 +1,15 @@
-﻿import React from 'react';
+import React from 'react';
 import { FilePlus2, Files, HelpCircle, History, LayoutDashboard, Lock, Settings, Sliders } from 'lucide-react';
 
 export interface SidebarProps {
   activeTab?: string;
   onSelectTab?: (tab: string) => void;
+  onOpenHelp?: () => void;
   /** RBAC: tabs that are disabled for this user. */
   disabledTabs?: string[];
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab = 'dashboard', onSelectTab, disabledTabs = [] }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab = 'dashboard', onSelectTab, onOpenHelp, disabledTabs = [] }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
     { id: 'files', label: 'Nova análise', icon: FilePlus2 },
@@ -49,7 +50,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab = 'dashboard', onSel
             );
           })}
         </nav>
-        <div className="mt-auto rounded-2xl border border-white/20 bg-white/[0.07] p-4"><div className="flex items-center gap-2 text-sm font-bold"><HelpCircle className="h-5 w-5" />Central de ajuda</div><p className="mt-2 text-xs leading-relaxed text-violet-100">Tutoriais, guias e boas práticas de pré-impressão.</p></div>
+        <button
+          type="button"
+          onClick={onOpenHelp}
+          className="mt-auto rounded-2xl border border-white/20 bg-white/[0.07] p-4 text-left transition hover:bg-white/[0.12] hover:border-white/30 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          aria-label="Abrir Central de Ajuda"
+        >
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <HelpCircle className="h-5 w-5 text-violet-200" />
+            <span>Central de ajuda</span>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-violet-100">
+            Tutoriais, guias e boas práticas de pré-impressão.
+          </p>
+        </button>
       </div>
     </aside>
     <nav className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 py-1.5 shadow-2xl backdrop-blur-md md:hidden">

@@ -20,6 +20,7 @@ import { TechnicalReportModal } from './components/TechnicalReportModal';
 import { ApplyAllFixesModal, type PlannedFix } from './components/ApplyAllFixesModal';
 import { PdfxPrerequisitesModal } from './components/PdfxPrerequisitesModal';
 import { TransparencyModal } from './components/TransparencyModal';
+import { HelpCenterModal } from './components/HelpCenterModal';
 import { Footer } from './components/Footer';
 
 import { COMMERCIAL_PRINT_300DPI_PROFILE, ProductionProfile, detectMatchingProfilesFromPage } from './utils/productionProfiles';
@@ -85,6 +86,7 @@ export const App: React.FC = () => {
   const [jobCheckResult, setJobCheckResult] = useState<JobCheckResult | null>(null);
 
   // Modals
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isTransparencyModalOpen, setIsTransparencyModalOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
@@ -1220,6 +1222,7 @@ export const App: React.FC = () => {
         <Sidebar
           activeTab={activeTab}
           onSelectTab={handleSidebarTabSelect}
+          onOpenHelp={() => setIsHelpOpen(true)}
           disabledTabs={disabledTabs}
         />
 
@@ -1529,6 +1532,11 @@ export const App: React.FC = () => {
           }}
         />
       )}
+      <HelpCenterModal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        currentAnalysis={currentAnalysis}
+      />
     </div>
   );
 };
