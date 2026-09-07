@@ -93,18 +93,25 @@ function isBillingEnforced() {
 }
 
 /**
- * Resolves Prexyon organization context and verifies explicit homologation entitlement for ArteCheck.
+ * Resolves Prexyon organization context and verifies entitlement for ArteCheck (commercial or homologation).
  * Flow:
  * 1. Resolves organization membership for the authenticated user (server-authoritative).
  * 2. Ensures membership is active (is_active: true).
  * 3. Verifies organization is active (is_active: true).
  * 4. Calls RPC `prexyon_get_organization_entitlements` using the user's Bearer JWT client (authenticated role).
  *    NEVER uses service_role key to bypass internal PostgreSQL / RPC authorization checks.
- * 5. Checks if "artecheck" is in `effective_products` AND `homologation_products`.
- * Returns { authorized: true, organizationId } if all conditions met; otherwise { authorized: false }.
+ * 5. Verifies entitlement:
+ *    - effective_products must include "artecheck"
+ *    - AND at least one of:
+ *      a) homologation_products includes "artecheck" (Homologation mode)
+ *      b) commercial_products includes "artecheck" AND has_subscription is true (Commercial mode)
+ * Returns { authorized: true, organizationId, mode: 'commercial' | 'homologation' } if conditions met; otherwise { authorized: false }.
  * Fail-closed on any error, missing token, or missing requirement.
  */
-async function resolvePrexyonHomologationEntitlement(userId: string, authToken?: string | null): Promise<{ authorized: boolean; organizationId?: string }> {
+async function resolvePrexyonEntitlement(
+  userId: string,
+  authToken?: string | null
+): Promise<{ authorized: boolean; organizationId?: string; mode?: 'commercial' | 'homologation' }> {
   if (!isValidUuid(userId)) return { authorized: false };
   if (!authToken || typeof authToken !== 'string' || !authToken.trim()) return { authorized: false };
 
@@ -152,24 +159,33 @@ async function resolvePrexyonHomologationEntitlement(userId: string, authToken?:
 
     const effectiveProducts: string[] = (entData as any).effective_products || [];
     const homologationProducts: string[] = (entData as any).homologation_products || [];
+    const commercialProducts: string[] = (entData as any).commercial_products || [];
 
     const hasEffective = effectiveProducts.includes('artecheck');
-    const hasHomologation = homologationProducts.includes('artecheck');
+    const isHomologation = homologationProducts.includes('artecheck');
+    const isCommercial = commercialProducts.includes('artecheck') && Boolean((entData as any).has_subscription);
 
-    if (hasEffective && hasHomologation) {
-      return { authorized: true, organizationId: orgId };
+    if (hasEffective && (isHomologation || isCommercial)) {
+      return {
+        authorized: true,
+        organizationId: orgId,
+        mode: isCommercial ? 'commercial' : 'homologation',
+      };
     }
 
     return { authorized: false };
   } catch (err: any) {
-    console.error('[Prexyon-Entitlement] Erro ao resolver homologação:', err?.message || err);
+    console.error('[Prexyon-Entitlement] Erro ao resolver entitlement:', err?.message || err);
     return { authorized: false };
   }
 }
 
+// Backward compatibility alias
+const resolvePrexyonHomologationEntitlement = resolvePrexyonEntitlement;
+
 /**
  * Centralized authorization for file processing (used in /api/upload and /api/flatten-transparency).
- * If user has valid Prexyon homologation entitlement, explicitly authorizes processing without
+ * If user has valid Prexyon entitlement (commercial or homologation), explicitly authorizes processing without
  * consulting legacy subscriptions/plans/analysis_usage_events tables.
  * Otherwise, falls back to standard billing quota validation (fail-closed).
  */
@@ -182,12 +198,14 @@ async function authorizeProcessing(req: Request, res: Response): Promise<{ allow
   const authToken = (req as any).authToken;
   if (!userId) return res.status(401).json({ success: false, error: 'Faça login para iniciar uma análise.' }) as any;
 
-  // 1. Check explicit Prexyon homologation entitlement using the user's Bearer JWT
-  const homologation = await resolvePrexyonHomologationEntitlement(userId, authToken);
-  if (homologation.authorized) {
-    // Homologation explicitly authorized — bypass legacy subscriptions/plans/analysis_usage_events
-    (req as any).prexyonHomologation = true;
-    (req as any).organizationId = homologation.organizationId;
+  // 1. Check explicit Prexyon entitlement (commercial or homologation) using the user's Bearer JWT
+  const entitlement = await resolvePrexyonEntitlement(userId, authToken);
+  if (entitlement.authorized) {
+    // Entitlement explicitly authorized via Prexyon — bypass legacy subscriptions/plans/analysis_usage_events
+    (req as any).prexyonEntitled = true;
+    (req as any).prexyonHomologation = entitlement.mode === 'homologation';
+    (req as any).prexyonMode = entitlement.mode;
+    (req as any).organizationId = entitlement.organizationId;
     return { allowed: true };
   }
 

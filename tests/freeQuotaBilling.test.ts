@@ -128,7 +128,7 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     assert.match(ruleEngineSrc, /export function runDeterministicRuleEngine/);
   });
 
-  it('12. Prexyon homologation entitlement: resolvePrexyonHomologationEntitlement e authorizeProcessing existem e validam o fluxo obrigatório', () => {
+  it('12. Prexyon entitlement: resolvePrexyonEntitlement e authorizeProcessing existem e validam o fluxo obrigatório (homologação e comercial)', () => {
     // 1. Deve verificar membership ativo no servidor
     assert.match(serverSrc, /from\(['"]organization_members['"]\)/);
     assert.match(serverSrc, /\.eq\(['"]user_id['"],\s*userId\)/);
@@ -146,25 +146,26 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     // 4. NÃO deve usar service_role para a chamada do RPC
     assert.doesNotMatch(serverSrc, /admin\.rpc\(['"]prexyon_get_organization_entitlements['"]/);
 
-    // 5. Deve passar authToken do request para resolvePrexyonHomologationEntitlement
+    // 5. Deve passar authToken do request para resolvePrexyonEntitlement
     assert.match(serverSrc, /const authToken = \(req as any\)\.authToken;/);
-    assert.match(serverSrc, /resolvePrexyonHomologationEntitlement\(userId,\s*authToken\)/);
+    assert.match(serverSrc, /resolvePrexyonEntitlement\(userId,\s*authToken\)/);
 
-    // 6. Deve exigir artecheck em effective_products E homologation_products
+    // 6. Deve checar artecheck em effective_products, homologation_products e commercial_products
     assert.match(serverSrc, /effectiveProducts\.includes\(['"]artecheck['"]\)/);
     assert.match(serverSrc, /homologationProducts\.includes\(['"]artecheck['"]\)/);
+    assert.match(serverSrc, /commercialProducts\.includes\(['"]artecheck['"]\)/);
 
-    // 7. Homologação autorizada faz bypass de subscriptions/plans/analysis_usage_events
-    assert.match(serverSrc, /if \(homologation\.authorized\)/);
-    assert.match(serverSrc, /prexyonHomologation = true/);
+    // 7. Entitlement autorizado faz bypass de subscriptions/plans/analysis_usage_events
+    assert.match(serverSrc, /if \(entitlement\.authorized\)/);
+    assert.match(serverSrc, /prexyonEntitled = true/);
 
     // 8. Autorização centralizada aplicada a POST /api/upload e POST /api/flatten-transparency
     assert.match(serverSrc, /app\.post\(\s*["']\/api\/upload["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
     assert.match(serverSrc, /app\.post\(\s*["']\/api\/flatten-transparency["'],\s*async\s*\(req:\s*Request,\s*res:\s*Response/);
   });
 
-  describe('Prexyon Homologation Entitlement Processing Authorization Logic', () => {
-    function simulatePrexyonHomologationResolution(opts: {
+  describe('Prexyon Entitlement Processing Authorization Logic (Homologation & Commercial)', () => {
+    function simulatePrexyonEntitlementResolution(opts: {
       userId: string;
       authToken?: string | null;
       clientType?: 'authenticated' | 'service_role' | 'anon';
@@ -174,7 +175,13 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       orgErr?: any;
       rpcCallerRole?: 'authenticated' | 'anon';
       rpcCallerId?: string | null;
-      entData?: { effective_products?: string[]; homologation_products?: string[] } | null;
+      entData?: {
+        effective_products?: string[];
+        homologation_products?: string[];
+        commercial_products?: string[];
+        has_subscription?: boolean;
+        is_entitled?: boolean;
+      } | null;
       entErr?: any;
     }) {
       const { userId, authToken, clientType, member, memberErr, org, orgErr, rpcCallerRole, rpcCallerId, entData, entErr } = opts;
@@ -213,9 +220,18 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
 
       const effectiveProducts: string[] = entData.effective_products || [];
       const homologationProducts: string[] = entData.homologation_products || [];
+      const commercialProducts: string[] = entData.commercial_products || [];
 
-      if (effectiveProducts.includes('artecheck') && homologationProducts.includes('artecheck')) {
-        return { authorized: true, organizationId: orgId };
+      const hasEffective = effectiveProducts.includes('artecheck');
+      const isHomologation = homologationProducts.includes('artecheck');
+      const isCommercial = commercialProducts.includes('artecheck') && Boolean(entData.has_subscription);
+
+      if (hasEffective && (isHomologation || isCommercial)) {
+        return {
+          authorized: true,
+          organizationId: orgId,
+          mode: isCommercial ? 'commercial' : 'homologation',
+        };
       }
       return { authorized: false, reason: 'missing_artecheck_entitlement' };
     }
@@ -225,8 +241,8 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
     const validOrgId = '43c47a08-2f84-42db-a64d-d1f0ea0c6a6b';
     const validJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.jwt';
 
-    it('A) homologation entitlement ArteCheck válido com Bearer JWT -> autorizado com contexto authenticated', () => {
-      const res = simulatePrexyonHomologationResolution({
+    it('1. Homologation entitlement ArteCheck válido com Bearer JWT -> autorizado com contexto homologation', () => {
+      const res = simulatePrexyonEntitlementResolution({
         userId: validOwnerId,
         authToken: validJwt,
         clientType: 'authenticated',
@@ -235,16 +251,42 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
+          has_subscription: false,
+          is_entitled: true,
+          commercial_products: [],
           effective_products: ['artecheck', 'arteflow', 'orcagraf'],
           homologation_products: ['artecheck', 'arteflow', 'orcagraf'],
         },
       });
       assert.equal(res.authorized, true);
       assert.equal(res.organizationId, validOrgId);
+      assert.equal((res as any).mode, 'homologation');
     });
 
-    it('B) homologation entitlement válido para MEMBER com Bearer JWT -> autorizado', () => {
-      const res = simulatePrexyonHomologationResolution({
+    it('2. Assinatura comercial válida + ArteCheck em commercial_products e effective_products -> autorizado com contexto commercial', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: true,
+          is_entitled: true,
+          commercial_products: ['artecheck', 'arteflow'],
+          effective_products: ['artecheck', 'arteflow'],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, true);
+      assert.equal(res.organizationId, validOrgId);
+      assert.equal((res as any).mode, 'commercial');
+    });
+
+    it('3. Assinatura comercial válida para MEMBER com Bearer JWT -> autorizado', () => {
+      const res = simulatePrexyonEntitlementResolution({
         userId: validMemberId,
         authToken: validJwt,
         clientType: 'authenticated',
@@ -253,16 +295,117 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
         member: { organization_id: validOrgId, role: 'member', is_active: true },
         org: { id: validOrgId, is_active: true },
         entData: {
+          has_subscription: true,
+          is_entitled: true,
+          commercial_products: ['artecheck'],
           effective_products: ['artecheck'],
-          homologation_products: ['artecheck'],
+          homologation_products: [],
         },
       });
       assert.equal(res.authorized, true);
       assert.equal(res.organizationId, validOrgId);
+      assert.equal((res as any).mode, 'commercial');
     });
 
-    it('C) RPC com role anon (sem JWT) lança 42501 -> FAIL CLOSED', () => {
-      const res = simulatePrexyonHomologationResolution({
+    it('4. Assinatura comercial sem ArteCheck (apenas arteflow/orcagraf) -> BLOQUEADO (fail-closed)', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: true,
+          is_entitled: true,
+          commercial_products: ['arteflow', 'orcagraf'],
+          effective_products: ['arteflow', 'orcagraf'],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'missing_artecheck_entitlement');
+    });
+
+    it('5. Sem assinatura e sem homologação -> BLOQUEADO', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: false,
+          is_entitled: false,
+          commercial_products: [],
+          effective_products: [],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'missing_artecheck_entitlement');
+    });
+
+    it('6. Assinatura comercial expirada/cancelada (has_subscription: false, commercial_products: []) -> BLOQUEADO', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: false,
+          is_entitled: false,
+          commercial_products: [],
+          effective_products: [],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'missing_artecheck_entitlement');
+    });
+
+    it('7. Membership inválido/inativo -> BLOQUEADO', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        member: { organization_id: validOrgId, role: 'owner', is_active: false },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: true,
+          effective_products: ['artecheck'],
+          commercial_products: ['artecheck'],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'inactive_membership');
+    });
+
+    it('8. Organização inativa -> BLOQUEADO', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: false },
+        entData: {
+          has_subscription: true,
+          effective_products: ['artecheck'],
+          commercial_products: ['artecheck'],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'inactive_org');
+    });
+
+    it('9. RPC com role anon (sem JWT) lança 42501 -> FAIL CLOSED', () => {
+      const res = simulatePrexyonEntitlementResolution({
         userId: validOwnerId,
         authToken: validJwt,
         rpcCallerRole: 'anon',
@@ -273,84 +416,8 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
       assert.equal((res as any).rpcError?.code, '42501');
     });
 
-    it('D) JWT ausente ou vazio -> BLOQUEADO imediatamente', () => {
-      const res1 = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: null,
-      });
-      assert.equal(res1.authorized, false);
-      assert.equal(res1.reason, 'missing_or_empty_jwt');
-
-      const res2 = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: '   ',
-      });
-      assert.equal(res2.authorized, false);
-      assert.equal(res2.reason, 'missing_or_empty_jwt');
-    });
-
-    it('E) sem entitlement ArteCheck (outros produtos) -> BLOQUEADO (fail-closed)', () => {
-      const res = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: validJwt,
-        clientType: 'authenticated',
-        member: { organization_id: validOrgId, role: 'owner', is_active: true },
-        org: { id: validOrgId, is_active: true },
-        entData: {
-          effective_products: ['arteflow', 'orcagraf'],
-          homologation_products: ['arteflow', 'orcagraf'],
-        },
-      });
-      assert.equal(res.authorized, false);
-    });
-
-    it('F) artecheck em effective_products mas ausente em homologation_products -> BLOQUEADO', () => {
-      const res = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: validJwt,
-        clientType: 'authenticated',
-        member: { organization_id: validOrgId, role: 'owner', is_active: true },
-        org: { id: validOrgId, is_active: true },
-        entData: {
-          effective_products: ['artecheck'],
-          homologation_products: [],
-        },
-      });
-      assert.equal(res.authorized, false);
-    });
-
-    it('G) membership inválido/inativo -> BLOQUEADO', () => {
-      const res = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: validJwt,
-        clientType: 'authenticated',
-        member: { organization_id: validOrgId, role: 'owner', is_active: false },
-        org: { id: validOrgId, is_active: true },
-        entData: {
-          effective_products: ['artecheck'],
-          homologation_products: ['artecheck'],
-        },
-      });
-      assert.equal(res.authorized, false);
-    });
-
-    it('H) organização inativa -> BLOQUEADO', () => {
-      const res = simulatePrexyonHomologationResolution({
-        userId: validOwnerId,
-        authToken: validJwt,
-        clientType: 'authenticated',
-        member: { organization_id: validOrgId, role: 'owner', is_active: true },
-        org: { id: validOrgId, is_active: false },
-        entData: {
-          effective_products: ['artecheck'],
-          homologation_products: ['artecheck'],
-        },
-      });
-      assert.equal(res.authorized, false);
-    });
-
-    it('I) erro de rede no RPC central de entitlements -> BLOQUEADO (fail-closed)', () => {
-      const res = simulatePrexyonHomologationResolution({
+    it('10. Erro de rede no RPC central de entitlements -> BLOQUEADO (fail-closed)', () => {
+      const res = simulatePrexyonEntitlementResolution({
         userId: validOwnerId,
         authToken: validJwt,
         clientType: 'authenticated',
@@ -359,17 +426,58 @@ describe('Free Plan & Billing Quota Restoration Tests', () => {
         entErr: new Error('RPC network failure'),
       });
       assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'rpc_error');
     });
 
-    it('J) Segurança: nenhum JWT ou token é exposto em logs ou retornos de erro', () => {
-      // Garante que a resolução não expõe o token
-      const res = simulatePrexyonHomologationResolution({
+    it('11. JWT ausente ou vazio -> BLOQUEADO imediatamente', () => {
+      const res1 = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: null,
+      });
+      assert.equal(res1.authorized, false);
+      assert.equal(res1.reason, 'missing_or_empty_jwt');
+
+      const res2 = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: '   ',
+      });
+      assert.equal(res2.authorized, false);
+      assert.equal(res2.reason, 'missing_or_empty_jwt');
+    });
+
+    it('12. OWNER em organização sem entitlement -> BLOQUEADO', () => {
+      const res = simulatePrexyonEntitlementResolution({
+        userId: validOwnerId,
+        authToken: validJwt,
+        clientType: 'authenticated',
+        rpcCallerRole: 'authenticated',
+        rpcCallerId: validOwnerId,
+        member: { organization_id: validOrgId, role: 'owner', is_active: true },
+        org: { id: validOrgId, is_active: true },
+        entData: {
+          has_subscription: false,
+          is_entitled: false,
+          commercial_products: [],
+          effective_products: [],
+          homologation_products: [],
+        },
+      });
+      assert.equal(res.authorized, false);
+      assert.equal(res.reason, 'missing_artecheck_entitlement');
+    });
+
+    it('13. Segurança: nenhum JWT ou token é exposto em logs ou retornos de erro', () => {
+      const res = simulatePrexyonEntitlementResolution({
         userId: validOwnerId,
         authToken: 'secret-jwt-token-123',
         clientType: 'authenticated',
         member: { organization_id: validOrgId, role: 'owner', is_active: true },
         org: { id: validOrgId, is_active: true },
-        entData: { effective_products: ['artecheck'], homologation_products: ['artecheck'] },
+        entData: {
+          has_subscription: true,
+          effective_products: ['artecheck'],
+          commercial_products: ['artecheck'],
+        },
       });
       const serialized = JSON.stringify(res);
       assert.equal(serialized.includes('secret-jwt-token-123'), false);
