@@ -116,7 +116,8 @@ describe('ARTECHECK AI — Central de Ajuda & Mini Manual de Pré-impressão', (
     assert.ok(html.includes('Como Enviar e Iniciar Análise'), 'Deve explicar envio de PDF');
     assert.ok(html.includes('Significado dos Status'), 'Deve explicar status Aprovado/Alerta/Erro');
     assert.ok(html.includes('Dimensões, Sangria e Caixas Técnicas'), 'Deve explicar MediaBox/TrimBox/BleedBox');
-    assert.ok(html.includes('DPI e Resolução Efetiva'), 'Deve explicar 300 DPI e resolução');
+    assert.ok(html.includes('DPI e Resolução Efetiva'), 'Deve explicar resolução');
+    assert.ok(html.includes('Perfil de Produção'), 'Deve explicar dependência do perfil de produção selecionado');
     assert.ok(html.includes('Espaços de Cor (CMYK, RGB e Spot)'), 'Deve explicar cores e LittleCMS');
     assert.ok(html.includes('Fontes e Tipografia'), 'Deve explicar incorporação de fontes');
     assert.ok(html.includes('Transparências e Norma PDF/X'), 'Deve explicar PDF/X e transparências');
@@ -138,7 +139,7 @@ describe('ARTECHECK AI — Central de Ajuda & Mini Manual de Pré-impressão', (
     assert.ok(html.includes('software de diagramação'), 'Deve orientar ajuste no software gráfico de origem');
   });
 
-  it('D & E. Área de Suporte não faz chamadas backend automáticas e preserva dados sensíveis', () => {
+  it('D & E. Área de Contato/Portal não faz chamadas backend automáticas e preserva dados sensíveis', () => {
     const analysis = createMockAnalysis();
     const portalUrl = getPrexyonPortalUrl();
 
@@ -151,7 +152,7 @@ describe('ARTECHECK AI — Central de Ajuda & Mini Manual de Pré-impressão', (
       })
     );
 
-    assert.ok(html.includes('Suporte &amp; Contato') || html.includes('Suporte & Contato'), 'Deve conter aba de Suporte');
+    assert.ok(html.includes('Contato &amp; Portal Prexyon') || html.includes('Contato & Portal Prexyon'), 'Deve conter aba de Contato & Portal Prexyon');
     assert.ok(html.includes(portalUrl), 'Deve apontar para o Portal Prexyon centralizado');
     assert.ok(html.includes('Resumo da Análise Ativa para Suporte'), 'Deve permitir copiar metadados sem enviar payload');
     assert.ok(html.includes('Nenhum dado sensível ou conteúdo do PDF é transmitido'), 'Deve conter aviso de segurança de dados');

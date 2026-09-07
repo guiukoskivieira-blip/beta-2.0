@@ -139,12 +139,12 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({
       content: (
         <div className="space-y-2 text-xs text-slate-600">
           <p>
-            A resolução é calculada com base nos pixels reais da imagem divididos pelo tamanho físico aplicado na página:
+            A resolução é calculada com base nos pixels reais da imagem divididos pelo tamanho físico aplicado na página (DPI efetivo) e depende do <strong>Perfil de Produção</strong> selecionado:
           </p>
           <ul className="list-disc pl-4 space-y-1 text-slate-600">
-            <li><strong>Recomendado:</strong> 300 DPI para impressos comerciais de alta qualidade.</li>
-            <li><strong>Alerta:</strong> Entre 200 e 299 DPI.</li>
-            <li><strong>Crítico / Erro:</strong> Abaixo de 150 ou 200 DPI (conforme o perfil). Exige substituição da imagem em alta resolução no software de origem.</li>
+            <li><strong>Recomendado (Aprovado):</strong> Definido pelo perfil ativo (ex: 300 DPI para impressos comerciais e offset, 100 DPI para grande formato ou valor personalizado).</li>
+            <li><strong>Alerta (Resolução Intermediária):</strong> Resolução entre o limite crítico e o recomendado do perfil (ex: 200 a 299 DPI em perfis comerciais).</li>
+            <li><strong>Crítico / Erro (Bloqueado):</strong> Resolução abaixo do limite crítico do perfil (ex: abaixo de 200 DPI em comerciais ou 80 DPI em grandes formatos), sujeita a pixelização visível na impressão.</li>
           </ul>
         </div>
       ),
@@ -286,7 +286,7 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({
             }`}
           >
             <LifeBuoy className="w-3.5 h-3.5" />
-            <span>Suporte & Contato</span>
+            <span>Contato & Portal Prexyon</span>
           </button>
         </div>
 
@@ -317,10 +317,10 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({
               <div className="p-4 rounded-2xl bg-violet-50/50 border border-violet-100 space-y-2">
                 <h3 className="text-xs font-black text-violet-900 uppercase tracking-wider flex items-center gap-2">
                   <LifeBuoy className="w-4 h-4 text-violet-700" />
-                  Atendimento Prexyon
+                  Portal Prexyon
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Para dúvidas operacionais, homologação de contas ou suporte sobre o ArteCheck, acesse o Portal Prexyon ou entre em contato com os administradores da sua organização.
+                  A gestão de contas, permissões de usuários e informações corporativas do ecossistema Prexyon são centralizadas no Portal oficial.
                 </p>
               </div>
 
@@ -328,7 +328,7 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900">Portal Prexyon</h4>
+                    <h4 className="text-xs font-bold text-slate-900">Acesso ao Portal Prexyon</h4>
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       Gerencie sua organização, usuários, permissões e consulte as novidades dos produtos.
                     </p>
