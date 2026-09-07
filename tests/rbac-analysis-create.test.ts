@@ -736,3 +736,235 @@ describe('4. React DOM Rendering & useSyncExternalStore Single Source of Truth',
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5. Regression: bootstrapUserContext MUST NOT select 'name' from organizations
+// ---------------------------------------------------------------------------
+describe('5. Regressão — bootstrapUserContext não seleciona coluna name de organizations', () => {
+  beforeEach(() => {
+    clearArteCheckSessionPermissions();
+    resetAuthInitFlight();
+  });
+
+  /**
+   * Simulates production Supabase where GRANT on organizations does NOT include 'name'.
+   * If bootstrapUserContext tries to select 'name', the mock returns a 42501 privilege error.
+   * The test asserts that despite this constraint, OWNER bootstrap succeeds with canCreate=true.
+   *
+   * This is a regression guard against the regression introduced in commit e9d8c2c
+   * (feat: align ArteCheck global Prexyon header) which added .select('id, name, is_active')
+   * to the organizations query, causing a 42501 error in production for accounts where the
+   * 'name' column is not in the GRANT for the authenticated role.
+   */
+  it('REGRESSÃO: OWNER bootstrap succeeded mesmo quando organizations.name NÃO está no GRANT', async () => {
+    // Build a client that simulates production: organizations table raises 42501 when 'name' is selected.
+    // The select builder tracks which columns were requested.
+    let orgColumnsRequested: string = '';
+
+    const clientWithNameRestriction = {
+      functions: {
+        invoke: async (fn: string, _opts: any) => {
+          if (fn === 'prexyon-sso-exchange') {
+            await new Promise((r) => setTimeout(r, 5));
+            return { data: { token_hash: 'hash-ok', verification_type: 'email' }, error: null };
+          }
+          return { data: null, error: null };
+        },
+      },
+      auth: {
+        verifyOtp: async () => ({
+          data: { session: { access_token: 'tok', user: { id: 'owner-1', email: 'owner@co.com', user_metadata: { company_name: 'Empresa S.A.' } } } },
+          error: null,
+        }),
+        getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: { id: 'owner-1', email: 'owner@co.com', user_metadata: {} } }, error: null }),
+        signOut: async () => ({ error: null }),
+        onAuthStateChange: (cb: any) => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      rpc: async (fn: string, _args: any) => {
+        if (fn === 'prexyon_get_organization_entitlements') {
+          return { data: { effective_products: ['artecheck'] }, error: null };
+        }
+        return { data: null, error: null };
+      },
+      from: (table: string) => {
+        const createBuilder = () => {
+          const builder: any = {
+            select: (cols: string) => {
+              if (table === 'organizations') {
+                orgColumnsRequested = cols;
+                // Simulate production 42501 error if 'name' is in the column list
+                if (cols.includes('name')) {
+                  return {
+                    ...builder,
+                    eq: () => ({
+                      ...builder,
+                      single: async () => ({
+                        data: null,
+                        error: { message: 'permission denied for column name', code: '42501' },
+                      }),
+                    }),
+                  };
+                }
+              }
+              return builder;
+            },
+            eq: () => builder,
+            in: () => builder,
+            maybeSingle: async () => {
+              if (table === 'organization_members') {
+                return { data: { organization_id: 'org-owner', role: 'owner', is_active: true }, error: null };
+              }
+              if (table === 'prexyon_user_product_roles') {
+                return { data: null, error: null };
+              }
+              return { data: null, error: null };
+            },
+            single: async () => {
+              if (table === 'organization_members') {
+                return { data: { organization_id: 'org-owner', role: 'owner', is_active: true }, error: null };
+              }
+              if (table === 'organizations') {
+                return { data: { id: 'org-owner', is_active: true }, error: null };
+              }
+              if (table === 'organization_member_product_access') {
+                return { data: { product_key: 'artecheck', is_enabled: true }, error: null };
+              }
+              return { data: null, error: null };
+            },
+            then: (onfulfilled: any, onrejected: any) => {
+              let resultData: any = null;
+              if (table === 'prexyon_permission_definitions') {
+                resultData = [
+                  { id: 'def-view', permission_key: 'artecheck.analysis.view' },
+                  { id: 'def-create', permission_key: 'artecheck.analysis.create' },
+                ];
+              } else if (table === 'prexyon_role_permissions') {
+                resultData = [];
+              } else if (table === 'prexyon_user_permission_overrides') {
+                resultData = [];
+              }
+              return Promise.resolve({ data: resultData, error: null }).then(onfulfilled, onrejected);
+            },
+          };
+          return builder;
+        };
+        return createBuilder();
+      },
+    } as any;
+
+    const status = await initializeAuthSession(clientWithNameRestriction, '?code=owner-sso-code');
+
+    assert.equal(status, 'authenticated', 'bootstrap deve concluir com sucesso mesmo sem acesso à coluna name');
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'OWNER deve ter canCreate=true');
+
+    const perms = getArteCheckSessionPermissions();
+    assert.notEqual(perms, null, 'store deve estar populada');
+    assert.equal(perms?.isOwner, true, 'isOwner deve ser true para OWNER');
+    assert.equal(perms?.bootstrapped, true, 'bootstrapped deve ser true');
+
+    // Prove that the column 'name' was NOT requested from organizations table
+    assert.ok(
+      !orgColumnsRequested.includes('name'),
+      `bootstrapUserContext NÃO deve selecionar 'name' de organizations. Colunas solicitadas: "${orgColumnsRequested}"`,
+    );
+  });
+
+  it('REGRESSÃO: OWNER com reload (getSession) — bootstrap concluído sem name column', async () => {
+    let orgColumnsRequested = '';
+
+    const clientReload = {
+      functions: { invoke: async () => ({ data: null, error: null }) },
+      auth: {
+        verifyOtp: async () => ({ data: null, error: null }),
+        getSession: async () => ({
+          data: {
+            session: {
+              access_token: 'tok',
+              user: { id: 'owner-1', email: 'owner@co.com', user_metadata: { company_name: 'Empresa S.A.' } },
+            },
+          },
+          error: null,
+        }),
+        getUser: async () => ({ data: { user: { id: 'owner-1', email: 'owner@co.com', user_metadata: {} } }, error: null }),
+        signOut: async () => ({ error: null }),
+        onAuthStateChange: (cb: any) => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      },
+      rpc: async (fn: string, _args: any) => {
+        if (fn === 'prexyon_get_organization_entitlements') {
+          return { data: { effective_products: ['artecheck'] }, error: null };
+        }
+        return { data: null, error: null };
+      },
+      from: (table: string) => {
+        const createBuilder = () => {
+          const builder: any = {
+            select: (cols: string) => {
+              if (table === 'organizations') {
+                orgColumnsRequested = cols;
+                // Fail if name column is requested (simulates production privilege restriction)
+                if (cols.includes('name')) {
+                  return {
+                    ...builder,
+                    eq: () => ({
+                      ...builder,
+                      single: async () => ({
+                        data: null,
+                        error: { message: 'permission denied for column name', code: '42501' },
+                      }),
+                    }),
+                  };
+                }
+              }
+              return builder;
+            },
+            eq: () => builder,
+            in: () => builder,
+            maybeSingle: async () => {
+              if (table === 'organization_members') {
+                return { data: { organization_id: 'org-owner', role: 'owner', is_active: true }, error: null };
+              }
+              if (table === 'prexyon_user_product_roles') return { data: null, error: null };
+              return { data: null, error: null };
+            },
+            single: async () => {
+              if (table === 'organization_members') {
+                return { data: { organization_id: 'org-owner', role: 'owner', is_active: true }, error: null };
+              }
+              if (table === 'organizations') {
+                return { data: { id: 'org-owner', is_active: true }, error: null };
+              }
+              if (table === 'organization_member_product_access') {
+                return { data: { product_key: 'artecheck', is_enabled: true }, error: null };
+              }
+              return { data: null, error: null };
+            },
+            then: (onfulfilled: any, onrejected: any) => {
+              let resultData: any = null;
+              if (table === 'prexyon_permission_definitions') {
+                resultData = [
+                  { id: 'def-view', permission_key: 'artecheck.analysis.view' },
+                  { id: 'def-create', permission_key: 'artecheck.analysis.create' },
+                ];
+              } else if (table === 'prexyon_role_permissions') resultData = [];
+              else if (table === 'prexyon_user_permission_overrides') resultData = [];
+              return Promise.resolve({ data: resultData, error: null }).then(onfulfilled, onrejected);
+            },
+          };
+          return builder;
+        };
+        return createBuilder();
+      },
+    } as any;
+
+    // Reload path: no code in URL, falls through to getSession() → bootstrapUserContext
+    const status = await initializeAuthSession(clientReload, '');
+
+    assert.equal(status, 'authenticated', 'reload deve autenticar OWNER sem erros');
+    assert.equal(hasPermission('artecheck.analysis.create'), true, 'OWNER reload: canCreate=true');
+    assert.ok(
+      !orgColumnsRequested.includes('name'),
+      `bootstrap no reload NÃO deve selecionar 'name'. Colunas: "${orgColumnsRequested}"`,
+    );
+  });
+});
