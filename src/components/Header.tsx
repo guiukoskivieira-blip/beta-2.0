@@ -4,7 +4,8 @@ import { Building2, LogOut, LayoutGrid, ChevronDown, ExternalLink } from 'lucide
 import { subscribeArteCheckPermissions, getArteCheckSessionPermissions } from '../auth/arteCheckPermissions';
 import { PrexyonSSOProvider } from '../auth/PrexyonSSOProvider';
 import { getSupabaseClient } from '../lib/supabaseClient';
-import { getPrexyonPortalUrl, getPrexyonProducts } from '../config/prexyon';
+import { getPrexyonPortalUrl, getPrexyonProducts, PrexyonProductItem } from '../config/prexyon';
+import { startPrexyonProductSso } from '../services/prexyonSsoService';
 
 export interface HeaderProps {
   portalUrl?: string;
@@ -17,6 +18,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isProductMenuOpen, setIsProductMenuOpen] = useState(false);
+  const [switchingProduct, setSwitchingProduct] = useState<string | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const productMenuRef = useRef<HTMLDivElement>(null);
 
@@ -71,6 +73,54 @@ export const Header: React.FC<HeaderProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isUserMenuOpen, isProductMenuOpen]);
+
+  const handleProductSwitch = async (product: PrexyonProductItem) => {
+    if (product.active || product.id === 'artecheck') {
+      setIsProductMenuOpen(false);
+      return;
+    }
+
+    const targetOrgId = sessionPerms?.organizationId;
+    const client = getSupabaseClient();
+
+    // If no organization or client available, redirect to Portal Prexyon
+    if (!targetOrgId || !client) {
+      setIsProductMenuOpen(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = portalUrl;
+      }
+      return;
+    }
+
+    try {
+      setSwitchingProduct(product.id);
+      const res = await startPrexyonProductSso(
+        client,
+        targetOrgId,
+        product.id as 'orcagraf' | 'arteflow',
+        product.url
+      );
+
+      if (res.success && res.redirectUrl) {
+        if (typeof window !== 'undefined') {
+          window.location.href = res.redirectUrl;
+        }
+        return;
+      }
+
+      // If SSO generation fails (e.g. permission or plan not entitled), fallback safely to Portal
+      if (typeof window !== 'undefined') {
+        window.location.href = portalUrl;
+      }
+    } catch {
+      if (typeof window !== 'undefined') {
+        window.location.href = portalUrl;
+      }
+    } finally {
+      setSwitchingProduct(null);
+      setIsProductMenuOpen(false);
+    }
+  };
 
   const handleSignOut = async () => {
     setIsUserMenuOpen(false);
@@ -145,6 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="my-1.5 space-y-1">
                 {products.map((product) => {
                   const isCurrent = product.active;
+                  const isTargetSwitching = switchingProduct === product.id;
                   const tagClasses =
                     product.id === 'orcagraf'
                       ? 'border-amber-400/60 bg-amber-500/20 text-amber-300'
@@ -183,11 +234,12 @@ export const Header: React.FC<HeaderProps> = ({
                   }
 
                   return (
-                    <a
+                    <button
                       key={product.id}
-                      href={product.url}
-                      onClick={() => setIsProductMenuOpen(false)}
-                      className="group flex w-full items-center justify-between gap-2.5 rounded-xl border border-transparent p-2.5 text-left transition hover:border-white/10 hover:bg-white/10"
+                      type="button"
+                      disabled={switchingProduct !== null}
+                      onClick={() => handleProductSwitch(product)}
+                      className="group flex w-full items-center justify-between gap-2.5 rounded-xl border border-transparent p-2.5 text-left transition hover:border-white/10 hover:bg-white/10 disabled:opacity-50"
                     >
                       <div className="flex min-w-0 items-center gap-2.5">
                         <span
@@ -200,12 +252,12 @@ export const Header: React.FC<HeaderProps> = ({
                             {product.name}
                           </p>
                           <p className="truncate text-[11px] text-slate-400">
-                            {product.description}
+                            {isTargetSwitching ? 'Iniciando acesso SSO...' : product.description}
                           </p>
                         </div>
                       </div>
                       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-slate-200" />
-                    </a>
+                    </button>
                   );
                 })}
               </div>
