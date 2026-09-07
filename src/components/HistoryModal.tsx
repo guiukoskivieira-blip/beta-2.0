@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { X, History, FileText, Download, Trash2, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { X, History, FileText, Download, Trash2, Loader2, CheckCircle2, AlertTriangle, Eye } from 'lucide-react';
 import type { AnalysisRecordSummary } from '../domain/beta';
 import { LocalStorageProvider } from '../storage/LocalStorageProvider';
 import { formatBytes } from '../../server/pdfExtractor';
 import { buildTechnicalReport } from '../services/technicalReport';
 import { generateTechnicalReportPdf, generateReportPdfFileName, downloadTechnicalReportPdf } from '../services/reportPdfGenerator';
+import { AnalysisDetailModal } from './AnalysisDetailModal';
 
 export function checkReportExportEligibility(item: AnalysisRecordSummary | null | undefined): {
   eligible: boolean;
@@ -29,6 +30,7 @@ export interface HistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   embedded?: boolean;
+  initialSelectedId?: string | null;
   onSelectAnalysis?: (id: string) => void;
   onExportReport?: (item: AnalysisRecordSummary) => Promise<void> | void;
 }
@@ -36,11 +38,14 @@ export interface HistoryModalProps {
 export const HistoryModal: React.FC<HistoryModalProps> = ({
   isOpen,
   onClose,
+  initialSelectedId = null,
   onSelectAnalysis,
   onExportReport,
   embedded = false,
 }) => {
   const [history, setHistory] = useState<AnalysisRecordSummary[]>([]);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecordSummary | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<{ id: string; type: 'loading' | 'success' | 'error'; message: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -52,9 +57,18 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
       setExportError(null);
       setExportSuccess(null);
       setExportStatus(null);
-      storage.listAnalyses().then(setHistory);
+      storage.listAnalyses().then((list) => {
+        setHistory(list);
+        if (initialSelectedId) {
+          const found = list.find((a) => a.id === initialSelectedId);
+          if (found) {
+            setSelectedAnalysis(found);
+            setIsDetailOpen(true);
+          }
+        }
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, initialSelectedId]);
 
   if (!isOpen) return null;
 
@@ -238,6 +252,22 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedAnalysis(item);
+                        setIsDetailOpen(true);
+                        if (onSelectAnalysis) onSelectAnalysis(item.id);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-[#4F46E5] text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                      title="Visualizar detalhes da análise"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Visualizar</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={async (e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -290,6 +320,17 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Analysis Detail Modal */}
+      <AnalysisDetailModal
+        isOpen={isDetailOpen}
+        onClose={() => {
+          setIsDetailOpen(false);
+          setSelectedAnalysis(null);
+        }}
+        record={selectedAnalysis}
+        onExportReport={handleExportReport}
+      />
     </div>
   );
 };

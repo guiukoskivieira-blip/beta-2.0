@@ -88,6 +88,7 @@ export const App: React.FC = () => {
   const [isTransparencyModalOpen, setIsTransparencyModalOpen] = useState(false);
   const [customInitDimensions, setCustomInitDimensions] = useState<{ widthMm: number; heightMm: number } | null>(null);
   const [historyList, setHistoryList] = useState<AnalysisRecordSummary[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
 
   // RBAC Single Source of Truth: directly derived from reactive in-memory permission store
   const permissionState = useSyncExternalStore(
@@ -1234,7 +1235,16 @@ export const App: React.FC = () => {
               onUpgrade={undefined}
             />
           ) : activeTab === 'history' ? (
-            <HistoryModal isOpen embedded onClose={() => setActiveTab('dashboard')} onExportReport={handleExportHistoryReport} />
+            <HistoryModal
+              isOpen
+              embedded
+              initialSelectedId={selectedHistoryId}
+              onClose={() => {
+                setSelectedHistoryId(null);
+                setActiveTab('dashboard');
+              }}
+              onExportReport={handleExportHistoryReport}
+            />
           ) : activeTab === 'profiles' ? (
             <ProductionProfilesModal
               isOpen
@@ -1264,10 +1274,8 @@ export const App: React.FC = () => {
               onReset={handleReset}
               historyList={historyList}
               onSelectHistoryItem={(id) => {
-                const item = historyList.find(h => h.id === id);
-                if (item) {
-                  setActiveTab('history');
-                }
+                setSelectedHistoryId(id);
+                setActiveTab('history');
               }}
               onDeleteHistoryItem={async (id) => {
                 await storage.deleteAnalysis(id);

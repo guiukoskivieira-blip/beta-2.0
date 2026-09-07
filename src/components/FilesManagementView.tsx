@@ -235,11 +235,21 @@ export const FilesManagementView: React.FC<FilesManagementViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right space-x-2">
+                      {onSelectHistoryItem && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectHistoryItem(item.id)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#4F46E5] font-bold text-[11px] transition-colors cursor-pointer"
+                          title="Visualizar Detalhes da Análise"
+                        >
+                          Visualizar
+                        </button>
+                      )}
                       {onExportHistoryReport && (
                         <button
                           type="button"
                           onClick={() => onExportHistoryReport(item)}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition-colors"
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition-colors cursor-pointer"
                           title="Exportar Relatório PDF"
                         >
                           PDF
@@ -249,7 +259,7 @@ export const FilesManagementView: React.FC<FilesManagementViewProps> = ({
                         <button
                           type="button"
                           onClick={() => onDeleteHistoryItem(item.id)}
-                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                           title="Excluir"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
