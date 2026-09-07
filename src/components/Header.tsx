@@ -1,10 +1,10 @@
 // src/components/Header.tsx
 import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
-import { ShieldCheck, Building2, LogOut, LayoutGrid, ChevronDown, ExternalLink } from 'lucide-react';
+import { Building2, LogOut, LayoutGrid, ChevronDown, ExternalLink } from 'lucide-react';
 import { subscribeArteCheckPermissions, getArteCheckSessionPermissions } from '../auth/arteCheckPermissions';
 import { PrexyonSSOProvider } from '../auth/PrexyonSSOProvider';
 import { getSupabaseClient } from '../lib/supabaseClient';
-import { getPrexyonPortalUrl } from '../config/prexyon';
+import { getPrexyonPortalUrl, getPrexyonProducts } from '../config/prexyon';
 
 export interface HeaderProps {
   portalUrl?: string;
@@ -15,8 +15,10 @@ export const Header: React.FC<HeaderProps> = ({
   portalUrl = getPrexyonPortalUrl(),
   onLogout,
 }) => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isProductMenuOpen, setIsProductMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const productMenuRef = useRef<HTMLDivElement>(null);
 
   // Read reactive session and permissions directly from in-memory store
   const sessionPerms = useSyncExternalStore(
@@ -39,19 +41,26 @@ export const Header: React.FC<HeaderProps> = ({
     .map((part) => part[0]?.toUpperCase())
     .join('') || 'U';
 
-  // Close dropdown on click outside or Escape key
+  const products = getPrexyonProducts();
+
+  // Close dropdowns on click outside or Escape key
   useEffect(() => {
-    if (!isMenuOpen) return;
+    if (!isUserMenuOpen && !isProductMenuOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
+      const target = event.target as Node;
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
+      if (productMenuRef.current && !productMenuRef.current.contains(target)) {
+        setIsProductMenuOpen(false);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsMenuOpen(false);
+        setIsUserMenuOpen(false);
+        setIsProductMenuOpen(false);
       }
     };
 
@@ -61,10 +70,11 @@ export const Header: React.FC<HeaderProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isMenuOpen]);
+  }, [isUserMenuOpen, isProductMenuOpen]);
 
   const handleSignOut = async () => {
-    setIsMenuOpen(false);
+    setIsUserMenuOpen(false);
+    setIsProductMenuOpen(false);
     if (onLogout) {
       onLogout();
       return;
@@ -84,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-50 flex h-[72px] min-h-[72px] w-full items-center justify-between border-b border-white/10 bg-[#031225] px-4 text-white shadow-lg shadow-black/20 sm:px-6 lg:px-8">
-      {/* Left: Prexyon Identity + Product Module */}
+      {/* Left: Prexyon Identity + Product Ecosystem Selector */}
       <div className="flex min-w-0 items-center gap-3 sm:gap-4">
         {/* Prexyon Official Brand Logo */}
         <a
@@ -95,16 +105,112 @@ export const Header: React.FC<HeaderProps> = ({
           <img
             src="/prexyon-logo-white.png"
             alt="Prexyon"
-            className="h-8 w-auto max-w-[130px] sm:max-w-[155px] object-contain object-left transition group-hover:opacity-90"
+            className="h-9 sm:h-10 w-auto max-w-[150px] sm:max-w-[180px] object-contain object-left transition group-hover:opacity-90"
           />
         </a>
 
-        {/* Current Product Badge: ArteCheck */}
-        <div className="flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold tracking-tight text-white shadow-inner sm:px-3.5">
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-violet-400/60 bg-violet-500/20 text-[11px] font-black text-violet-300">
-            AC
-          </span>
-          <span>ArteCheck</span>
+        {/* Product Selector Dropdown (OrçaGraf, ArteFlow, ArteCheck) */}
+        <div className="relative" ref={productMenuRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setIsProductMenuOpen((prev) => !prev);
+              setIsUserMenuOpen(false);
+            }}
+            aria-expanded={isProductMenuOpen}
+            aria-haspopup="true"
+            aria-label="Selecionar produto Prexyon"
+            className="flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 text-sm font-bold tracking-tight text-white shadow-inner transition hover:bg-white/[0.08] hover:border-white/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 sm:px-3.5"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-violet-400/60 bg-violet-500/20 text-[11px] font-black text-violet-300">
+              AC
+            </span>
+            <span>ArteCheck</span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
+                isProductMenuOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+
+          {/* Product Selector Dropdown Menu */}
+          {isProductMenuOpen && (
+            <div className="absolute left-0 mt-2 w-72 origin-top-left rounded-2xl border border-white/15 bg-[#071933] p-2 text-slate-100 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 z-50">
+              <div className="border-b border-white/10 px-3 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Ecossistema Prexyon
+                </p>
+              </div>
+
+              <div className="my-1.5 space-y-1">
+                {products.map((product) => {
+                  const isCurrent = product.active;
+                  const tagClasses =
+                    product.id === 'orcagraf'
+                      ? 'border-amber-400/60 bg-amber-500/20 text-amber-300'
+                      : product.id === 'arteflow'
+                      ? 'border-teal-400/60 bg-teal-500/20 text-teal-300'
+                      : 'border-violet-400/60 bg-violet-500/20 text-violet-300';
+
+                  if (isCurrent) {
+                    return (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => setIsProductMenuOpen(false)}
+                        className="flex w-full items-center justify-between gap-2.5 rounded-xl border border-white/15 bg-white/[0.08] p-2.5 text-left transition cursor-default"
+                      >
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-black ${tagClasses}`}
+                          >
+                            {product.tag}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-bold text-white">
+                              {product.name}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-400">
+                              {product.description}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-violet-400/40 bg-violet-500/25 px-2 py-0.5 text-[10px] font-bold text-violet-300">
+                          Ativo
+                        </span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <a
+                      key={product.id}
+                      href={product.url}
+                      onClick={() => setIsProductMenuOpen(false)}
+                      className="group flex w-full items-center justify-between gap-2.5 rounded-xl border border-transparent p-2.5 text-left transition hover:border-white/10 hover:bg-white/10"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-black ${tagClasses}`}
+                        >
+                          {product.tag}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-slate-200 group-hover:text-white">
+                            {product.name}
+                          </p>
+                          <p className="truncate text-[11px] text-slate-400">
+                            {product.description}
+                          </p>
+                        </div>
+                      </div>
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-slate-200" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Active Organization (Desktop only) */}
@@ -139,11 +245,14 @@ export const Header: React.FC<HeaderProps> = ({
         </a>
 
         {/* User Profile Menu */}
-        <div className="relative" ref={menuRef}>
+        <div className="relative" ref={userMenuRef}>
           <button
             type="button"
-            onClick={() => setIsMenuOpen((prev) => !prev)}
-            aria-expanded={isMenuOpen}
+            onClick={() => {
+              setIsUserMenuOpen((prev) => !prev);
+              setIsProductMenuOpen(false);
+            }}
+            aria-expanded={isUserMenuOpen}
             aria-haspopup="true"
             className="flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] p-1.5 pr-2.5 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
@@ -157,12 +266,12 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="block truncate">{userName}</span>
             </div>
 
-            <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${isMenuOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Dropdown Menu */}
-          {isMenuOpen && (
-            <div className="absolute right-0 mt-2 w-72 origin-top-right rounded-2xl border border-white/15 bg-[#071933] p-2 text-slate-100 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+          {isUserMenuOpen && (
+            <div className="absolute right-0 mt-2 w-72 origin-top-right rounded-2xl border border-white/15 bg-[#071933] p-2 text-slate-100 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 z-50">
               {/* User Header Details */}
               <div className="rounded-xl bg-white/[0.04] p-3">
                 <div className="flex items-center gap-3">
@@ -199,7 +308,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="my-1.5 space-y-1">
                 <a
                   href={portalUrl}
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsUserMenuOpen(false)}
                   className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
                 >
                   <LayoutGrid className="h-4 w-4 text-cyan-400" />
