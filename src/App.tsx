@@ -117,11 +117,14 @@ export const App: React.FC = () => {
       });
   }, []);
 
-  const storage = new LocalStorageProvider();
+  const storage = useMemo(
+    () => new LocalStorageProvider(permissionState?.organizationId, permissionState?.userId),
+    [permissionState?.organizationId, permissionState?.userId],
+  );
 
   const loadHistory = useCallback(() => {
     storage.listAnalyses().then(setHistoryList).catch(() => {});
-  }, []);
+  }, [storage]);
 
   useEffect(() => {
     loadHistory();

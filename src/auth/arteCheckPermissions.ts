@@ -14,6 +14,8 @@ export interface ArteCheckSessionPermissions {
   isOwner: boolean;
   /** Whether bootstrap completed successfully. null = not yet bootstrapped. */
   bootstrapped: boolean;
+  /** Authenticated user ID. */
+  userId?: string;
   /** Active organization name for UI display. */
   organizationName?: string;
   /** Active organization ID. */

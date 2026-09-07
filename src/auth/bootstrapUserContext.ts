@@ -102,6 +102,7 @@ export async function bootstrapUserContext(
   const perms = await resolveArteCheckPermissions(client, user.id, orgId);
   setArteCheckSessionPermissions({
     ...perms,
+    userId: user.id,
     organizationName: orgName,
     organizationId: orgId,
     userEmail: user.email || '',

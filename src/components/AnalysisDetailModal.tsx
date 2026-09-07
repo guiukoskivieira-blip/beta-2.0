@@ -159,7 +159,9 @@ export const AnalysisDetailModal: React.FC<AnalysisDetailModalProps> = ({
 
   // Technical metrics
   const dimEvidence = docSummary?.dimensionsSummary || findRuleEvidence(['RULE-PROF-DIM-001', 'RULE-UNIV-DIM-001'], ['dimension'])?.evidence;
-  const pageCountText = docSummary?.pageCount !== undefined ? `${docSummary.pageCount} página(s)` : (snapshotRules.length > 0 ? '1 página (estimada)' : null);
+  const pageCountText = (docSummary?.pageCount !== undefined && docSummary?.pageCount !== null)
+    ? `${docSummary.pageCount} página(s)`
+    : 'Não informado';
   const dpiRule = findRuleEvidence(['RULE-PROF-RES-001', 'RULE-PROF-DPI-001'], ['dpi', 'resolution']);
   const colorRule = findRuleEvidence(['RULE-PROF-CLR-001'], ['color']);
   const fontRule = findRuleEvidence(['RULE-PROF-FNT-001'], ['font', 'typography']);
