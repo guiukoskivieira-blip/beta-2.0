@@ -2,7 +2,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PrexyonSSOProvider } from './PrexyonSSOProvider';
 import { bootstrapUserContext } from './bootstrapUserContext';
-import { clearArteCheckSessionPermissions, getArteCheckSessionPermissions } from './arteCheckPermissions';
+import {
+  clearArteCheckSessionPermissions,
+  denyArteCheckAuthorizationPreservingTenant,
+  getArteCheckSessionPermissions,
+} from './arteCheckPermissions';
 
 export type AuthInitStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'error';
 export type AuthInitStage = 'idle' | 'pending' | 'success' | 'failed';
@@ -116,7 +120,9 @@ async function executeAuthInit(
     // Do not log raw remote errors or session details.
     _initStage = 'failed';
     _resolvedStatus = 'error';
-    clearArteCheckSessionPermissions();
+    // A valid membership may already have established the tenant identity.
+    // Preserve it for tenant-scoped storage, but keep every permission denied.
+    denyArteCheckAuthorizationPreservingTenant();
     return 'error';
   }
 }

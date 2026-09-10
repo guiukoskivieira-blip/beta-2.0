@@ -64,6 +64,43 @@ export function setArteCheckSessionPermissions(perms: ArteCheckSessionPermission
 }
 
 /**
+ * Records authenticated tenant identity as soon as an active membership is proven.
+ * This is structural context only: authorization remains fail-closed until the
+ * complete bootstrap replaces it with a bootstrapped permission snapshot.
+ */
+export function setArteCheckStructuralContext(context: {
+  userId: string;
+  organizationId: string;
+  organizationName?: string;
+  userEmail?: string;
+  userDisplayName?: string;
+  userRole?: string;
+}): void {
+  _store = {
+    resolved: {},
+    isOwner: false,
+    bootstrapped: false,
+    ...context,
+  };
+  notifyListeners();
+}
+
+/** Denies authorization without discarding an already-proven tenant identity. */
+export function denyArteCheckAuthorizationPreservingTenant(): void {
+  if (!_store?.userId || !_store?.organizationId) {
+    clearArteCheckSessionPermissions();
+    return;
+  }
+  _store = {
+    ..._store,
+    resolved: {},
+    isOwner: false,
+    bootstrapped: false,
+  };
+  notifyListeners();
+}
+
+/**
  * Returns the current in-memory permissions snapshot.
  * Returns null if bootstrap has not been completed.
  */

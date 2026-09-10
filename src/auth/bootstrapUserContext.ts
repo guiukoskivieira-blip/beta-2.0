@@ -1,7 +1,7 @@
 // src/auth/bootstrapUserContext.ts
 import type { SupabaseClient, Session } from '@supabase/supabase-js';
 import { resolveArteCheckPermissions } from '../services/resolveArteCheckPermissions';
-import { setArteCheckSessionPermissions } from './arteCheckPermissions';
+import { setArteCheckSessionPermissions, setArteCheckStructuralContext } from './arteCheckPermissions';
 
 /**
  * Performs the post-SSO bootstrap validation.
@@ -46,6 +46,25 @@ export async function bootstrapUserContext(
   }
 
   const orgId = (member as any).organization_id;
+  if (typeof orgId !== 'string' || !orgId.trim()) {
+    throw new Error('Bootstrap failed: invalid organization membership');
+  }
+
+  const meta = user.user_metadata || {};
+  const displayName = meta.display_name || meta.displayName || meta.full_name || user.email?.split('@')[0] || 'Usuário';
+  const orgName = meta.company_name || meta.companyName || meta.organization_name || meta.organizationName || 'Organização';
+  const memberRole = (member as any)?.role || 'member';
+
+  // Membership is the canonical source for structural tenant identity. Persist
+  // it in memory before auxiliary/authorization queries, without granting access.
+  setArteCheckStructuralContext({
+    userId: user.id,
+    organizationId: orgId,
+    organizationName: orgName,
+    userEmail: user.email || '',
+    userDisplayName: displayName,
+    userRole: memberRole,
+  });
 
   // 4. Organization active
   // NOTE: select only columns whose GRANT is guaranteed in production (id, is_active).
@@ -94,11 +113,6 @@ export async function bootstrapUserContext(
   // 7. Resolve and store permissions in memory (no localStorage/sessionStorage)
   // org.name is intentionally NOT read here — the column is not selected (see step 4).
   // Organization display name is derived from user_metadata to avoid column privilege errors.
-  const meta = user.user_metadata || {};
-  const displayName = meta.display_name || meta.displayName || meta.full_name || user.email?.split('@')[0] || 'Usuário';
-  const orgName = meta.company_name || meta.companyName || meta.organization_name || meta.organizationName || 'Organização';
-  const memberRole = (member as any)?.role || 'member';
-
   const perms = await resolveArteCheckPermissions(client, user.id, orgId);
   setArteCheckSessionPermissions({
     ...perms,
